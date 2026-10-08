@@ -1,0 +1,16 @@
+{
+  "appId": "com.inkread.app",
+  "appName": "墨读 InkRead",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+<meta charset="UTF-8">
+<script>try{var S=sessionStorage;if(S.getItem("inkread.boot.v1"))document.documentElement.classList.add("boot-skip");if(S.getItem("inkread.nav.v1")){S.removeItem("inkread.nav.v1");document.documentElement.classList.add("nav-in")}}catch(e){}</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>墨读 InkRead · 任务</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+<script src="fonts.js"></script>
+<script src="theme.js"></script>
+</head>
+<body data-page="tasks">
+<div class="boot" id="boot" aria-hidden="true">
+  <span class="boot-seal">墨</span>
+  <span class="boot-name">墨读 InkRead</span>
+  <span class="boot-line"></span>
+</div>
+<div class="device">
+  <div class="screen" id="screen">
+    <main class="app-content" id="appContent">
+      <div class="page">
+        <div class="page-head">
+          <div class="ph-main">
+            <h1 class="page-title">任务</h1>
+            <span class="ph-sub" id="tasksSub"></span>
+          </div>
+          <div class="ph-actions">
+            <a class="btn btn-ghost" href="reader.html?doc=plan-01"><span id="icSrc"></span>查看计划原文</a>
+            <button class="btn btn-mark" id="btnBatch"><span id="icBatch"></span>批量设今日</button>
+          </div>
+        </div>
+        <div class="rule-2line" aria-hidden="true"></div>
+
+        <div class="card card-pad mb-18">
+          <div class="row" style="gap:26px;flex-wrap:wrap">
+            <div class="row" style="gap:16px">
+              <div class="ring" id="dayRing"><i>0%</i></div>
+              <div>
+                <div class="card-title" style="margin:0 0 6px"><span id="icToday"></span>今日清单</div>
+                <div class="card-note" id="dayNote"></div>
+              </div>
+            </div>
+            <span class="spacer"></span>
+            <div class="row wrap" style="gap:10px" id="dayStats"></div>
+          </div>
+          <div class="hr"></div>
+          <div class="row-between mb-12">
+            <div class="seg" id="scopeSeg">
+              <button class="seg-btn on" data-scope="daily">今日清单</button>
+              <button class="seg-btn" data-scope="monthly">月度清单</button>
+            </div>
+            <div class="row" style="gap:10px;align-items:center">
+              <button class="chip chip-btn" id="focusChip" aria-pressed="false" title="只看被标为「今日」的任务">◎ 今日聚焦</button>
+              <span class="card-note" id="scopeNote"></span>
+            </div>
+          </div>
+          <div id="dailyWrap"></div>
+          <div id="monthlyWrap" style="display:none"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="modal-mask" id="batchMask" style="display:none">
+  <div class="modal">
+    <div class="modal-head">
+      <h3><span id="icBatchTitle"></span>批量设置今日聚焦</h3>
+      <button class="modal-x" id="batchX"></button>
+    </div>
+    <div class="modal-body">
+      <p class="card-note mb-18">对所选范围内的任务统一设置「今日聚焦」标记。</p>
+      <label class="field-label">范围</label>
+      <select class="field" id="batchScope">
+        <option value="daily">全部每日任务（5 项）</option>
+        <option value="monthly">全部月度任务（10 项）</option>
+        <option value="all">全部任务（15 项）</option>
+      </select>
+      <label class="field-label">批量动作</label>
+      <select class="field" id="batchWho">
+        <option value="today">加入今日聚焦</option>
+        <option value="untoday">移出今日聚焦</option>
+      </select>
+      <label class="field-label">处理方式</label>
+      <div class="row" style="gap:8px">
+        <button class="chip chip-btn on" id="onlyUndone">仅未打卡</button>
+        <button class="chip chip-btn" id="allTasks">含已打卡</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="batchCancel">取消</button>
+      <button class="btn btn-primary" id="batchConfirm">确认设置</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-root" id="toastRoot"></div>
+<script src="mock.js"></script>
+<script src="md.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+<script src="brain.js"></script>
+<script>
+(function () {
+  var state = { scope: "daily", onlyUndone: true, focus: false };
+  var ck = InkStore.getCheckins();
+
+  var IC = { icSrc: "book-open", icBatch: "sun", icToday: "calendar-days", icBatchTitle: "sun" };
+  Object.keys(IC).forEach(function (id) { var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16); });
+  qs("#batchX").innerHTML = icon("x", 18);
+
+  /* 任务来源：mock 清单 + 本机导入任务 + 分配覆盖的合并视图（API.localTasks），
+     导入文档确认后生成的任务在这里立即可见；不直接改 mock 原对象。 */
+  var TASKS = (window.API && API.localTasks) ? API.localTasks() : DB.tasks.slice();
+  var impN = Math.max(0, TASKS.length - DB.tasks.length);   /* 导入任务条数 */
+  var daily = TASKS.filter(function (t) { return t.kind === "daily"; });
+  var monthly = TASKS.filter(function (t) { return t.kind === "monthly"; });
+
+  /* 批量分配弹窗里的范围选项：条数按合并后的真实清单给出 */
+  qsa("#batchScope option").forEach(function (o) {
+    var n = o.value === "daily" ? daily.length : o.value === "monthly" ? monthly.length : TASKS.length;
+    o.textContent = o.textContent.replace(/（.*）/, "（" + n + " 项）");
+  });
+
+  function done(id) { return !!ck[id]; }
+
+  function taskCard(t, inTimeline) {
+    var on = done(t.id);
+    var card =
+      '<div class="task-card' + (on ? " done" : "") + '" id="' + t.id + '">' +
+        '<div class="task-time">' + esc(t.time || t.monthLabel) + '<br><span style="font-size:10.5px;color:var(--ink-3)">' + esc(t.week || t.phase) + "</span></div>" +
+        '<div class="task-body">' +
+          '<div class="task-title">' + esc(t.title) + "</div>" +
+          '<div class="task-quote">' + esc(t.quote) +
+            (t.anchor ? '　<a href="reader.html?doc=' + t.docId + "#" + t.anchor + '">查看原文 ›</a>' : "") +
+          "</div>" +
+          '<div class="task-meta">' +
+            '<span class="chip">' + icon("layers", 12) + esc(t.src) + "</span>" +
+            (t.today ? '<span class="chip chip-accent">' + icon("sun", 12) + "今日</span>" : "") +
+            (on ? '<span class="chip chip-green">' + icon("circle-check", 12) + "已打卡 " + esc(ck[t.id]) + "</span>"
+                : '<span class="chip chip-amber">' + icon("clock", 12) + "待完成</span>") +
+          "</div>" +
+        "</div>" +
+        '<div class="task-side">' +
+          '<button class="chip chip-btn' + (t.today ? " on" : "") + '" data-today="' + t.id + '"' +
+            ' aria-pressed="' + (t.today ? "true" : "false") + '" title="在「今日聚焦」里只看这条任务">' +
+            icon("sun", 12) + (t.today ? "已在今日" : "加入今日") + "</button>" +
+          (on
+            ? '<span class="stamp">已打卡</span><button class="undo-link" data-undo="' + t.id + '">撤销打卡</button>'
+            : '<button class="btn btn-sm btn-accent" data-check="' + t.id + '">' + icon("stamp", 14) + "打卡</button>") +
+        "</div>" +
+      "</div>";
+    return inTimeline ? '<div class="tl-item' + (on ? " done" : "") + '">' + card + "</div>" : card;
+  }
+
+  function focusEmpty() {
+    return '<p class="card-note" style="padding:18px 4px">今日聚焦里还没有任务 —— 点任务右侧的「加入今日」，把今天要先做完的挑进来。</p>';
+  }
+
+  function renderDaily() {
+    var list = state.focus ? daily.filter(function (t) { return t.today; }) : daily;
+    if (!list.length) { qs("#dailyWrap").innerHTML = focusEmpty(); return; }
+    qs("#dailyWrap").innerHTML = '<div class="day-timeline">' + list.map(function (t) { return taskCard(t, true); }).join("") + "</div>";
+  }
+
+  function renderMonthly() {
+    var out = DB.months.map(function (m) {
+      var list = monthly.filter(function (t) { return t.month === m.key; });
+      if (state.focus) list = list.filter(function (t) { return t.today; });
+      if (state.focus && !list.length) return "";   /* 非聚焦时保持原样：空月份也照常显示进度头 */
+      var dn = list.filter(function (t) { return done(t.id); }).length;
+      var pct = list.length ? Math.round(dn / list.length * 100) : 0;
+      return '<div class="month-block">' +
+        '<div class="month-head"><h3>' + esc(m.label) + " · " + esc(m.phase) + "</h3>" +
+          '<span class="bar mh-bar"><i style="width:' + pct + '%"></i></span>' +
+          '<span class="mh-pct">' + dn + "/" + list.length + "</span></div>" +
+        list.map(function (t) { return taskCard(t, false); }).join("") +
+        "</div>";
+    }).join("");
+    qs("#monthlyWrap").innerHTML = out || (state.focus ? focusEmpty() : "");
+  }
+
+  function renderHead() {
+    var dn = daily.filter(function (t) { return done(t.id); }).length;
+    var pct = Math.round(dn / daily.length * 100);
+    var ring = qs("#dayRing");
+    ring.style.setProperty("--p", pct);
+    /* v2.17：环上原来写「0%」，与右侧「今日完成 0/5」和下面那句「已完成 0 / 5 项」
+       是同一个数的三次表达。环的弧长本身就表示百分比，环心改写成 0/5 这个分数，
+       于是「今日」这一维只剩一处读数，另两处删掉。 */
+    ring.querySelector("i").textContent = dn + "/" + daily.length;
+    var d = new Date();
+    var wk = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
+    qs("#dayNote").innerHTML = d.getFullYear() + " 年 " + (d.getMonth() + 1) + " 月 " + d.getDate() + " 日 · 周" + wk +
+      (impN > 0 ? "<br>含导入任务 " + impN + " 项" : "<br>来自《2026 考研英语备考全程规划》第四章");
+    var mAll = monthly.length, mDone = monthly.filter(function (t) { return done(t.id); }).length;
+    var total = TASKS.length, tDone = TASKS.filter(function (t) { return done(t.id); }).length;
+    /* 连续打卡没有日期维度，按「今天有打卡 = 1 天，否则 0 天」的保守口径 */
+    var hasCheckin = Object.keys(ck || {}).length > 0;
+    qs("#dayStats").innerHTML = [
+      { k: "月度完成", v: mDone + "/" + mAll, i: "calendar-days" },
+      { k: "总完成率", v: Math.round(tDone / total * 100) + "%", i: "target" },
+      { k: "连续打卡", v: (hasCheckin ? 1 : 0) + " 天", i: "flame" }
+    ].map(function (c) {
+      return '<div class="chip" style="padding:7px 13px">' + icon(c.i, 14) + c.k + "　<b>" + c.v + "</b></div>";
+    }).join("");
+    qs("#scopeNote").textContent = (state.focus ? "今日聚焦 · 只显示标了「今日」的任务" :
+      state.scope === "daily" ? "每日例行任务 · 与文档第四章逐条对应"
+                              : "月度任务 · 与文档第三章逐条对应");
+    qs("#tasksSub").textContent = "从计划文档解析出 " + DB.tasks.length + " 项任务" +
+      (impN > 0 ? " · 另有导入任务 " + impN + " 项" : "") +
+      " · 打卡与今日标记本地保存";
+  }
+
+  function renderAll() { renderHead(); renderDaily(); renderMonthly(); }
+
+  /* 打卡 / 撤销 / 分配 */
+  document.addEventListener("click", async function (e) {
+    var c = e.target.closest("[data-check]");
+    var u = e.target.closest("[data-undo]");
+    if (c) {
+      var id = c.dataset.check;
+      c.disabled = true;
+      var r = await API.checkin(id);
+      ck = InkStore.getCheckins();
+      InkFX.flash();
+      document.dispatchEvent(new CustomEvent("ink:checkins"));   /* 侧栏 streak 卡即时重画 */
+      renderAll();
+      var el = qs("#" + id);
+      if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+      toast("已打卡 " + r.data.time + " · 已本地保存", "stamp");
+    } else if (u) {
+      await API.undoCheckin(u.dataset.undo);
+      ck = InkStore.getCheckins();
+      document.dispatchEvent(new CustomEvent("ink:checkins"));
+      renderAll();
+      toast("已撤销打卡", "undo-2");
+    }
+  });
+
+  /* 「加入今日」落库（inkread.tasks.v1 的 today 标记）后同步本会话副本，界面即时反映。
+     替代原先的「负责人」下拉：那三个名字是 mock.js 里的演示人物，指派给谁都不会
+     触发任何行为，而真实导入的任务还会被默认写成第一个假名字。 */
+  function applyLocalToday(id, on) {
+    TASKS.forEach(function (t) { if (t.id === id) t.today = on; });
+  }
+
+  document.addEventListener("click", async function (e) {
+    var b = e.target.closest("[data-today]");
+    if (!b) return;
+    var id = b.dataset.today;
+    var on = !(TASKS.find(function (t) { return t.id === id; }) || {}).today;
+    b.disabled = true;
+    await API.setToday(id, on);
+    applyLocalToday(id, on);
+    renderAll();
+    toast(on ? "已加入今日聚焦" : "已移出今日聚焦", "sun");
+  });
+
+  /* 范围切换 */
+  qsa("#scopeSeg .seg-btn").forEach(function (b) {
+    b.addEventListener("click", function () {
+      qsa("#scopeSeg .seg-btn").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on");
+      state.scope = b.dataset.scope;
+      qs("#dailyWrap").style.display = state.scope === "daily" ? "block" : "none";
+      qs("#monthlyWrap").style.display = state.scope === "monthly" ? "block" : "none";
+      renderHead();
+    });
+  });
+
+  qs("#focusChip").addEventListener("click", function () {
+    state.focus = !state.focus;
+    qs("#focusChip").classList.toggle("on", state.focus);
+    qs("#focusChip").setAttribute("aria-pressed", state.focus ? "true" : "false");
+    renderAll();
+  });
+
+  /* 批量分配 */
+  var mask = qs("#batchMask");
+  qs("#btnBatch").addEventListener("click", function () { mask.style.display = "grid"; });
+  qs("#batchX").addEventListener("click", function () { mask.style.display = "none"; });
+  qs("#batchCancel").addEventListener("click", function () { mask.style.display = "none"; });
+  mask.addEventListener("click", function (e) { if (e.target === mask) mask.style.display = "none"; });
+  /* Esc 关闭批量分配弹窗（与 index.html 导入弹窗同一套约定） */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || mask.style.display !== "grid") return;
+    mask.style.display = "none";
+  });
+  qs("#onlyUndone").addEventListener("click", function () {
+    state.onlyUndone = true;
+    qs("#onlyUndone").classList.add("on"); qs("#allTasks").classList.remove("on");
+  });
+  qs("#allTasks").addEventListener("click", function () {
+    state.onlyUndone = false;
+    qs("#allTasks").classList.add("on"); qs("#onlyUndone").classList.remove("on");
+  });
+  qs("#batchConfirm").addEventListener("click", async function () {
+    var scope = qs("#batchScope").value, on = qs("#batchWho").value === "today";
+    var list = TASKS.filter(function (t) {
+      if (scope === "daily" && t.kind !== "daily") return false;
+      if (scope === "monthly" && t.kind !== "monthly") return false;
+      if (state.onlyUndone && done(t.id)) return false;
+      return true;
+    });
+    for (var i = 0; i < list.length; i++) {
+      await API.setToday(list[i].id, on);
+      applyLocalToday(list[i].id, on);
+    }
+    mask.style.display = "none";
+    renderAll();
+    toast((on ? "已将 " : "已移出 ") + list.length + " 项" + (on ? "加入今日聚焦" : "今日聚焦"), "sun");
+  });
+
+  renderAll();
+
+  if (location.hash) {
+    setTimeout(function () {
+      var el = qs("#" + CSS.escape(location.hash.slice(1)));
+      if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("flash"); setTimeout(function () { el.classList.remove("flash"); }, 1900); }
+    }, 160);
+  }
+})();
+</script>
+</body>
+</html>

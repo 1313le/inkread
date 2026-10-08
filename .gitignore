@@ -1,0 +1,21 @@
+node_modules/
+dist/
+dist-*/
+backups/
+.work/
+*.log
+
+# 安卓工程（Capacitor + 原生 Gradle）：只保留源码与 www 镜像，
+# 依赖与构建产物不进仓库（构建产物 >100MB，且随每次构建变化）
+android/node_modules/
+android/.gradle/
+android/android/.gradle/
+android/android/build/
+android/android/app/build/
+android/android/capacitor-cordova-android-plugins/build/
+android/android/local.properties
+android/**/*.apk
+android/**/*.aab
+
+# 注意：根目录 build/ 是打包用的应用图标（icon.png / icon.svg / icon@256 / icon@64），
+# 全部需要进仓库，不要忽略。

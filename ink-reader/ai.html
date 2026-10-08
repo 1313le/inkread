@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+<meta charset="UTF-8">
+<script>try{var S=sessionStorage;if(S.getItem("inkread.boot.v1"))document.documentElement.classList.add("boot-skip");if(S.getItem("inkread.nav.v1")){S.removeItem("inkread.nav.v1");document.documentElement.classList.add("nav-in")}}catch(e){}</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>墨读 InkRead · 主脑</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+<style id="ai-extra">
+/* ============================================================
+   主脑页 · 页内补充样式（ai-extra）
+   只作用于本页（body[data-page="ai"]），随 styles.css 之后加载，
+   同特异性下后来者胜 —— 用于对话区质感与上下两区对齐的局部微调，
+   不改 styles.css 一行。契约：不新增色值，全部走既有 token
+   （--paper 系 / --ink 系 / --line 系 / --grain）；不引入外部资源。
+   ============================================================ */
+
+/* ---------- A. 对话区：内凹的墨水屏 ----------
+   屏 = 纸底略沉 + 纸纹叠最上层 + 上缘最重的 inset 阴影 + 1px 内描边 + 轻暗角。
+   暗角与阴影一律用 color-mix 现调 --ink，不硬编码黑，深浅主题都成立。 */
+body[data-page="ai"] .chat-msgs {
+  background-color: color-mix(in oklab, var(--paper) 96%, var(--ink));
+  background-image:
+    var(--grain),
+    radial-gradient(120% 96% at 50% 26%,
+      transparent 52%,
+      color-mix(in srgb, var(--ink) 9%, transparent) 118%);
+  box-shadow:
+    inset 0 2px 6px color-mix(in srgb, var(--ink) 15%, transparent),
+    inset 0 14px 26px color-mix(in srgb, var(--ink) 6%, transparent),
+    inset 0 0 0 1px var(--line-2);
+}
+
+/* 屏与框分层：头部分隔线从 --line-2 提到 --line，重半档，「屏」嵌进「框」里 */
+body[data-page="ai"] .chat-head { border-bottom: 1px solid var(--line); }
+
+/* AI 气泡：小件层 --paper-3 + 细边 + 极轻外投影，像贴在屏面上的一枚纸片；
+   圆角语言（10px + 左上 3px）沿用 styles.css，不重述 */
+body[data-page="ai"] .msg.ai {
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+/* 用户气泡：保留墨底，顶部一点同色系提亮渐变 + 纸色内高光，墨块不再死平 */
+body[data-page="ai"] .msg.me {
+  background: linear-gradient(168deg,
+    color-mix(in oklab, var(--ink) 87%, var(--paper)) 0%,
+    var(--ink) 60%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--paper) 14%, transparent),
+    0 1px 2px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+/* 输入井：与聊天屏同一套凹陷语言（--paper-3 底 + 上缘 inset + 1px 内圈），
+   聚焦时保留全站强调外圈；发送按钮不动 */
+body[data-page="ai"] .chat-input-row .field {
+  background: var(--paper-3);
+  box-shadow:
+    inset 0 2px 5px color-mix(in srgb, var(--ink) 10%, transparent),
+    inset 0 0 0 1px var(--line-2);
+}
+body[data-page="ai"] .chat-input-row .field:focus {
+  border-color: var(--ink-2);
+  box-shadow:
+    inset 0 2px 5px color-mix(in srgb, var(--ink) 10%, transparent),
+    0 0 0 3px var(--accent-wash);
+}
+
+/* ---------- C. 快捷条：溢出收成单行横扫，不折行、不错落 ---------- */
+body[data-page="ai"] .chat-quick { flex-wrap: nowrap; overflow-x: auto; }
+body[data-page="ai"] .chat-quick > * { flex: none; }
+
+/* ---------- B1. 上下两区统一列模板：中缝走同一条垂直线 ---------- */
+body[data-page="ai"] .two-col { grid-template-columns: 1.32fr .94fr; align-items: stretch; }
+/* 下区两卡底边齐平（v2.2）：左卡 flex 撑开，同步日志区吃掉余量 —— 等高不留错位 */
+body[data-page="ai"] .two-col > .card:first-child { display: flex; flex-direction: column; }
+body[data-page="ai"] .two-col > .card:first-child .sync-log { flex: 1; }
+
+/* ---------- B2. 左右两列底边对齐 ----------
+   两列给同一把定高尺子（顶栏 46 + 页头与页边距约 210）：行高由此锁定，
+   stretch 把两列拉满同一行高。注意 flex:1 的 0% 基准在容器高度不定时
+   会按内容解析 —— 所以 .ai-stack 必须显式定高，术语表卡的 flex:1
+   才能吃掉余量、#glList 内部滚动（条目再多也不把卡片撑破），
+   .gl-tools / .gl-add 等固定部分不随列表滚。模型配置卡保持内容自适应。 */
+body[data-page="ai"] .ai-layout { align-items: stretch; }
+body[data-page="ai"] .chat-card {
+  height: clamp(520px, calc(100dvh - var(--tb-h, 46px) - 210px), 780px);
+  min-width: 0;
+}
+body[data-page="ai"] .ai-stack {
+  height: clamp(520px, calc(100dvh - var(--tb-h, 46px) - 210px), 780px);
+  min-width: 0;
+}
+body[data-page="ai"] .ai-stack > .card:last-child {
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 0;
+}
+body[data-page="ai"] #glList {
+  flex: 1; min-height: 0; overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---------- B4. 行节奏统一：四类行的上下内距与行高对齐 ----------
+   gl-row / mm-row / sync-log li 统一 8px 上下（原 7px）、行高 1.6；
+   mm-row 保留井内左右 11px，dev-row 是盒子行保持 12px，仅拉齐行高与字距。 */
+body[data-page="ai"] .gl-row { padding: 8px 0; line-height: 1.6; }
+body[data-page="ai"] .mm-row { padding: 8px 11px; line-height: 1.6; }
+body[data-page="ai"] .sync-log li { padding: 8px 0; line-height: 1.6; }
+body[data-page="ai"] .dev-row { line-height: 1.6; }
+
+/* ---------- B3. ≤899px：单列堆叠，撤两列 stretch 与定高，聊天卡回到固定可视高度 ---------- */
+@media (max-width: 899px) {
+  body[data-page="ai"] .ai-layout { grid-template-columns: 1fr; align-items: start; }
+  body[data-page="ai"] .ai-stack { height: auto; }
+  body[data-page="ai"] .two-col { grid-template-columns: 1fr; }
+  body[data-page="ai"] .chat-card { height: clamp(420px, 60dvh, 560px); }
+  body[data-page="ai"] .chat-msgs { flex: 1 1 0%; height: auto; min-height: 0; }
+  /* 单列时术语卡随页滚动，但列表本体仍限高内部滚动，不无限撑长页面 */
+  body[data-page="ai"] #glList { max-height: 46dvh; }
+}
+</style>
+<script src="fonts.js"></script>
+<script src="theme.js"></script>
+</head>
+<body data-page="ai">
+<div class="boot" id="boot" aria-hidden="true">
+  <span class="boot-seal">墨</span>
+  <span class="boot-name">墨读 InkRead</span>
+  <span class="boot-line"></span>
+</div>
+<div class="device">
+  <div class="screen" id="screen">
+    <main class="app-content" id="appContent">
+      <div class="page">
+        <div class="page-head">
+          <div class="ph-main">
+            <h1 class="page-title">主脑与设备</h1>
+            <span class="ph-sub" id="aiSub"></span>
+          </div>
+          <div class="ph-actions">
+            <button class="btn btn-ghost" id="btnSync"><span id="icSync"></span>立即同步</button>
+            <button class="btn btn-mark" id="btnModel"><span id="icModel"></span>模型设置</button>
+          </div>
+        </div>
+        <div class="rule-2line" aria-hidden="true"></div>
+
+        <div class="ai-layout">
+          <div class="card chat-card">
+            <div class="chat-head">
+              <span class="bot-ava" id="botAva"></span>
+              <div>
+                <b>墨读主脑</b>
+                <span class="sub" id="chatSub"></span>
+              </div>
+              <span class="spacer"></span>
+              <label class="chip ctx-chip" title="对话聚焦的文档 —— 主脑优先从这本书里找依据">
+                <span id="icCtx"></span>
+                <select id="ctxDoc" aria-label="对话聚焦的文档"></select>
+              </label>
+              <button class="chip chip-btn mem-chip" id="memBtn" aria-expanded="false" aria-controls="memPop"><span id="icMemChip"></span><em id="memBtnN">0</em> 条记忆</button>
+              <span class="chip chip-green" id="chatState"></span>
+            </div>
+            <div class="mem-pop" id="memPop" hidden role="dialog" aria-label="记忆管理">
+              <div class="mp-head">
+                <b>记忆</b>
+                <span class="mp-sub" id="memSub"></span>
+                <span class="spacer"></span>
+                <button class="mp-x" id="memExport" aria-label="导出记忆" title="导出记忆（JSON 备份）"></button>
+                <button class="mp-x" id="memX" aria-label="收起"></button>
+              </div>
+              <p class="card-note mp-note">记忆是主脑从你的真实行为里学来的结论 —— 打卡的钟点、划的高亮、调过的排版、读到的进度、复习的闪卡、自建的术语。每条都带证据与置信度；证据不足就不记。可随时开关或忘掉。</p>
+              <div id="memList"></div>
+            </div>
+            <div class="chat-msgs" id="chatMsgs"></div>
+            <div class="chat-quick" id="chatQuick"></div>
+            <div class="chat-input-row">
+              <input class="field" id="chatInput" placeholder="问点什么：总结当前文档 / 这本书讲了什么 / 帮我写段代码 / 解释「注意力机制」…">
+              <button class="btn btn-primary" id="chatSend"><span id="icSend"></span>发送</button>
+            </div>
+          </div>
+
+          <div class="ai-stack">
+            <div class="card card-pad">
+              <div class="card-title"><span id="icCpu"></span>模型配置<span class="sub" id="mmSub"></span></div>
+              <p class="card-note mb-12">主脑按你填写的接口地址、API Key 与模型名直连，支持任何 OpenAI 兼容服务（含本机 Ollama）。</p>
+              <div class="mm-now" id="mmNow"></div>
+              <div class="row-between">
+                <span class="card-note" id="mmHint"></span>
+                <span class="row" style="gap:8px">
+                  <button class="btn btn-ghost btn-sm" id="mmTest">测试连接</button>
+                  <button class="btn btn-primary btn-sm" id="mmEdit">编辑模型</button>
+                </span>
+              </div>
+            </div>
+
+            <div class="card card-pad">
+              <div class="card-title"><span id="icGloss"></span>术语表<span class="sub" id="glSub"></span></div>
+              <p class="card-note mb-12">翻译时作为固定译名下发给模型，保证全篇一致。可导入 CSV / TSV，也可逐条增删改。</p>
+
+              <div class="gl-tools">
+                <label class="gl-search">
+                  <span id="icGlSearch"></span>
+                  <input class="field" id="glSearch" type="search" placeholder="搜原词或译名" aria-label="搜索术语">
+                </label>
+                <button class="btn btn-ghost btn-sm" id="glImportBtn" aria-expanded="false" aria-controls="glImp">导入</button>
+                <button class="btn btn-ghost btn-sm" id="glExport">导出</button>
+              </div>
+
+              <div class="gl-imp" id="glImp" hidden>
+                <p class="gl-imp-h">两列即可 —— 原词、译名（第三列可选填词性）。直接粘贴，或选一个文件。</p>
+                <textarea class="field gl-ta" id="glPaste" rows="4" spellcheck="false"
+                  placeholder="注意力,attention&#10;认知负荷,cognitive load,n."></textarea>
+                <div class="gl-imp-row">
+                  <label class="gl-file">
+                    <input type="file" id="glFile" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
+                    <span class="btn btn-ghost btn-sm">选择文件</span>
+                    <em id="glFileNote">未选择</em>
+                  </label>
+                  <span class="gl-sep">分隔符</span>
+                  <select class="gl-mini" id="glDelim" aria-label="分隔符">
+                    <option value="">自动</option>
+                    <option value=",">逗号</option>
+                    <option value="&#9;">制表符</option>
+                    <option value=";">分号</option>
+                    <option value="|">竖线</option>
+                    <option value="=">等号</option>
+                    <option value="：">全角冒号</option>
+                  </select>
+                  <label class="gl-ck"><input type="checkbox" id="glHeader" checked>首行为表头</label>
+                  <span class="gl-sep">重复</span>
+                  <label class="gl-ck"><input type="radio" name="glDup" value="skip" checked>跳过</label>
+                  <label class="gl-ck"><input type="radio" name="glDup" value="over">覆盖</label>
+                </div>
+                <p class="gl-pv" id="glPv" aria-live="polite"></p>
+                <div class="gl-imp-act">
+                  <button class="btn btn-primary btn-sm" id="glDo" disabled>导入</button>
+                  <button class="btn btn-ghost btn-sm" id="glCancel">取消</button>
+                </div>
+              </div>
+
+              <div id="glList"></div>
+              <div class="gl-add">
+                <input class="field" id="glSrc" placeholder="原词，如「注意力」">
+                <input class="field" id="glDst" placeholder="译名，如 attention">
+                <button class="btn btn-primary btn-sm" id="glAdd">添加</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col mt-24">
+          <div class="card card-pad">
+            <div class="card-title"><span id="icDev"></span>双端设备</div>
+            <div class="dev-row">
+              <span id="icDesk"></span>
+              <div><b>桌面端 · 墨读 InkRead</b><span>Windows · 水墨屏模拟器</span></div>
+              <span class="dev-state" id="deskState"></span>
+            </div>
+            <div class="dev-row">
+              <span id="icPhone"></span>
+              <div><b>手机端 · 墨读 App</b><span>iOS · 镜像阅读与打卡</span></div>
+              <span class="dev-state" id="phoneState"></span>
+            </div>
+            <div class="sync-log">
+              <div class="card-note mb-12">最近同步</div>
+              <ul id="syncLog"></ul>
+            </div>
+          </div>
+
+          <div class="card card-pad">
+            <div class="card-title"><span id="icMirror"></span>手机端实时预览<span class="sub">打卡即同步</span></div>
+            <div class="phone-wrap">
+              <div class="phone">
+                <div class="phone-screen">
+                  <div class="phone-status">
+                    <span id="phTime">08:12</span>
+                    <span class="row" style="gap:6px"><span id="phWifi"></span><span id="phBat"></span></span>
+                  </div>
+                  <div class="phone-head">
+                    <b id="phTitle">今日清单</b>
+                    <span id="phSub"></span>
+                  </div>
+                  <div class="phone-body">
+                    <div class="relay-chip" id="relayChip"></div>
+                    <div class="m-sync-tip" id="mSyncTip">已同步至桌面端</div>
+                    <div id="phBody"></div>
+                  </div>
+                  <div class="phone-tabbar">
+                    <button class="ptab active" data-ptab="today"><span id="ptToday"></span>今日</button>
+                    <button class="ptab" data-ptab="plan"><span id="ptPlan"></span>计划</button>
+                    <button class="ptab" data-ptab="me"><span id="ptMe"></span>我的</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="modal-mask" id="modelMask" style="display:none">
+  <div class="modal modal-lg">
+    <div class="modal-head">
+      <h3><span id="icModelTitle"></span>模型设置</h3>
+      <button class="modal-x" id="modelX"></button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">服务商</label>
+      <div class="pv-chips" id="pvChips" role="group" aria-label="服务商预设"></div>
+      <p class="field-hint" id="pvNote">选预设可自动填好接口地址；密钥与模型名由你决定。</p>
+
+      <label class="field-label" for="mBase">接口地址 · Base URL</label>
+      <input class="field" id="mBase" type="url" spellcheck="false" autocomplete="off" placeholder="https://api.deepseek.com/v1">
+      <p class="field-hint">以 http:// 或 https:// 开头；OpenAI 兼容服务通常以 /v1 结尾。</p>
+
+      <label class="field-label" for="mKey">API Key</label>
+      <div class="key-row">
+        <input class="field" id="mKey" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…">
+        <button class="btn btn-ghost btn-sm" id="mKeyEye" aria-label="显示或隐藏密钥"></button>
+      </div>
+      <p class="field-hint">密钥只存本机浏览器，不随同步上传。</p>
+
+      <label class="field-label" for="mName">模型名称</label>
+      <div class="key-row">
+        <input class="field" id="mName" list="mNameList" spellcheck="false" autocomplete="off" placeholder="deepseek-chat">
+        <datalist id="mNameList"></datalist>
+        <button class="btn btn-ghost btn-sm" id="mPull">拉取列表</button>
+      </div>
+
+      <div class="hr"></div>
+      <div class="adv-head">
+        <span class="field-label" style="margin:0">高级参数</span>
+        <button class="mpd-mini" id="advToggle" aria-expanded="false">展开 ›</button>
+      </div>
+      <div id="advBox" hidden>
+        <label class="field-label">温度 <span class="card-note" id="tempVal">0.4</span></label>
+        <input type="range" class="range" id="tempRange" min="0" max="10" value="4">
+        <label class="field-label" for="mTokens">最大输出 tokens</label>
+        <input class="field" id="mTokens" type="number" min="256" max="32768" step="256" value="2048">
+        <div class="set-row"><span class="sr-k">流式输出（逐字返回）</span><button class="switch on" id="swStream"></button></div>
+      </div>
+
+      <div class="hr"></div>
+      <div class="adv-head">
+        <span class="field-label" style="margin:0">朗读音色 · 云音色</span>
+        <span class="card-note" id="ttsState"></span>
+      </div>
+      <label class="field-label" for="ttsBase">Moss 接口地址</label>
+      <input class="field" id="ttsBase" type="url" spellcheck="false" autocomplete="off" placeholder="https://api.mosi.cn/v1">
+      <label class="field-label" for="ttsKey">Moss API Key</label>
+      <div class="key-row">
+        <input class="field" id="ttsKey" type="password" spellcheck="false" autocomplete="off" placeholder="留空则只用本机声线">
+        <button class="btn btn-ghost btn-sm" id="ttsPull">拉取音色</button>
+      </div>
+      <label class="field-label" for="ttsModel">TTS 模型</label>
+      <input class="field" id="ttsModel" list="ttsModelList" spellcheck="false" autocomplete="off" placeholder="moss-tts-1.5-flash">
+      <datalist id="ttsModelList">
+        <option value="moss-tts-1.5-flash"></option>
+        <option value="moss-tts-1.5-pro"></option>
+      </datalist>
+      <p class="field-hint">填好密钥后「音色商城」会出现该账号的云音色（Mossland 音色库），音质最好；留空则一律用本机声线，离线可用。</p>
+
+      <div class="mtest" id="mTest" hidden></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="mTestBtn"><span id="icTestBtn"></span>测试连接</button>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="modelCancel">取消</button>
+      <button class="btn btn-primary" id="modelOk">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-root" id="toastRoot"></div>
+<script src="mock.js"></script>
+<script src="md.js"></script>
+<script src="voices-data.js"></script>
+<script src="voices.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+<script src="brain.js"></script>
+<script>
+(function () {
+  var ck = InkStore.getCheckins();
+  var state = { ptab: "today" };
+
+  var IC = {
+    icSync: "refresh-cw", icModel: "cpu", icModelTitle: "cpu", icSend: "send", icMem: "brain",
+    icMemChip: "brain", icCtx: "book-open",
+    icCpu: "cpu", icDev: "share-2", icDesk: "monitor", icPhone: "smartphone", icMirror: "smartphone",
+    icGloss: "languages", icGlSearch: "search",
+    icTestBtn: "zap",
+    icBot: "bot", ptToday: "list-checks", ptPlan: "calendar-days", ptMe: "user", phWifi: "wifi", phBat: "battery"
+  };
+  Object.keys(IC).forEach(function (id) { var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16); });
+  qs("#botAva").innerHTML = icon("sparkles", 18);
+  qs("#modelX").innerHTML = icon("x", 18);
+  qs("#memX").innerHTML = icon("x", 14);
+  /* 手机预览状态条接真实本机状态（镜像语义：所见即当前设备实况） */
+  function paintPhoneStatus() {
+    var on = navigator.onLine !== false;
+    qs("#phWifi").innerHTML = icon(on ? "wifi" : "wifi-off", 12);
+    var bat = qs("#phBat");
+    if (navigator.getBattery) {
+      navigator.getBattery().then(function (b) {
+        bat.innerHTML = icon(b.charging ? "battery-charging" : "battery", 12) +
+          "<em style='font-style:normal;font-family:var(--font-mono);font-size:10px'>" +
+          Math.round(b.level * 100) + "%</em>";
+      }).catch(function () { bat.style.display = "none"; });   /* v2.11 C：取不到就藏，不留有形无值的空图标 */
+    } else {
+      bat.style.display = "none";
+    }
+  }
+  paintPhoneStatus();
+  window.addEventListener("online", paintPhoneStatus);
+  window.addEventListener("offline", paintPhoneStatus);
+
+  var daily = DB.tasks.filter(function (t) { return t.kind === "daily"; });
+  function done(id) { return !!ck[id]; }
+
+  /* ============ 上下文：对话聚焦哪本书 ============ */
+  function memAll() { return (window.Brain && Brain.memories && Brain.memories()) || []; }
+  function ctxDoc() { return state.ctxDoc || ""; }
+
+  function renderCtx() {
+    var sel = qs("#ctxDoc");
+    var list = (window.shelfList ? shelfList() : (DB.shelf || []));
+    sel.innerHTML = '<option value="">全部书架</option>' + list.map(function (d) {
+      return '<option value="' + esc(d.id) + '">' + esc(d.title) + "</option>";
+    }).join("");
+    sel.value = ctxDoc();
+    sel.addEventListener("change", function () {
+      state.ctxDoc = sel.value || "";
+      if (window.Brain) Brain.setDoc(state.ctxDoc || null);
+      renderChatSub();
+      toast(state.ctxDoc ? "上下文 · 聚焦《" + (Brain.docTitle(state.ctxDoc) || "") + "》" : "上下文 · 全部书架", "brain");
+    });
+  }
+
+  /* 在线 / 离线：不是装饰，是「答案从哪来」的交代 */
+  function renderChatSub() {
+    var online = !!(window.Brain && Brain.online && Brain.online());
+    var cfg = online ? (API.modelCfg() || {}) : {};
+    qs("#chatSub").textContent = online ? ("在线 · " + (cfg.model || "已接入模型")) : "离线 · 仅用本机离线库";
+    var st = qs("#chatState");
+    st.className = "chip " + (online ? "chip-green" : "chip-amber");
+    st.innerHTML = icon(online ? "wifi" : "wifi-off", 12) + (online ? "在线" : "离线");
+  }
+
+  /* ============ 对话 ============ */
+  function msgEl(role, html) {
+    var d = new Date();
+    var hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    return '<div class="msg ' + role + '">' + html + '<span class="msg-time">' + hm + "</span></div>";
+  }
+
+  /* 记忆短标签：取首句（逗号前），足够在引用条里认出是哪一条 */
+  function memLabel(text) {
+    var s = String(text || "").split(/[，,；;。]/)[0].trim();
+    return s.length > 18 ? s.slice(0, 18) + "…" : s;
+  }
+
+  /* 引用条：答案下面诚实标出「这次用到了哪几条记忆」。
+     ids 为 null 表示这轮没走记忆（例如打招呼），不贴引用条。 */
+  function memRefsHTML(ids) {
+    if (ids == null) return "";
+    var list = (ids || []).map(function (id) {
+      return memAll().find(function (m) { return m.id === id; });
+    }).filter(function (m) { return m && m.on !== false; });
+    if (!list.length) {
+      return '<div class="msg-ref none" data-refs="' + esc((ids || []).join(",")) + '">' + icon("brain", 12) + "未参考记忆</div>";
+    }
+    var chips = list.map(function (m) {
+      return '<button class="mr-chip" data-mem="' + m.id + '" title="' + esc(m.why || m.text) + '">' + esc(memLabel(m.text)) + "</button>";
+    }).join("");
+    return '<div class="msg-ref" data-refs="' + esc((ids || []).join(",")) + '">' + icon("brain", 12) + "参考 " + list.length + " 条记忆" +
+      '<span class="mr-chips">' + chips + "</span></div>";
+  }
+
+  /* 答案来源徽标：在线（哪个模型）/ 离线（用了离线库的哪几部分） */
+  function modeHTML(r) {
+    if (!r) return "";
+    /* v2.2：记忆指令的回执徽标（记住 / 忘掉 / 清单 / 未匹配） */
+    if (r.mode === "memory") {
+      var label = { remember: "记忆 · 已写入", forget: "记忆 · 已删除", list: "记忆 · 当前清单", miss: "记忆 · 未匹配" }[r.action] || "记忆";
+      return '<div class="msg-mode on">' + icon("database", 11) + esc(label) + "</div>";
+    }
+    var online = r.mode === "online";
+    var txt = online ? ("主脑 · " + (r.model || "模型")) : "离线库作答" + (r.used && r.used.length ? " · " + r.used.join("/") : "");
+    return '<div class="msg-mode ' + (online ? "on" : "off") + '">' + icon(online ? "sparkles" : "wifi-off", 11) + esc(txt) + "</div>";
+  }
+
+  function pushMsg(role, text, refs, r) {
+    var box = qs("#chatMsgs");
+    var html = role === "ai" ? MD.render(text) + memRefsHTML(refs) + modeHTML(r) : esc(text);
+    box.insertAdjacentHTML("beforeend", msgEl(role, html));
+    box.scrollTop = box.scrollHeight;
+    bindRefChips();
+  }
+
+  function bindRefChips() {
+    qsa(".mr-chip", qs("#chatMsgs")).forEach(function (b) {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", function () { openMem(b.dataset.mem); });
+    });
+  }
+
+  function typing(on) {
+    var box = qs("#chatMsgs");
+    var t = qs("#typingRow");
+    if (on) {
+      if (t) return;
+      box.insertAdjacentHTML("beforeend", '<div class="msg ai" id="typingRow"><span class="typing"><i></i><i></i><i></i></span></div>');
+      box.scrollTop = box.scrollHeight;
+    } else if (t) t.remove();
+  }
+
+  /* 流式：先立一个空壳，模型吐一段就重画一段 —— 长答案不用干等 */
+  function pushStreaming(role) {
+    var box = qs("#chatMsgs");
+    box.insertAdjacentHTML("beforeend", msgEl(role, '<div class="stream-body"></div>'));
+    var el = box.lastElementChild;
+    box.scrollTop = box.scrollHeight;
+    return el;
+  }
+  function paintStreaming(el, text) {
+    var b = el.querySelector(".stream-body");
+    if (b) b.innerHTML = MD.render(text || "");
+    var box = qs("#chatMsgs");
+    box.scrollTop = box.scrollHeight;
+  }
+  function finalizeStreaming(el, text, refs, r) {
+    var b = el.querySelector(".stream-body");
+    var tail = memRefsHTML(refs) + modeHTML(r);
+    if (b) b.outerHTML = MD.render(text || "") + tail;
+    else el.insertAdjacentHTML("beforeend", MD.render(text || "") + tail);
+    bindRefChips();
+  }
+
+  /* 开场白：由真实状态现算，不是预置文案 */
+  function greet() {
+    var name = window.InkProfile ? InkProfile.name() : "读者";
+    var h = new Date().getHours();
+    var hi = h < 6 ? "夜深了" : h < 11 ? "早上好" : h < 14 ? "中午好" : h < 18 ? "下午好" : "晚上好";
+    var dn = daily.filter(function (t) { return done(t.id); }).length;
+    var mems = memAll().filter(function (m) { return m.on !== false; });
+    var bits = [hi + "，" + name + "。"];
+    if (daily.length) bits.push("今日清单 " + dn + "/" + daily.length + " 项已打卡。");
+    var cur = ctxDoc();
+    if (cur) { var dm = window.Brain && Brain.docMeta(cur); if (dm) bits.push("我正看着《" + dm.title + "》。"); }
+    bits.push(mems.length ? ("从你的行为里学到了 " + mems.length + " 条记忆，回答时会带上。") : "我还不太认识你 —— 多读几页、划几条高亮，我会自己看出来。");
+    bits.push(window.Brain && Brain.online() ? "有什么想问的直接说。" : "现在没接模型，我离线只用本机离线库作答；接上模型后我就有那个模型的全部能力。");
+    return bits.join("");
+  }
+
+  var QUICK = ["总结当前文档", "这本书讲了什么", "我的记忆有哪些", "帮我调整本周计划", "解释「注意力机制」"];
+  qs("#chatQuick").innerHTML = QUICK.map(function (q) { return '<button class="chip chip-btn" data-q="' + esc(q) + '">' + esc(q) + "</button>"; }).join("");
+  qsa("#chatQuick .chip-btn").forEach(function (b) {
+    b.addEventListener("click", function () { send(b.dataset.q); });
+  });
+
+  var busy = false;
+  async function send(text) {
+    if (busy) return;
+    text = (text || qs("#chatInput").value).trim();
+    if (!text) return;
+    qs("#chatInput").value = "";
+    pushMsg("me", text);
+    busy = true;
+    typing(true);
+    var holder = null;
+    try {
+      var r = await Brain.ask(text, {
+        docId: ctxDoc(),
+        onDelta: function (piece, all) {
+          if (!holder) { typing(false); holder = pushStreaming("ai"); }
+          paintStreaming(holder, all);
+        }
+      });
+      if (holder) finalizeStreaming(holder, r.reply, r.refs, r);
+      else { typing(false); pushMsg("ai", r.reply, r.refs, r); }
+    } catch (e) {
+      typing(false);
+      if (holder) holder.remove();
+      pushMsg("ai", "主脑出错了：" + ((e && e.message) || "未知错误") + "。\n\n可到右侧「模型设置」检查接口地址与密钥；离线时我仍能用本机离线库作答。");
+    }
+    busy = false;
+    InkFX.flash();
+    renderMemory();
+  }
+
+  qs("#chatSend").addEventListener("click", function () { send(); });
+  qs("#chatInput").addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
+
+  /* ============ 记忆（主脑从行为中学到的，带证据） ============
+     入口只有两个：对话头部的「N 条记忆」按钮、答案里的记忆引用条。
+     开关即时落库并同步刷新引用条与计数；「忘掉」是真删除（两击确认）。 */
+  var memPop = qs("#memPop"), memBtn = qs("#memBtn");
+
+  function renderMemory() {
+    var list = memAll();
+    var on = list.filter(function (m) { return m.on !== false; }).length;
+    qs("#memBtnN").textContent = on;
+    qs("#memSub").textContent = list.length ? (on + " / " + list.length + " 条已启用") : "尚无记忆";
+    if (!list.length) {
+      qs("#memList").innerHTML = '<p class="mem-empty">主脑还没从你的行为里学到什么。多读几页、划几条高亮、打几次卡、建几条术语 —— 证据攒够了，记忆会自己长出来。</p>';
+      return;
+    }
+    qs("#memList").innerHTML = list.map(function (m) {
+      var conf = Math.round((m.conf || 0) * 100);
+      return '<div class="mem-row" data-row="' + m.id + '">' +
+        '<div class="mem-main">' +
+          '<div class="mem-text">' + esc(m.text) + "</div>" +
+          '<div class="mem-meta"><span class="mem-src">' + esc(m.src || "行为") + '</span>' +
+            '<span class="mem-conf" title="置信度">' + conf + '%</span>' +
+            (m.at ? '<span class="mem-at">' + esc(m.at) + "</span>" : "") + "</div>" +
+          (m.why ? '<div class="mem-why">' + esc(m.why) + "</div>" : "") +
+        "</div>" +
+        '<div class="mem-act">' +
+          '<button class="switch' + (m.on !== false ? " on" : "") + '" data-mem="' + m.id + '" role="switch" aria-checked="' + (m.on !== false ? "true" : "false") + '" aria-label="启用或停用这条记忆"></button>' +
+          '<button class="mem-edit" data-edit="' + m.id + '" aria-label="编辑这条记忆" title="编辑文本">' + icon("pen-line", 13) + "</button>" +
+          '<button class="mem-del" data-forget="' + m.id + '" aria-label="忘掉这条记忆" title="忘掉（删除）">' + icon("trash-2", 13) + "</button>" +
+        "</div></div>";
+    }).join("");
+
+    qsa("#memList .switch").forEach(function (s) {
+      s.addEventListener("click", async function () {
+        var m = memAll().find(function (x) { return x.id === s.dataset.mem; });
+        if (!m) return;
+        var next = m.on === false;
+        await API.saveMemoryToggle(s.dataset.mem, next);
+        renderMemory();
+        repaintRefs();
+        toast(next ? "记忆已启用" : "记忆已停用", "brain");
+      });
+    });
+
+    /* 忘掉 = 真的删除，两击确认，不用系统弹窗 */
+    qsa("#memList .mem-del").forEach(function (b) {
+      b.addEventListener("click", async function () {
+        if (b.dataset.arm !== "1") {
+          b.dataset.arm = "1";
+          b.classList.add("arm");
+          b.title = "再点一次确认忘掉";
+          setTimeout(function () { b.dataset.arm = ""; b.classList.remove("arm"); b.title = "忘掉（删除）"; }, 2600);
+          return;
+        }
+        await API.forgetMemory(b.dataset.forget);
+        renderMemory();
+        repaintRefs();
+        toast("已忘掉这条记忆", "brain");
+      });
+    });
+
+    /* v2.2 · 编辑记忆：点铅笔 → 文本行内可改 → 回车/失焦保存，Esc 放弃。
+       调研对齐（ChatGPT Memory：让用户能纠正推断出的结论，是信任的一半）。 */
+    qsa("#memList .mem-edit").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var row = b.closest(".mem-row");
+        var t = row && row.querySelector(".mem-text");
+        if (!t || t.isContentEditable) return;
+        var before = t.textContent;
+        t.setAttribute("contenteditable", "true");
+        t.classList.add("editing");
+        t.focus();
+        try {
+          var rng = document.createRange();
+          rng.selectNodeContents(t); rng.collapse(false);
+          var sel = window.getSelection();
+          sel.removeAllRanges(); sel.addRange(rng);
+        } catch (e) {}
+        var finish = function (save) {
+          t.removeAttribute("contenteditable");
+          t.classList.remove("editing");
+          var v = String(t.textContent || "").trim();
+          if (!save || !v || v === before) { t.textContent = before; return; }
+          var list = memAll().map(function (x) {
+            return x.id === b.dataset.edit ? Object.assign({}, x, { text: v, edited: true }) : x;
+          });
+          if (window.API && API.memWrite) API.memWrite(list);
+          renderMemory();
+          repaintRefs();
+          toast("记忆已更新", "pen-line");
+        };
+        t.addEventListener("blur", function () { finish(true); }, { once: true });
+        t.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); t.blur(); }
+          else if (e.key === "Escape") { e.preventDefault(); t.textContent = before; t.blur(); }
+        });
+      });
+    });
+  }
+
+  /* v2.2 · 导出记忆：JSON 备份（与「本机数据」整包导出互补，这里是记忆单件） */
+  if (qs("#memExport")) {
+    qs("#memExport").innerHTML = icon("download", 13);
+    qs("#memExport").addEventListener("click", function () {
+      var list = memAll();
+      var blob = new Blob([JSON.stringify({ app: "inkread", kind: "memories", exportedAt: new Date().toISOString(), memories: list }, null, 2)], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "inkread-memories.json";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+      toast("已导出 " + list.length + " 条记忆", "download");
+    });
+  }
+
+  /* 记忆开关一变，已经贴在答案下面的引用条要跟着重画 —— 否则会显示「参考了已停用的记忆」 */
+  function repaintRefs() {
+    qsa("#chatMsgs .msg.ai").forEach(function (el) {
+      var ref = el.querySelector(".msg-ref");
+      if (!ref) return;
+      var ids = (ref.dataset.refs || "").split(",").filter(Boolean);
+      ref.outerHTML = memRefsHTML(ids);
+    });
+    bindRefChips();
+  }
+
+  function openMem(focusId) {
+    memPop.hidden = false;
+    memBtn.setAttribute("aria-expanded", "true");
+    if (focusId) {
+      var row = qs('#memList .mem-row[data-row="' + focusId + '"]');
+      if (row) {
+        row.classList.add("on");
+        row.scrollIntoView({ block: "center" });
+        setTimeout(function () { row.classList.remove("on"); }, 1600);
+      }
+    }
+  }
+  function closeMem() { memPop.hidden = true; memBtn.setAttribute("aria-expanded", "false"); }
+
+  memBtn.addEventListener("click", function () { memPop.hidden ? openMem() : closeMem(); });
+  qs("#memX").addEventListener("click", closeMem);
+  document.addEventListener("click", function (e) {
+    if (memPop.hidden) return;
+    if (memPop.contains(e.target) || memBtn.contains(e.target)) return;
+    if (e.target.closest && e.target.closest(".mr-chip")) return;
+    closeMem();
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !memPop.hidden) closeMem(); });
+
+  /* ============ 模型配置：预设 + 自定义导入 ============
+     流程（调研 Chatbox / LobeChat / SillyTavern 后取齐）：
+     ① 选服务商 → 自动填好接口地址；② 填 API Key；③ 填或拉取模型名；
+     ④ 测试连通；⑤ 保存。必填三项之外都收进「高级参数」，默认不展开。 */
+  var MC = null;        /* 已保存的配置 */
+  var draft = null;     /* 弹层草稿，取消即丢弃 */
+  var mask = qs("#modelMask");
+
+  function providerOf(cfg) {
+    var ps = (cfg && cfg.presets) || [];
+    var hit = ps.filter(function (p) { return p.baseUrl && p.baseUrl === cfg.baseUrl; })[0];
+    return hit || { k: "custom", name: "自定义", baseUrl: "", models: [] };
+  }
+  function presetOf(k) {
+    return (MC.presets || []).filter(function (p) { return p.k === k; })[0] ||
+      { k: "custom", name: "自定义", baseUrl: "", models: [] };
+  }
+  function maskKey(k) {
+    k = String(k || "");
+    if (!k) return "未填写";
+    return k.length <= 8 ? k.slice(0, 2) + "···" : k.slice(0, 3) + "···" + k.slice(-4);
+  }
+
+  function renderModelCard() {
+    var p = providerOf(MC);
+    qs("#mmSub").textContent = p.name;
+    qs("#mmNow").innerHTML =
+      '<div class="mm-row"><span class="mm-k">接口</span><span class="mm-v">' + esc(MC.baseUrl || "未填写") + "</span></div>" +
+      '<div class="mm-row"><span class="mm-k">模型</span><span class="mm-v">' + esc(MC.model || "未填写") + "</span></div>" +
+      '<div class="mm-row"><span class="mm-k">密钥</span><span class="mm-v">' + esc(maskKey(MC.key)) + "</span></div>";
+    qs("#mmHint").textContent = MC.key ? "密钥只存本机" : "尚未填写 API Key";
+    qs("#chatSub").innerHTML = icon("cloud", 12) + esc(p.name + " · " + (MC.model || "未配置")) + " · 记忆已接入";
+  }
+
+  function paintChips() {
+    qs("#pvChips").innerHTML = (MC.presets || []).map(function (p) {
+      return '<button type="button" class="pv-chip' + (p.k === draft.preset ? " on" : "") +
+        '" data-pv="' + p.k + '" aria-pressed="' + (p.k === draft.preset) + '">' + esc(p.name) + "</button>";
+    }).join("");
+    qsa("[data-pv]", qs("#pvChips")).forEach(function (b) {
+      b.addEventListener("click", function () { usePreset(b.dataset.pv); });
+    });
+    var cur = presetOf(draft.preset);
+    qs("#mNameList").innerHTML = (cur.models || []).map(function (m) {
+      return '<option value="' + esc(m) + '"></option>';
+    }).join("");
+    qs("#pvNote").textContent = (draft.preset === "custom" || !cur.baseUrl)
+      ? "自定义：接口地址、密钥、模型名都由你填写。"
+      : cur.name + "：接口地址已填好，密钥与模型名请自行确认。";
+  }
+
+  /* 点预设只补地址与候选模型名；已填过的地址不覆盖，免得抹掉用户手改的内容 */
+  function usePreset(k) {
+    var p = presetOf(k);
+    draft.preset = k;
+    if (p.baseUrl) { draft.baseUrl = p.baseUrl; qs("#mBase").value = p.baseUrl; }
+    var typed = qs("#mName").value.trim();
+    if (p.models && p.models.length && p.models.indexOf(typed) < 0) {
+      draft.model = p.models[0];
+      qs("#mName").value = p.models[0];
+    }
+    paintChips();
+  }
+
+  function openModel() {
+    draft = {
+      preset: providerOf(MC).k, baseUrl: MC.baseUrl, key: MC.key, model: MC.model,
+      temp: MC.temp, maxTokens: MC.maxTokens, stream: MC.stream !== false
+    };
+    var t = draft.temp == null ? 0.4 : draft.temp;
+    qs("#mBase").value = draft.baseUrl || "";
+    qs("#mKey").value = draft.key || "";
+    qs("#mKey").type = "password";
+    qs("#mKeyEye").innerHTML = icon("eye", 14);
+    qs("#mName").value = draft.model || "";
+    qs("#tempRange").value = Math.round(t * 10);
+    qs("#tempVal").textContent = t.toFixed(1);
+    qs("#mTokens").value = draft.maxTokens || 2048;
+    qs("#swStream").classList.toggle("on", draft.stream);
+    qs("#mTest").hidden = true;
+    qs("#advBox").hidden = true;
+    qs("#advToggle").textContent = "展开 ›";
+    qs("#advToggle").setAttribute("aria-expanded", "false");
+    var tc = API.ttsConfig ? (API.ttsConfig().data || {}) : {};
+    qs("#ttsBase").value = tc.baseUrl || "https://api.mosi.cn/v1";
+    qs("#ttsKey").value = "";
+    qs("#ttsKey").placeholder = tc.hasKey ? "已保存（重新输入可覆盖）" : "留空则只用本机声线";
+    qs("#ttsModel").value = tc.model || "moss-tts-1.5-flash";
+    qs("#ttsState").textContent = tc.hasKey ? "已配置 · 云音色可用" : "未配置 · 仅本机声线";
+    paintChips();
+    mask.style.display = "grid";
+    qs("#mBase").focus();
+  }
+  function closeModel() { mask.style.display = "none"; draft = null; }
+
+  function readForm() {
+    return {
+      preset: draft ? draft.preset : "custom",
+      baseUrl: qs("#mBase").value.trim(),
+      key: qs("#mKey").value.trim(),
+      model: qs("#mName").value.trim(),
+      temp: qs("#tempRange").value / 10,
+      maxTokens: Math.max(256, Math.min(32768, parseInt(qs("#mTokens").value, 10) || 2048)),
+      stream: qs("#swStream").classList.contains("on")
+    };
+  }
+
+  async function testCfg(cfg, btn) {
+    var box = qs("#mTest");
+    box.hidden = false;
+    box.className = "mtest";
+    box.innerHTML = icon("loader-circle", 13) + "正在连通…";
+    if (btn) btn.disabled = true;
+    var r = await API.testModel(cfg);
+    if (btn) btn.disabled = false;
+    var d = r.data || {};
+    if (d.ok) {
+      box.className = "mtest ok";
+      box.innerHTML = icon("circle-check", 13) + "连通正常 · " + d.latency + "ms · 可用模型 " +
+        ((d.models || []).length) + ' 个<span class="mtest-note">' + esc(d.note || "") + "</span>";
+      /* 拉回来的模型名直接进候选，省得手敲 */
+      if (d.models && d.models.length) {
+        qs("#mNameList").innerHTML = d.models.map(function (m) { return '<option value="' + esc(m) + '"></option>'; }).join("");
+        if (!qs("#mName").value.trim()) qs("#mName").value = d.models[0];
+      }
+    } else {
+      box.className = "mtest err";
+      box.innerHTML = icon("alert-triangle", 13) + esc(d.reason || "连通失败，请检查地址与密钥");
+    }
+  }
+
+  qs("#btnModel").addEventListener("click", openModel);
+  qs("#mmEdit").addEventListener("click", openModel);
+  qs("#modelX").addEventListener("click", closeModel);
+  qs("#modelCancel").addEventListener("click", closeModel);
+  mask.addEventListener("click", function (e) { if (e.target === mask) closeModel(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && mask.style.display === "grid") closeModel(); });
+
+  qs("#mKeyEye").addEventListener("click", function () {
+    var inp = qs("#mKey");
+    var show = inp.type === "password";
+    inp.type = show ? "text" : "password";
+    qs("#mKeyEye").innerHTML = icon(show ? "x" : "eye", 14);
+  });
+  qs("#advToggle").addEventListener("click", function () {
+    var box = qs("#advBox");
+    box.hidden = !box.hidden;
+    qs("#advToggle").textContent = box.hidden ? "展开 ›" : "收起 ⌄";
+    qs("#advToggle").setAttribute("aria-expanded", String(!box.hidden));
+  });
+  qs("#tempRange").addEventListener("input", function (e) { qs("#tempVal").textContent = (e.target.value / 10).toFixed(1); });
+  qs("#swStream").addEventListener("click", function () { qs("#swStream").classList.toggle("on"); });
+
+  qs("#mTestBtn").addEventListener("click", function () { testCfg(readForm(), qs("#mTestBtn")); });
+  qs("#mPull").addEventListener("click", function () { testCfg(readForm(), qs("#mPull")); });
+  qs("#mmTest").addEventListener("click", async function () {
+    var b = qs("#mmTest");
+    b.disabled = true; b.textContent = "测试中…";
+    var r = await API.testModel(MC);
+    b.disabled = false; b.textContent = "测试连接";
+    toast(r.data && r.data.ok ? "连通正常 · " + r.data.latency + "ms" : (r.data && r.data.reason) || "连通失败", "zap");
+  });
+
+  qs("#ttsPull").addEventListener("click", async function () {
+    var base = qs("#ttsBase").value.trim() || "https://api.mosi.cn/v1";
+    var key = qs("#ttsKey").value.trim();
+    var model = qs("#ttsModel").value.trim() || "moss-tts-1.5-flash";
+    if (!key && !(API.ttsConfig().data || {}).hasKey) { toast("请先填写 Moss API Key", "alert-triangle"); return; }
+    API.saveTtsConfig({ baseUrl: base, key: key, model: model });
+    var btn = qs("#ttsPull");
+    btn.disabled = true; btn.textContent = "拉取中…";
+    var r = await API.mossVoices();
+    btn.disabled = false; btn.textContent = "拉取音色";
+    if (r.code === 0) {
+      qs("#ttsState").textContent = "已配置 · 云音色 " + r.data.count + " 款";
+      toast("已拉取 " + r.data.count + " 款云音色 · 去「主题商城 · 音色」查看", "audio-lines");
+    } else {
+      qs("#ttsState").textContent = "拉取失败";
+      toast(r.msg || "拉取失败", "alert-triangle");
+    }
+  });
+
+  qs("#modelOk").addEventListener("click", async function () {
+    var cfg = readForm();
+    var ttsBase = qs("#ttsBase").value.trim() || "https://api.mosi.cn/v1";
+    var ttsKey = qs("#ttsKey").value.trim();
+    var ttsModel = qs("#ttsModel").value.trim() || "moss-tts-1.5-flash";
+    var hasLLM = !!(cfg.baseUrl && cfg.key && cfg.model);
+    var hasTTS = !!ttsKey || !!(API.ttsConfig().data || {}).hasKey;
+    if (!hasLLM && !hasTTS) {
+      if (!/^https?:\/\//i.test(cfg.baseUrl)) { toast("接口地址需以 http:// 或 https:// 开头", "alert-triangle"); return; }
+      if (!cfg.key) { toast("请先填写 API Key", "alert-triangle"); return; }
+      if (!cfg.model) { toast("请填写模型名称", "alert-triangle"); return; }
+    }
+    if (hasLLM) {
+      if (!/^https?:\/\//i.test(cfg.baseUrl)) { toast("接口地址需以 http:// 或 https:// 开头", "alert-triangle"); return; }
+      await API.saveModelConfig(cfg);
+      MC = (await API.fetchModelConfig()).data;
+      renderModelCard();
+    }
+    var tts = { baseUrl: ttsBase, model: ttsModel };
+    if (ttsKey) tts.key = ttsKey;
+    API.saveTtsConfig(tts);
+    closeModel();
+    InkFX.flash();
+    toast(hasLLM ? "模型已保存 · " + cfg.model : "云音色配置已保存", "cpu");
+  });
+
+  /* ============ 同步（演示）============
+   原型没有云端：数据本机即时落盘，这里如实说明，不假装双端传输。 */
+  /* v2.3：设备卡与同步日志改为真实数据 ——
+     日志读 InkSync 的真实记录（inkread.synclog.v1，跨端同步）；
+     「手机端」状态由日志里最近的非本机条目推断（真的有人从那端推过才算数）。 */
+  function relTime(ts) {
+    var s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 60) return s + " 秒前";
+    if (s < 3600) return Math.round(s / 60) + " 分钟前";
+    if (s < 86400) return Math.round(s / 3600) + " 小时前";
+    return Math.round(s / 86400) + " 天前";
+  }
+  function renderSync() {
+    var log = (window.InkSync && InkSync.log()) || [];
+    qs("#syncLog").innerHTML = log.length
+      ? log.slice(0, 6).map(function (s) {
+          var what = s.action === "pull" ? "拉取 " + (s.pulled || 0) + " 项"
+            : s.action === "sync" ? "双向 · 拉 " + (s.pulled || 0) + " / 推 " + (s.pushed || 0) + " 项"
+            : "推送 " + (s.pushed || 0) + " 项";
+          return "<li><b>" + esc(s.atText || "") + "</b>" + esc(s.device || "桌面") + " · " + esc(what) + "</li>";
+        }).join("")
+      : '<li><span class="card-note">还没有同步过 —— 点「立即同步」，或从手机访问电脑 IP:8765 接入</span></li>';
+    /* 桌面端 = 本窗口；手机端 = 日志里最近一条其他设备 */
+    qs("#deskState").innerHTML = icon("circle-check", 13) + "本窗口";
+    var other = log.filter(function (s) { return (s.device || "桌面") !== (window.InkSync ? InkSync.device() : "桌面"); })[0];
+    qs("#phoneState").innerHTML = other
+      ? icon("circle-check", 13) + esc(other.device || "远端") + " · " + relTime(other.at)
+      : icon("clock", 13) + "尚无远端接入";
+    var mems = memAll().filter(function (m) { return m.on !== false; }).length;
+    var last = log[0];
+    qs("#aiSub").textContent = "主脑已通读 " + ((window.shelfList ? shelfList() : DB.shelf) || []).length +
+      " 份文档 · 学到 " + mems + " 条记忆 · " +
+      (last ? "上次同步 " + relTime(last.at) : "尚未同步");
+  }
+
+  /* v2.3 真同步：与书架页同一引擎（拉取 + 推送本地服务快照） */
+  qs("#btnSync").addEventListener("click", async function () {
+    var b = qs("#btnSync");
+    b.disabled = true;
+    qs("#icSync").innerHTML = icon("loader-circle", 16);
+    var r = await InkSync.now();
+    qs("#icSync").innerHTML = icon("refresh-cw", 16);
+    b.disabled = false;
+    renderSync();
+    InkFX.flash();
+    if (r.offline) { toast("同步服务不可达 · 本机数据仍即时保存", "wifi-off"); return; }
+    if (r.pulled > 0) {
+      toast("已从另一端同步 " + r.pulled + " 项 · 即将刷新", "refresh-cw");
+      setTimeout(function () { location.reload(); }, 900);
+    } else {
+      toast(r.pushed > 0 ? "已推送本机变更 " + r.pushed + " 项" : "两端已一致 · 无需同步", "circle-check");
+    }
+  });
+
+  /* ============ 手机预览 ============ */
+  function mTask(t) {
+    var on = done(t.id);
+    return '<div class="m-task' + (on ? " done" : "") + '" data-mt="' + t.id + '">' +
+      '<div class="mt-body"><div class="mt-time">' + esc(t.time) + "</div>" +
+      '<div class="mt-title">' + esc(t.title) + "</div></div>" +
+      '<button class="m-check" aria-pressed="' + (on ? "true" : "false") + '" aria-label="' +
+        esc((on ? "取消完成：" : "标记完成：") + t.title) + '">' + icon("check", 16) + "</button></div>";
+  }
+  /* 统计行：数值留给 InkStats 回调上漆（引擎异步校正时能刷新） */
+  function mStat(label, id) {
+    return '<div class="m-task"><div class="mt-body"><div class="mt-time">' + esc(label) +
+      '</div><div class="mt-title" id="' + id + '">—</div></div></div>';
+  }
+
+  function renderPhone() {
+    var dn = daily.filter(function (t) { return done(t.id); }).length;
+    qs("#phSub").textContent = "已完成 " + dn + "/" + daily.length + " · 与桌面端同步";
+    qs("#relayChip").innerHTML = icon("refresh-cw", 13) + "桌面端 → 手机端 · 实时镜像";
+    if (state.ptab === "today") {
+      qs("#phTitle").textContent = "今日清单";
+      qs("#phBody").innerHTML = daily.map(mTask).join("");
+    } else if (state.ptab === "plan") {
+      qs("#phTitle").textContent = "计划原文";
+      qs("#phBody").innerHTML = '<div class="phone-doc">' +
+        '<h4>四、每日例行任务</h4>' +
+        blocks_p() + "</div>";
+    } else {
+      qs("#phTitle").textContent = "我的";
+      /* 数字取自本机统计引擎（inkread.stats.v1），和桌面端同一口径 ——
+         原来这里是 mock 里的常量，手机预览上永远显示「21 天 / 46 分钟」。 */
+      qs("#phBody").innerHTML =
+        mStat("连续打卡", "msStreak") + mStat("今日阅读", "msToday") + mStat("本周字数", "msWeek");
+      var setStat = function (id, txt) { var el = qs("#" + id); if (el) el.textContent = txt; };
+      setStat("msStreak", InkStats.streakSmart() + " 天");
+      InkStats.streakSmart(function (n) { setStat("msStreak", n + " 天"); });
+      setStat("msToday", InkStats.fmtSec(InkStats.range("day").sec).join(" "));
+      InkStats.range("day", function (r) { setStat("msToday", InkStats.fmtSec(r.sec).join(" ")); });
+      setStat("msWeek", InkStats.fmtWords(InkStats.range("week").words).join(" "));
+      InkStats.range("week", function (r) { setStat("msWeek", InkStats.fmtWords(r.words).join(" ")); });
+    }
+    qsa(".ptab").forEach(function (t) { t.classList.toggle("active", t.dataset.ptab === state.ptab); });
+  }
+
+  function blocks_p() {
+    var c = DB.contents["plan-01"] || [];
+    var li = c.filter(function (b) { return b.type === "list" && b.items && b.items.length && b.items[0].id && b.items[0].id.indexOf("d-t") === 0; })[0];
+    return li ? "<p>" + li.items.map(function (i) { return esc(i.x); }).join("</p><p>") + "</p>" : "";
+  }
+
+  qs("#phBody").addEventListener("click", async function (e) {
+    var c = e.target.closest(".m-check");
+    if (!c) return;
+    var row = c.closest(".m-task"), id = row.dataset.mt;
+    if (done(id)) { await API.undoCheckin(id); }
+    else { await API.checkin(id); }
+    ck = InkStore.getCheckins();
+    InkFX.ripple(c);
+    renderPhone();
+    var tip = qs("#mSyncTip");
+    tip.classList.add("show");
+    setTimeout(function () { tip.classList.remove("show"); }, 1600);
+    toast(done(id) ? "手机端已打卡 · 同步至桌面端" : "手机端已撤销打卡", "smartphone");
+  });
+
+  qsa(".ptab").forEach(function (t) {
+    t.addEventListener("click", function () { state.ptab = t.dataset.ptab; renderPhone(); InkFX.ripple(t); });
+  });
+
+  function clock() {
+    var d = new Date();
+    qs("#phTime").textContent = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  /* ============ 术语表：内置（只读）+ 自建（可增删） ============
+     与 api.js 的 inkread.glossary.v1 同源；翻译时全量下发给模型，
+     同名以用户为准 —— 读者改过的译名不该被内置表盖回去。 */
+  var GL = { builtin: [], user: [] };
+  function glQuery() { return (qs("#glSearch").value || "").trim().toLowerCase(); }
+  function glMatch(t, q) {
+    return !q || t.src.toLowerCase().indexOf(q) >= 0 || String(t.dst || "").toLowerCase().indexOf(q) >= 0;
+  }
+  function renderGloss() {
+    var box = qs("#glList");
+    if (!box) return;
+    var q = glQuery();
+    qs("#glSub").textContent = "内置 " + GL.builtin.length + " · 自建 " + GL.user.length;
+    var rows = GL.builtin.filter(function (t) { return glMatch(t, q); }).map(function (t) { return glossRow(t, false); })
+      .concat(GL.user.filter(function (t) { return glMatch(t, q); }).map(function (t) { return glossRow(t, true); }));
+    box.innerHTML = rows.length ? rows.join("")
+      : '<div class="card-note">' + (q ? "没有匹配「" + esc(q) + "」的术语。" : "还没有术语。添加后，翻译时会强制沿用。") + "</div>";
+    qsa("[data-gl-del]", box).forEach(function (b) {
+      b.addEventListener("click", async function () {
+        var next = GL.user.filter(function (t) { return t.src !== b.dataset.glDel; });
+        var r = await API.saveGlossary(next);
+        GL.user = r.data || next;
+        renderGloss();
+        toast("已从术语表移除", "trash-2");
+      });
+    });
+  }
+  function glossRow(t, mine) {
+    return '<div class="gl-row">' +
+      '<span class="gl-src">' + esc(t.src) + '</span>' +
+      '<span class="gl-dst">' + esc(t.dst) + '</span>' +
+      (t.pos ? '<span class="gl-pos">' + esc(t.pos) + '</span>' : "") +
+      (mine
+        ? '<button class="gl-del" data-gl-del="' + esc(t.src) + '" aria-label="删除">' + icon("x", 13) + '</button>'
+        : '<span class="gl-del void" aria-hidden="true"></span>') +
+    '</div>';
+  }
+  qs("#glAdd").addEventListener("click", async function () {
+    var src = qs("#glSrc").value.trim(), dst = qs("#glDst").value.trim();
+    if (!src || !dst) { toast("原词与译名都要填", "info"); return; }
+    var next = GL.user.filter(function (t) { return t.src !== src; });
+    next.push({ src: src, dst: dst, pos: "" });
+    var r = await API.saveGlossary(next);
+    GL.user = r.data || next;
+    qs("#glSrc").value = ""; qs("#glDst").value = "";
+    renderGloss();
+    toast("已加入术语表 · " + src, "languages");
+  });
+
+  /* ============ 术语表 · 导入 / 导出 / 检索 ============
+     调研（DeepL 术语表导入 / Anki CSV 导入）：粘贴或选文件 → 自动认分隔符 →
+     跳过表头 → 预览解析结果 → 重名按「跳过 / 覆盖」裁定 → 一次落库。
+     解析走 API.parseGlossary（纯函数，不打网络），落库走 API.importGlossary。 */
+  var IMP = { open: false, rows: [] };
+
+  function impOpen(on) {
+    IMP.open = on;
+    var box = qs("#glImp");
+    if (box) box.hidden = !on;
+    qs("#glImportBtn").setAttribute("aria-expanded", on ? "true" : "false");
+    if (on) impRefresh();
+  }
+  function impPolicy() {
+    var r = qsa('input[name="glDup"]').filter(function (x) { return x.checked; })[0];
+    return r ? r.value : "skip";
+  }
+  function impReset() {
+    qs("#glPaste").value = "";
+    qs("#glFileNote").textContent = "未选择";
+    qs("#glFile").value = "";
+    IMP.rows = [];
+  }
+  function impRefresh() {
+    var text = qs("#glPaste").value;
+    var pv = qs("#glPv"), doBtn = qs("#glDo");
+    if (!text.trim()) {
+      IMP.rows = [];
+      pv.textContent = "还没有内容 —— 粘贴两列文本，或选一个 CSV / TSV 文件。";
+      doBtn.disabled = true;
+      return;
+    }
+    var r = API.parseGlossary(text, { delim: qs("#glDelim").value, header: qs("#glHeader").checked });
+    IMP.rows = r.rows;
+    doBtn.disabled = !r.rows.length;
+    var bits = ["识别到 <b>" + r.rows.length + "</b> 条"];
+    if (r.delimName) bits.push("分隔符 <b>" + esc(r.delimName) + "</b>");
+    if (r.skippedHeader) bits.push("已跳过表头");
+    if (r.bad) bits.push("<b>" + r.bad + "</b> 行读不出");
+    if (!r.rows.length) bits.push("至少要两列：原词、译名");
+    pv.innerHTML = bits.join(" · ");
+  }
+
+  qs("#glImportBtn").addEventListener("click", function () { impOpen(!IMP.open); });
+  qs("#glCancel").addEventListener("click", function () { impOpen(false); });
+  qs("#glSearch").addEventListener("input", renderGloss);
+  qs("#glPaste").addEventListener("input", impRefresh);
+  qs("#glDelim").addEventListener("change", impRefresh);
+  qs("#glHeader").addEventListener("change", impRefresh);
+
+  qs("#glFile").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    qs("#glFileNote").textContent = f ? f.name : "未选择";
+    if (!f) { impRefresh(); return; }
+    var fr = new FileReader();
+    fr.onload = function () { qs("#glPaste").value = String(fr.result || ""); impRefresh(); };
+    fr.onerror = function () { toast("文件读取失败，可改为直接粘贴", "info"); };
+    fr.readAsText(f, "utf-8");
+  });
+
+  qs("#glDo").addEventListener("click", async function () {
+    if (!IMP.rows.length) return;
+    var r = await API.importGlossary(IMP.rows, impPolicy());
+    var d = r.data || {};
+    GL.user = d.user || GL.user;
+    impReset();
+    impOpen(false);
+    qs("#glSearch").value = "";
+    renderGloss();
+    var msg = "导入完成 · 新增 " + (d.added || 0);
+    if (d.over) msg += " · 覆盖 " + d.over;
+    if (d.skip) msg += " · 跳过 " + d.skip;
+    toast(msg, "languages");
+  });
+
+  qs("#glExport").addEventListener("click", function () {
+    var seen = {}, list = [];
+    GL.user.forEach(function (t) { seen[t.src] = 1; list.push(t); });
+    GL.builtin.forEach(function (t) { if (!seen[t.src]) list.push(t); });
+    var csv = list.map(function (t) { return [t.src, t.dst, t.pos || ""].join(","); }).join("\n");
+    var blob = new Blob(["\ufeff" + "src,dst,pos\n" + csv], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "inkread-glossary.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    toast("已导出术语表 · " + list.length + " 条", "download");
+  });
+
+  /* ============ 启动 ============ */
+  var params = new URLSearchParams(location.search);
+  state.ctxDoc = params.get("doc") || "";
+  if (window.Brain) Brain.setDoc(state.ctxDoc || null);
+  renderCtx();
+  renderChatSub();
+  renderMemory();
+  pushMsg("ai", greet(), null, null);
+  renderSync(); renderPhone(); clock();
+  API.fetchModelConfig().then(function (r) { MC = r.data; renderModelCard(); renderChatSub(); });
+  API.fetchGlossary().then(function (r) {
+    GL.builtin = (r.data && r.data.builtin) || [];
+    GL.user = (r.data && r.data.user) || [];
+    renderGloss();
+  });
+  /* 记忆是学出来的，且学习发生在 DOMContentLoaded（晚于本段解析期渲染）。
+     所以头部的「N 条记忆」不能只渲一次 —— 订阅主脑，学到新的就即时回流。
+     只在真的变动时刷新，不做定时轮询（省电、不发烫）。 */
+  if (window.Brain && Brain.onChange) {
+    Brain.onChange(function () { renderSync(); renderMemory(); });
+  }
+  setInterval(clock, 30000);
+})();
+</script>
+</body>
+</html>

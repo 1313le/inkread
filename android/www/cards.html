@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>墨读 InkRead · 闪卡</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+<style>
+/* ---------- 闪卡页（v2.6 要求四）----------
+   只写本页专属的两块：① 按类别陈列的卡组列表；② 页内全屏复习浮层。
+   卡面 / 评分排 / 挖空 一律沿用 styles.css 既有 .fc-* 全局样式
+   （与阅读页闪卡面板同一套外观，观感同源，也不重复造样式）。 */
+
+/* 页头统计：与 tasks.html 的 chip 统计同一做法 */
+.cards-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+.cards-stats .chip { padding: 7px 13px; }
+.cards-stats b { font-variant-numeric: tabular-nums; }
+
+/* ---------- 一、类别分组 + 卡组 ---------- */
+.cat-block { margin-bottom: 26px; }
+.cat-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.cat-head h2 { font-size: 15px; letter-spacing: .12em; font-weight: 700; }
+.cat-head .ic { color: var(--accent-ink); }
+.cat-head .cat-n { font-size: 11.5px; color: var(--ink-3); letter-spacing: .06em; }
+.cat-head .cat-rule { flex: 1; height: 1px; background: var(--line-2); }
+
+.deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(292px, 1fr)); gap: 14px; align-items: start; }
+.deck-item { min-width: 0; }
+/* 展开详情时占满整行：卡组列表重新排布，详情不被挤成窄条 */
+.deck-item.open { grid-column: 1 / -1; }
+.deck-card { position: relative; padding: 15px 17px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md); }
+.dc-top { display: flex; align-items: center; gap: 8px; }
+.dc-name { font-size: 16px; font-weight: 700; letter-spacing: .03em; margin: 10px 0 6px; cursor: pointer; }
+.dc-name:hover { color: var(--accent-ink); }
+.dc-meta { font-size: 12.5px; color: var(--ink-3); letter-spacing: .03em; }
+.dc-meta b { color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.dc-bar { margin: 11px 0 13px; }
+.dc-foot { display: flex; align-items: center; gap: 8px; }
+
+/* ⋯ 菜单：卡组操作（重命名 / 删除） */
+.dc-more { flex: none; }
+.dc-menu {
+  position: absolute; right: 12px; top: 50px; z-index: 6; min-width: 208px; padding: 6px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-sm);
+  box-shadow: var(--sh-md); animation: dcMenuIn .16s ease both;
+}
+@keyframes dcMenuIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.dc-mi {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px;
+  background: none; border: none; border-radius: var(--r-xs);
+  color: var(--ink-2); font-size: 13px; letter-spacing: .03em; cursor: pointer; text-align: left;
+}
+.dc-mi:hover { background: var(--paper-2); color: var(--ink); }
+.dc-mi.danger { color: var(--amber); }
+/* 第二击确认：按钮改为醒目的警示态 */
+.dc-mi.confirm { background: var(--amber-wash); color: var(--amber); border: 1px solid var(--amber); }
+.dc-warn { margin-top: 4px; padding: 7px 10px 4px; border-top: 1px solid var(--line-2); font-size: 11px; color: var(--ink-3); line-height: 1.7; }
+
+/* 行内重命名 */
+.dc-rename { display: flex; gap: 6px; margin: 10px 0 6px; }
+.dc-rename .field { flex: 1; min-width: 0; padding: 6px 10px; font-size: 14px; }
+
+/* ---------- 二、卡组详情：组内卡列表 ---------- */
+.deck-detail { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line-2); }
+.detail-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 11px; }
+.detail-head .dh-k { font-size: 11.5px; color: var(--ink-3); letter-spacing: .06em; }
+.detail-list { display: flex; flex-direction: column; gap: 8px; max-height: 54vh; overflow-y: auto; }
+/* 行内卡面：点文本在「正面（挖空）⇄ 背面（原文）」之间翻，不跳页 */
+.dk-main { cursor: pointer; }
+.dk-main:hover .dk-front, .dk-main:hover .dk-back { color: var(--accent-ink); }
+.dk-back { font-size: 13px; color: var(--ink); }
+.dk-flip-tip { font-size: 10.5px; color: var(--ink-3); letter-spacing: .05em; }
+
+/* ---------- 三、复习浮层：页内全屏，风格同阅读页闪卡面板 ---------- */
+.fc-stage { position: absolute; inset: 0; z-index: 280; display: flex; flex-direction: column; background: var(--paper); background-image: var(--grain); }
+.fc-stage[hidden] { display: none; }
+/* styles.css 的 .fc-rate 是 display:flex，会盖掉 UA 的 [hidden]（同 .toc-panel 那类问题）——
+   本页显式压回：没翻面时评分排不出现，与 modes.js 里 rate.hidden 的语义一致。
+   只作用于本页浮层，不动全局。 */
+.fc-stage .fc-rate[hidden] { display: none; }
+.fcs-top { display: flex; align-items: center; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--line-2); }
+.fcs-name { font-size: 14px; font-weight: 700; letter-spacing: .04em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcs-prog { margin-left: auto; font-size: 12.5px; color: var(--ink-3); letter-spacing: .06em; font-variant-numeric: tabular-nums; }
+.fcs-body {
+  flex: 1; overflow-y: auto; width: 100%; max-width: 940px; margin: 0 auto;
+  padding: 22px clamp(16px, 6vw, 90px) 28px;
+  display: flex; flex-direction: column; justify-content: center; gap: 0;
+}
+.fcs-key { margin-top: 14px; text-align: center; font-size: 11.5px; color: var(--ink-3); letter-spacing: .05em; }
+.fcs-key kbd { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; margin: 0 2px; background: var(--paper-2); }
+/* 完成小结 */
+.fcs-sum { text-align: center; padding: 20px 0; }
+.fcs-sum .ic { width: 34px; height: 34px; color: var(--accent-ink); margin-bottom: 12px; }
+.fcs-sum .big { font-size: 26px; font-weight: 700; letter-spacing: .03em; }
+.fcs-sum .card-note { margin-top: 10px; }
+
+@media (max-width: 640px) {
+  .deck-grid { grid-template-columns: 1fr; }
+  .dc-menu { right: 8px; left: 8px; min-width: 0; }
+  .fcs-body { padding: 16px 16px 22px; }
+}
+
+/* 已删除的卡组：恢复入口（删除只清调度，高亮还在 —— 一键重新成卡） */
+.gone-strip {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 6px; padding: 12px 15px;
+  border: 1px dashed var(--line); border-radius: var(--r-md); background: var(--paper-2);
+  font-size: 12.5px; color: var(--ink-3); letter-spacing: .02em;
+}
+.gone-strip .ic { color: var(--ink-3); }
+.gone-strip .chip-btn { background: var(--paper); }
+.gone-strip .chip-btn em { font-style: normal; color: var(--ink-3); }
+</style>
+<script src="fonts.js"></script>
+<script src="theme.js"></script>
+</head>
+<body data-page="cards">
+<div class="boot" id="boot" aria-hidden="true">
+  <span class="boot-seal">墨</span>
+  <span class="boot-name">墨读 InkRead</span>
+  <span class="boot-line"></span>
+</div>
+<div class="device">
+  <div class="screen" id="screen">
+    <main class="app-content" id="appContent">
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">闪卡</h1>
+            <p class="page-sub" id="cardsSub">从高亮自动成卡 · 按遗忘曲线复习</p>
+          </div>
+          <div class="cards-stats" id="cardsStats"></div>
+        </div>
+        <div id="cardsBody"></div>
+      </div>
+    </main>
+
+    <!-- 复习浮层：页内全屏（absolute 于 .screen 内，盖住底部标签栏），初始隐藏 -->
+    <div class="fc-stage" id="fcStage" hidden role="dialog" aria-modal="true" aria-label="复习闪卡">
+      <div class="fcs-top">
+        <button class="btn btn-ghost btn-sm" id="fcsExit"><span id="icExit"></span>退出复习</button>
+        <span class="fcs-name" id="fcsName"></span>
+        <span class="fcs-prog" id="fcsProg"></span>
+      </div>
+      <div class="fcs-body" id="fcsBody"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-root" id="toastRoot"></div>
+<script src="mock.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* 存储键（与 api.js / modes.js 同一套语义，不新增旁路）
+     · inkread.cards.v1 —— SRS 调度：{noteId: {ef, ivl, reps, due, last, suspended}}
+       读：API.fetchCards()；写单卡：API.saveCard(id, st)（与阅读页闪卡面板同一条通路）；
+       删除整组调度：api.js 没有删除端点，本页按同一形状直接覆盖写这个键（见 dropDeckCards）。
+     · inkread.decks.v1 —— 卡组自定义名：{docId: name}（本页独有，无历史数据，缺省 {}）。
+     · inkread.cards.gone.v1 —— 「删除卡组」的墓碑：{docId: {at, n}}。
+       为什么需要第三个键：卡是由高亮派生出来的，删掉调度记录后高亮还在，
+       下一帧又会重新成组 —— 与「删除后该组消失」不符，也不符合确认文案里
+       「高亮与笔记不受影响」的承诺（源数据只读，删的是派生视图）。
+       墓碑只记「这篇文档暂不成卡」，两个正式键的形状因此保持不变
+       （cards.v1 始终是 {noteId:{…}}，decks.v1 始终是 {docId:name}）；
+       页面底部给出「重新成卡」入口，一键把墓碑摘掉即恢复。 */
+  var K_DECKS = "inkread.decks.v1";
+  var K_CARDS = "inkread.cards.v1";
+  var K_GONE = "inkread.cards.gone.v1";
+
+  /* ============================================================
+     一、复制自 modes.js 的纯函数（阅读页闪卡面板）
+     —— cards.html 是独立页面，不 import modes.js（那是 reader 页的模块）。
+        以下 ymd / isDue / sm2Update / RATE / makeCloze 与 modes.js 逐字相同
+        （见 modes.js 第 770–829、971–984 行），改一处需两处同步。
+     ============================================================ */
+  function ymd(d) {
+    var x = d || new Date();
+    return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+  }
+  /* 到期判定：从未复习过，或到期日不晚于今天 */
+  function isDueSt(st) {
+    return !st || !st.due || st.due <= ymd();
+  }
+  function isSusp(st) { return !!(st && st.suspended); }
+
+  /* SM-2 简化实现：quality 0–5（<3 判为遗忘，间隔归零重来）。
+     答对后间隔按 1 → 6 → ivl×EF 递增，EF 随评分微调、下限 1.3 ——
+     与 Anki 默认曲线同源，只保留必要参数，原型里不堆整套调度器。 */
+  function sm2Update(quality, st) {
+    var q = Math.max(0, Math.min(5, Math.round(quality)));
+    var s = st || {};
+    var ef = s.ef || 2.5, ivl = s.ivl || 0, reps = s.reps || 0;
+    if (q < 3) {
+      reps = 0;
+      ivl = 1;
+    } else {
+      reps += 1;
+      if (reps === 1) ivl = 1;
+      else if (reps === 2) ivl = 6;
+      else ivl = Math.max(1, Math.round(ivl * ef));
+      ef = Math.max(1.3, ef + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)));
+    }
+    var due = new Date();
+    due.setDate(due.getDate() + ivl);
+    return { ef: Math.round(ef * 100) / 100, ivl: ivl, reps: reps, due: ymd(due), last: ymd() };
+  }
+
+  /* 四档评分对应 SM-2 的 0 / 3 / 4 / 5：比让人记「0–5 该打几分」直观 */
+  var RATE = [
+    ["0", "忘记", "重来"],
+    ["3", "模糊", "明天"],
+    ["4", "记得", "按曲线"],
+    ["5", "熟练", "拉长"]
+  ];
+
+  /* 挖空：取句子中段的一小段（按 id 哈希定长，同一张卡每次挖同一处，不闪跳） */
+  function makeCloze(text, seed) {
+    var s = String(text);
+    var h = 0;
+    for (var i = 0; i < String(seed).length; i++) h = (h * 31 + String(seed).charCodeAt(i)) >>> 0;
+    var len = Math.max(2, Math.min(6, Math.round(s.length * 0.18)));
+    var at = Math.floor((h % 1000) / 1000 * Math.max(0, s.length - len - 2)) + 1;
+    var hole = s.slice(at, at + len);
+    /* 挖到空白或标点就往前挪，避免挖出「，」这种没意义的空 */
+    while (/[\s，。、；：！？,.!?;:]/.test(hole) && at > 0) { at--; hole = s.slice(at, at + len); }
+    return {
+      front: esc(s.slice(0, at)) + '<mark class="fc-hole">' + esc(hole) + "</mark>" + esc(s.slice(at + len))
+    };
+  }
+
+  /* ============================================================
+     二、类别映射（v2.6 要求三的 8 类体系）
+     —— 只做展示映射：未知 / 缺失的 key 原样显示该值（兜底不静默吞掉），
+        排在已知八类之后；类别顺序与方案文档的表格一致。
+     ============================================================ */
+  var CAT_ORDER = ["book", "textbook", "paper", "report", "plan", "note", "comic", "other"];
+  var CAT = {
+    book: { name: "书籍", icon: "book" },
+    textbook: { name: "教材", icon: "book-marked" },
+    paper: { name: "论文", icon: "graduation-cap" },
+    report: { name: "报告", icon: "clipboard-check" },
+    plan: { name: "计划", icon: "list-checks" },
+    note: { name: "笔记", icon: "notebook-pen" },
+    comic: { name: "漫画", icon: "image" },
+    other: { name: "其他", icon: "layers" }
+  };
+  function catRank(t) { var i = CAT_ORDER.indexOf(t); return i < 0 ? CAT_ORDER.length : i; }
+  function catName(t) { return (CAT[t] || {}).name || String(t); }          /* 缺 key → 原值 */
+  function catIcon(t) { return (CAT[t] || {}).icon || "layers"; }
+
+  /* ============================================================
+     三、数据聚合：书架 × 笔记 × 调度
+     卡源口径与阅读页 poolAll 完全一致：
+     kind ∈ {highlight, margin} 且 text 长度 ≥ 8 字（modes.js 第 774–778 行）。
+     ============================================================ */
+  function readDecks() {
+    try {
+      var v = JSON.parse(localStorage.getItem(K_DECKS));
+      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    } catch (e) { return {}; }
+  }
+  function writeDecks(m) { try { localStorage.setItem(K_DECKS, JSON.stringify(m)); } catch (e) {} }
+  function readGone() {
+    try {
+      var v = JSON.parse(localStorage.getItem(K_GONE));
+      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    } catch (e) { return {}; }
+  }
+  function writeGone(m) { try { localStorage.setItem(K_GONE, JSON.stringify(m)); } catch (e) {} }
+  /* 整表覆盖写 cards.v1：删除卡组时要把一批 key 摘掉，逐张 saveCard 做不到 */
+  function writeCardsAll(m) { try { localStorage.setItem(K_CARDS, JSON.stringify(m)); } catch (e) {} }
+
+  var state = {
+    cards: {},        /* inkread.cards.v1 的内存副本 */
+    decks: {},        /* inkread.decks.v1 的内存副本 */
+    gone: {},         /* inkread.cards.gone.v1 的内存副本（已删除的卡组） */
+    open: null,       /* 展开详情的 docId */
+    menu: null,       /* 打开 ⋯ 菜单的 docId */
+    renaming: null,   /* 正在重命名的 docId */
+    confirmDel: null, /* 删除按钮已点第一击的 docId（第二击才真删） */
+    rv: null          /* 复习会话 */
+  };
+
+  function cardSources(notes) {
+    return (notes || []).filter(function (n) {
+      return n && (n.kind === "highlight" || n.kind === "margin") && String(n.text || "").length >= 8;
+    });
+  }
+
+  /* 遍历书架 → 每本书取其笔记里的成卡源 → 组装卡组 —— 阅读页 poolAll 同口径（modes.js 774） */
+  function buildDecks() {
+    var shelf = InkStore.getShelf() || [];
+    var notes = InkStore.getNotes() || [];
+    var byDoc = {};
+    cardSources(notes).forEach(function (n) {
+      var id = n.docId || "";
+      (byDoc[id] || (byDoc[id] = [])).push(n);
+    });
+
+    function makeDeck(docId, title, type, list) {
+      var cards = list.map(function (n) {
+        var st = state.cards[n.id] || null;
+        return { n: n, st: st, susp: isSusp(st), due: !isSusp(st) && isDueSt(st) };
+      });
+      /* 列表顺序：待复习 → 新卡 → 已排期 → 挂起；同档按页码 */
+      cards.sort(function (a, b) {
+        var ra = a.susp ? 3 : a.due ? 0 : (a.st && a.st.due ? 2 : 1);
+        var rb = b.susp ? 3 : b.due ? 0 : (b.st && b.st.due ? 2 : 1);
+        return ra - rb || (a.n.page || 0) - (b.n.page || 0);
+      });
+      var dueN = cards.filter(function (c) { return c.due; }).length;
+      var suspN = cards.filter(function (c) { return c.susp; }).length;
+      var custom = state.decks[docId];
+      return {
+        docId: docId, type: type || "other",
+        bookTitle: title || "未知文档",
+        name: (custom && String(custom).trim()) || title || "未知文档",
+        custom: !!(custom && String(custom).trim()),
+        cards: cards, totalN: cards.length, dueN: dueN, suspN: suspN
+      };
+    }
+
+    var decks = [], seen = {};
+    shelf.forEach(function (d) {
+      seen[d.id] = 1;
+      var list = byDoc[d.id];
+      if (!list || !list.length) return;      /* 没有成卡源的书不出现 */
+      if (state.gone[d.id]) return;           /* 已删除的卡组：墓碑在就不重新成组（高亮仍在） */
+      decks.push(makeDeck(d.id, d.title, d.type, list));
+    });
+    /* 笔记所属文档已不在书架（被删除 / 导入残留）：也成组，归入「其他」，名字可清 */
+    Object.keys(byDoc).forEach(function (docId) {
+      if (seen[docId] || !byDoc[docId].length || state.gone[docId]) return;
+      decks.push(makeDeck(docId, "", "other", byDoc[docId]));
+    });
+    return decks;
+  }
+
+  /* 墓碑对应的文档（还有笔记在的才列出来，可一键重新成卡） */
+  function goneList() {
+    var notes = InkStore.getNotes() || [];
+    var nByDoc = {};
+    cardSources(notes).forEach(function (n) { nByDoc[n.docId || ""] = (nByDoc[n.docId || ""] || 0) + 1; });
+    return Object.keys(state.gone).filter(function (docId) { return nByDoc[docId]; }).map(function (docId) {
+      var doc = null;
+      (InkStore.getShelf() || []).forEach(function (d) { if (d.id === docId) doc = d; });
+      var custom = state.decks[docId];
+      return { docId: docId, n: nByDoc[docId], name: (custom && String(custom).trim()) || (doc && doc.title) || "未知文档" };
+    });
+  }
+
+  /* 类别分组：只显示有卡组的类别；类内按「到期数降序」→ 卡数 → 名称 */
+  function groupDecks(decks) {
+    var groups = [];
+    decks.forEach(function (d) {
+      var g = groups.filter(function (x) { return x.type === d.type; })[0];
+      if (!g) { g = { type: d.type, decks: [] }; groups.push(g); }
+      g.decks.push(d);
+    });
+    groups.forEach(function (g) {
+      g.decks.sort(function (a, b) {
+        return b.dueN - a.dueN || b.totalN - a.totalN || String(a.name).localeCompare(String(b.name), "zh");
+      });
+    });
+    groups.sort(function (a, b) {
+      return catRank(a.type) - catRank(b.type) || String(a.type).localeCompare(String(b.type));
+    });
+    return groups;
+  }
+
+  /* ============================================================
+     四、渲染
+     ============================================================ */
+  function render() {
+    var decks = buildDecks();
+    renderHead(decks);
+    renderBody(decks);
+  }
+
+  function renderHead(decks) {
+    var all = 0, due = 0, susp = 0;
+    decks.forEach(function (d) {
+      all += d.totalN; due += d.dueN; susp += d.suspN;
+    });
+    qs("#cardsSub").textContent = "从高亮自动成卡 · 按遗忘曲线复习 · 共 " + decks.length + " 个卡组";
+    qs("#cardsStats").innerHTML = [
+      { k: "总卡数", v: all, i: "layers" },
+      { k: "今日到期", v: due, i: "calendar-days" },
+      { k: "已挂起", v: susp, i: "minus-circle" }
+    ].map(function (c) {
+      return '<span class="chip">' + icon(c.i, 14) + c.k + "　<b>" + c.v + "</b></span>";
+    }).join("");
+  }
+
+  function emptyState() {
+    return '<div class="empty">' + icon("layers", 30) +
+      "<p>还没有可以复习的卡<br>先到阅读页高亮几句话，闪卡会自动生成</p>" +
+      '<div class="row" style="justify-content:center;margin-top:16px">' +
+        '<a class="btn btn-accent" href="index.html">' + icon("library", 15) + "去书架</a>" +
+      "</div></div>";
+  }
+
+  function deckCardHTML(d) {
+    var more = state.menu === d.docId;
+    var ren = state.renaming === d.docId;
+    /* 进度条 = 已排期（不在到期）比例：一眼看出这组清到什么程度 */
+    var pct = d.totalN ? Math.round((d.totalN - d.dueN) / d.totalN * 100) : 0;
+    var canReview = d.totalN - d.suspN > 0;
+    return '<article class="deck-card" data-deck="' + esc(d.docId) + '">' +
+      '<div class="dc-top">' +
+        '<span class="chip chip-accent">' + icon(catIcon(d.type), 13) + esc(catName(d.type)) + "</span>" +
+        (d.custom ? '<span class="chip">' + icon("square-pen", 12) + "自定名</span>" : "") +
+        (d.suspN ? '<span class="chip chip-amber">' + icon("minus-circle", 12) + "挂起 " + d.suspN + "</span>" : "") +
+        '<span class="spacer"></span>' +
+        '<button class="btn btn-ghost btn-sm dc-more" data-more="' + esc(d.docId) + '" title="卡组操作" aria-label="卡组操作">' + icon("ellipsis", 16) + "</button>" +
+      "</div>" +
+      (ren
+        ? '<div class="dc-rename">' +
+            '<input class="field" data-rename-input="' + esc(d.docId) + '" value="' + esc(d.custom ? d.name : "") + '" placeholder="' + esc(d.bookTitle) + '" aria-label="卡组名">' +
+            '<button class="btn btn-accent btn-sm" data-rename-ok="' + esc(d.docId) + '">保存</button>' +
+            '<button class="btn btn-ghost btn-sm" data-rename-cancel="1">取消</button>' +
+          "</div>"
+        : '<h3 class="dc-name" data-open="' + esc(d.docId) + '" title="' + esc(d.bookTitle) + '">' + esc(d.name) + "</h3>") +
+      '<p class="dc-meta">到期 <b>' + d.dueN + "</b> / 共 <b>" + d.totalN + "</b> 张" +
+        (d.custom ? " · " + esc(d.bookTitle) : "") + "</p>" +
+      '<div class="dc-bar"><span class="bar bar-accent"><i style="width:' + pct + '%"></i></span></div>' +
+      '<div class="dc-foot">' +
+        '<button class="btn btn-accent btn-sm" data-review="' + esc(d.docId) + '"' + (canReview ? "" : " disabled title=\"这一组的卡都在挂起中\"") + ">" +
+          icon("play", 14) + "开始复习</button>" +
+        '<button class="btn btn-ghost btn-sm" data-open="' + esc(d.docId) + '">' +
+          icon("list-tree", 14) + (state.open === d.docId ? "收起" : "浏览") + "</button>" +
+      "</div>" +
+      (more
+        ? '<div class="dc-menu">' +
+            '<button class="dc-mi" data-rename="' + esc(d.docId) + '">' + icon("square-pen", 14) + "重命名</button>" +
+            (state.confirmDel === d.docId
+              ? '<button class="dc-mi danger confirm" data-del="' + esc(d.docId) + '">' + icon("alert-triangle", 14) + "确认删除（再点一次）</button>"
+              : '<button class="dc-mi danger" data-del="' + esc(d.docId) + '">' + icon("trash-2", 14) + "删除卡组</button>") +
+            '<p class="dc-warn">' + (state.confirmDel === d.docId
+              ? "删除只清除这一组的<b>调度记录</b>，卡组随之消失；高亮与笔记不受影响。"
+              : "删除 = 只删该组的调度记录；原始高亮与笔记保留，可随时重新成卡。") + "</p>" +
+          "</div>"
+        : "") +
+      "</article>";
+  }
+
+  function cardRowHTML(d, c) {
+    var n = c.n, st = c.st || {};
+    var cloze = makeCloze(n.text, n.id);
+    var status = c.susp
+      ? '<span class="fc-row-status">已挂起</span>'
+      : (c.due
+          ? '<span class="fc-row-status"><b class="fc-due-mark">待复习</b></span>'
+          : '<span class="fc-row-status">' + (st.due ? "排期 " + esc(st.due) : "新卡") + "</span>");
+    var bits = ["P" + (n.page || 1)];
+    if (st.reps) bits.push("连对 " + st.reps);
+    else bits.push("新卡");
+    if (st.ivl) bits.push("间隔 " + st.ivl + " 天");
+    if (n.kind === "margin") bits.push("随笔");
+    return '<div class="fc-row' + (c.susp ? " off" : "") + '" data-cid="' + esc(n.id) + '">' +
+      '<div class="fc-row-main dk-main" data-flip="' + esc(n.id) + '" title="点击翻面">' +
+        '<p class="dk-front" data-side="front">' + cloze.front + "</p>" +
+        '<p class="dk-back" data-side="back" hidden>' + esc(n.text) + "</p>" +
+        '<span class="card-note">' + bits.map(esc).join(" · ") + '<span class="dk-flip-tip">　点卡片翻面</span></span>' +
+      "</div>" +
+      status +
+      '<button class="tool-btn" data-susp="' + esc(n.id) + '">' + (c.susp ? "恢复" : "挂起") + "</button>" +
+      '<a class="tool-btn" href="' + esc(srcLink(d.docId, n.id)) + '" title="回到原文位置">' + icon("arrow-up-right", 14) + "原文</a>" +
+      "</div>";
+  }
+
+  function deckDetailHTML(d) {
+    return '<div class="deck-detail">' +
+      '<div class="detail-head">' +
+        '<span class="dh-k">共 ' + d.totalN + " 张 · 到期 " + d.dueN + " 张" + (d.suspN ? " · 挂起 " + d.suspN + " 张" : "") + "</span>" +
+        '<span class="spacer"></span>' +
+        '<button class="btn btn-accent btn-sm" data-review="' + esc(d.docId) + '">' + icon("play", 14) + "开始复习</button>" +
+        '<button class="btn btn-ghost btn-sm" data-open="' + esc(d.docId) + '">' + icon("chevron-up", 14) + "收起</button>" +
+      "</div>" +
+      '<div class="detail-list">' + d.cards.map(function (c) { return cardRowHTML(d, c); }).join("") + "</div>" +
+      '<p class="card-note" style="margin-top:10px">正面挖空 · 点卡片可看原文；挂起的卡不进复习队列；「原文」回到阅读页对应位置。</p>' +
+      "</div>";
+  }
+
+  function goneStripHTML() {
+    var list = goneList();
+    if (!list.length) return "";
+    return '<div class="gone-strip">' + icon("trash-2", 14) +
+      "<span>已删除的卡组 " + list.length + " 个 · 原始高亮仍在，可随时重新成卡</span>" +
+      '<span class="spacer"></span>' +
+      list.map(function (g) {
+        return '<button class="chip chip-btn" data-restore="' + esc(g.docId) + '" title="重新成卡">' +
+          esc(g.name) + "<em>" + g.n + " 张</em></button>";
+      }).join("") +
+      "</div>";
+  }
+
+  function renderBody(decks) {
+    var box = qs("#cardsBody");
+    if (!decks.length) {
+      var g = goneStripHTML();
+      box.innerHTML = (g ? g : "") + emptyState();
+      return;
+    }
+    box.innerHTML = groupDecks(decks).map(function (g) {
+      return '<section class="cat-block" data-cat="' + esc(g.type) + '">' +
+        '<div class="cat-head">' + icon(catIcon(g.type), 16) + "<h2>" + esc(catName(g.type)) + "</h2>" +
+          '<span class="cat-n">' + g.decks.length + " 组 · " +
+            g.decks.reduce(function (s, d) { return s + d.totalN; }, 0) + " 张</span>" +
+          '<span class="cat-rule"></span>' +
+        "</div>" +
+        '<div class="deck-grid">' + g.decks.map(function (d) {
+          return '<div class="deck-item' + (state.open === d.docId ? " open" : "") + '">' +
+            deckCardHTML(d) + (state.open === d.docId ? deckDetailHTML(d) : "") + "</div>";
+        }).join("") + "</div>" +
+        "</section>";
+    }).join("") + goneStripHTML();
+    if (state.renaming) {
+      var inp = qs('[data-rename-input="' + CSS.escape(state.renaming) + '"]');
+      if (inp) { inp.focus(); inp.select(); }
+    }
+  }
+
+  /* ============================================================
+     五、卡组操作：重命名 / 删除（两击确认）/ 挂起
+     ============================================================ */
+  function findDeck(docId) {
+    var hit = null;
+    buildDecks().forEach(function (d) { if (d.docId === docId) hit = d; });
+    return hit;
+  }
+
+  function saveRename(docId, value) {
+    var name = String(value || "").trim().slice(0, 40);
+    /* 空名 = 恢复书名（删掉自定名这条），不是把卡组叫「」 */
+    if (name) state.decks[docId] = name; else delete state.decks[docId];
+    writeDecks(state.decks);
+    state.renaming = null;
+    render();
+    toast(name ? "已重命名为「" + name + "」· 已本地保存" : "已恢复书名", "square-pen");
+  }
+
+  /* 删除卡组：只删该组所有卡的调度记录（cards.v1 对应 key）+ 自定名，
+     原始高亮与笔记一律保留；加一条墓碑让该组不再自动重新成卡（可一键恢复）。 */
+  function dropDeck(docId) {
+    var d = findDeck(docId);
+    if (!d) return;
+    var n = 0;
+    d.cards.forEach(function (c) { if (state.cards[c.n.id]) { delete state.cards[c.n.id]; n++; } });
+    writeCardsAll(state.cards);
+    if (state.decks[docId]) { delete state.decks[docId]; writeDecks(state.decks); }
+    state.gone[docId] = { at: new Date().toISOString().slice(0, 16).replace("T", " "), n: d.totalN };
+    writeGone(state.gone);
+    state.menu = null; state.confirmDel = null;
+    if (state.open === docId) state.open = null;
+    render();
+    toast("已删除「" + d.name + "」的调度记录（" + n + " 条）· 高亮与笔记不受影响", "trash-2");
+  }
+
+  /* 重新成卡：摘掉墓碑，该文档的高亮立刻按「新卡」重新成组 */
+  function restoreDeck(docId) {
+    delete state.gone[docId];
+    writeGone(state.gone);
+    render();
+    toast("已重新成卡 · 全部按新卡从头开始排期", "layers");
+  }
+
+  function toggleSusp(noteId) {
+    var cur = state.cards[noteId] || {};
+    var next = Object.assign({}, cur);
+    if (next.suspended) delete next.suspended; else next.suspended = true;
+    state.cards[noteId] = next;
+    API.saveCard(noteId, next);
+    render();
+    toast(next.suspended ? "已挂起，复习队列跳过这张卡" : "已恢复进入复习队列", "layers");
+  }
+
+  /* ============================================================
+     六、复习流（页内全屏浮层）
+     队列 = 该组非挂起卡里的到期卡；无到期则全部（提前复习），与阅读页同口径。
+     ============================================================ */
+  function deckQueue(d) {
+    var active = d.cards.filter(function (c) { return !c.susp; });
+    if (!active.length) return { list: [], ahead: false };
+    var due = active.filter(function (c) { return c.due; });
+    if (!due.length) return { list: active, ahead: true };
+    return { list: due, ahead: false };
+  }
+
+  function startReview(docId) {
+    var d = findDeck(docId);
+    if (!d) return;
+    var q = deckQueue(d);
+    if (!q.list.length) { toast("这一组的卡都在挂起中 · 到详情里恢复后再复习", "minus-circle"); return; }
+    state.rv = { docId: docId, name: d.name, list: q.list, idx: 0, flipped: false, done: false, ahead: q.ahead, reviewed: 0 };
+    qs("#fcStage").hidden = false;
+    renderReview();
+  }
+
+  function exitReview() {
+    qs("#fcStage").hidden = true;
+    state.rv = null;
+    render();          /* 回列表：到期数 / 排期已变 */
+  }
+
+  function flipReview() {
+    var rv = state.rv;
+    if (!rv || rv.done) return;
+    rv.flipped = !rv.flipped;
+    renderReview();
+  }
+
+  function renderReview() {
+    var rv = state.rv, body = qs("#fcsBody");
+    qs("#fcsName").textContent = rv.name;
+    if (rv.done) { renderSummary(body, rv); return; }
+    var c = rv.list[rv.idx];
+    var st = state.cards[c.n.id] || null;
+    var n = c.n;
+    qs("#fcsProg").textContent = (rv.idx + 1) + " / " + rv.list.length;
+    /* 卡头信息：本组还到期多少 / 共多少（与阅读页 fc-due 同一口径） */
+    var d = findDeck(rv.docId);
+    var head = d
+      ? (rv.ahead
+          ? icon("circle-check", 12) + " 这一组今天已清空 · 提前复习 " + rv.list.length + " 张"
+          : icon("calendar-days", 12) + " 到期 <b>" + d.dueN + "</b> 张 · 本组共 " + d.totalN + " 张")
+      : "";
+    body.innerHTML =
+      '<div class="fc-due">' + head +
+        (st && st.last ? '<span class="spacer"></span>上次 ' + esc(st.last) + " · 间隔 " + esc(st.ivl) + " 天" : "") +
+      "</div>" +
+      '<div class="fc-meta"><span>P' + esc(n.page || 1) + " · " + esc(n.at || "本机笔记") + "</span>" +
+        '<span class="spacer"></span><b>' + (rv.idx + 1) + " / " + rv.list.length + "</b></div>" +
+      '<div class="fc-card" id="fcCard" data-flip="' + (rv.flipped ? "on" : "off") + '" role="button" tabindex="0" aria-label="点击卡片看答案">' +
+        '<div class="fc-side fc-front">' +
+          '<span class="fc-tag">挖空</span>' +
+          "<p>" + makeCloze(n.text, n.id).front + "</p>" +
+          '<span class="fc-tip">点击卡片看答案</span>' +
+        "</div>" +
+        '<div class="fc-side fc-back">' +
+          '<span class="fc-tag">原文</span>' +
+          "<p>" + esc(n.text) + "</p>" +
+          '<span class="fc-tip">' + (n.kind === "margin" ? "随笔" : "高亮") + " · P" + esc(n.page || 1) + "</span>" +
+        "</div>" +
+      "</div>" +
+      '<div class="fc-rate" id="fcRate"' + (rv.flipped ? "" : " hidden") + ">" +
+        RATE.map(function (r) {
+          return '<button class="fc-rate-btn" data-q="' + r[0] + '">' + esc(r[1]) + "<em>" + esc(r[2]) + "</em></button>";
+        }).join("") +
+      "</div>" +
+      '<p class="fcs-key"><kbd>空格</kbd>翻面 · <kbd>1</kbd>–<kbd>4</kbd>评分 · <kbd>Esc</kbd>退出</p>';
+  }
+
+  function renderSummary(body, rv) {
+    qs("#fcsProg").textContent = rv.reviewed + " / " + rv.list.length;
+    var d = findDeck(rv.docId);
+    var nextN = 0, near = null;
+    if (d) {
+      d.cards.forEach(function (c) {
+        var st = c.st || {};
+        if (st.due && st.due > ymd()) {
+          nextN++;
+          if (!near || st.due < near) near = st.due;
+        }
+      });
+    }
+    body.innerHTML =
+      '<div class="fcs-sum">' + icon("circle-check", 34) +
+        '<p class="big">复习 ' + rv.reviewed + " 张 · 下次到期 " + nextN + " 张</p>" +
+        '<p class="card-note">' + (near ? "最近一次：" + esc(near) + " · " + nextN + " 张排队中" : "本组暂无排期中的卡") +
+          "<br>间隔按遗忘曲线自动排期（SM-2），已写入本机复习进度。</p>" +
+        '<div class="row" style="justify-content:center;margin-top:18px">' +
+          '<button class="btn btn-accent" id="fcsAgain">再复习一轮</button>' +
+          '<button class="btn btn-ghost" id="fcsBack">回到卡组</button>' +
+        "</div>" +
+      "</div>";
+  }
+
+  /* 评分：sm2Update 结算 → 落 inkread.cards.v1（经 API.saveCard，与阅读页同一通路）→ 下一张 */
+  function rateCard(q) {
+    var rv = state.rv;
+    if (!rv || rv.done || !rv.flipped) return;
+    var c = rv.list[rv.idx];
+    var next = sm2Update(q, state.cards[c.n.id]);
+    state.cards[c.n.id] = next;
+    API.saveCard(c.n.id, next);
+    rv.reviewed++;
+    rv.idx++;
+    rv.flipped = false;
+    if (rv.idx >= rv.list.length) rv.done = true;
+    renderReview();
+    InkFX.flash();
+    toast("已排期：" + next.due + "（间隔 " + next.ivl + " 天）", "calendar-days");
+  }
+
+  /* ============================================================
+     七、事件（委托在容器上：每次重渲染后无需重绑）
+     ============================================================ */
+  qs("#cardsBody").addEventListener("click", function (e) {
+    var t = e.target;
+    var more = t.closest("[data-more]");
+    if (more) {
+      state.menu = state.menu === more.dataset.more ? null : more.dataset.more;
+      state.confirmDel = null;
+      render();
+      return;
+    }
+    var ren = t.closest("[data-rename]");
+    if (ren) { state.renaming = ren.dataset.rename; state.menu = null; state.confirmDel = null; render(); return; }
+    var rk = t.closest("[data-rename-ok]");
+    if (rk) {
+      var input = document.querySelector('[data-rename-input="' + CSS.escape(rk.dataset.renameOk) + '"]');
+      saveRename(rk.dataset.renameOk, input ? input.value : "");
+      return;
+    }
+    if (t.closest("[data-rename-cancel]")) { state.renaming = null; render(); return; }
+    var del = t.closest("[data-del]");
+    if (del) {
+      if (state.confirmDel === del.dataset.del) { dropDeck(del.dataset.del); return; }
+      state.confirmDel = del.dataset.del;      /* 第一击：换成确认态，第二击才删 */
+      render();
+      return;
+    }
+    var rev = t.closest("[data-review]");
+    if (rev) { startReview(rev.dataset.review); return; }
+    var rs = t.closest("[data-restore]");
+    if (rs) { restoreDeck(rs.dataset.restore); return; }
+    var op = t.closest("[data-open]");
+    if (op) {
+      var id = op.dataset.open;
+      state.open = state.open === id ? null : id;
+      state.menu = null; state.confirmDel = null;
+      render();
+      return;
+    }
+    var sp = t.closest("[data-susp]");
+    if (sp) { toggleSusp(sp.dataset.susp); return; }
+    var fl = t.closest("[data-flip]");
+    if (fl) {                                  /* 行内翻面：正面（挖空）⇄ 背面（原文） */
+      var front = fl.querySelector('[data-side="front"]');
+      var back = fl.querySelector('[data-side="back"]');
+      var toBack = !back.hidden;
+      back.hidden = toBack;
+      front.hidden = !toBack;
+      return;
+    }
+  });
+  /* 重命名输入：回车保存 */
+  qs("#cardsBody").addEventListener("keydown", function (e) {
+    var inp = e.target.closest("[data-rename-input]");
+    if (!inp) return;
+    if (e.key === "Enter") { e.preventDefault(); saveRename(inp.dataset.renameInput, inp.value); }
+    else if (e.key === "Escape") { e.preventDefault(); state.renaming = null; render(); }
+  });
+  /* 失焦（点到重命名行之外）也保存，不留半开状态 */
+  qs("#cardsBody").addEventListener("focusout", function (e) {
+    var inp = e.target.closest("[data-rename-input]");
+    if (!inp || !state.renaming) return;
+    var box = inp.closest(".dc-rename");
+    setTimeout(function () {
+      if (box && box.contains(document.activeElement)) return;
+      if (state.renaming === inp.dataset.renameInput) saveRename(inp.dataset.renameInput, inp.value);
+    }, 120);
+  });
+  /* 点空白处收起 ⋯ 菜单（第一击确认态一并复位） */
+  document.addEventListener("click", function (e) {
+    if (!state.menu) return;
+    if (e.target.closest(".dc-menu") || e.target.closest("[data-more]")) return;
+    state.menu = null; state.confirmDel = null;
+    render();
+  });
+
+  /* 复习浮层内的事件 */
+  qs("#fcStage").addEventListener("click", function (e) {
+    if (e.target.closest("#fcsExit") || e.target.closest("#fcsBack")) { exitReview(); return; }
+    if (e.target.closest("#fcsAgain")) {
+      if (!state.rv) return;
+      var id = state.rv.docId; state.rv = null;
+      startReview(id);
+      return;
+    }
+    var q = e.target.closest("[data-q]");
+    if (q) { rateCard(+q.dataset.q); return; }
+    if (e.target.closest("#fcCard")) { flipReview(); }
+  });
+  /* 键盘：空格翻面、1–4 评分、Esc 退出 */
+  document.addEventListener("keydown", function (e) {
+    if (!state.rv || qs("#fcStage").hidden) return;
+    if (e.key === "Escape") { e.preventDefault(); exitReview(); return; }
+    if (e.key === " " || e.key === "Spacebar") { e.preventDefault(); flipReview(); return; }
+    if (e.key >= "1" && e.key <= "4") { e.preventDefault(); rateCard(+RATE[+e.key - 1][0]); }
+  });
+  qs("#icExit").innerHTML = icon("chevron-left", 14);
+
+  /* 从别的页面回来（切回本页 / 书架改了笔记）时重读一次：状态不保鲜 */
+  window.addEventListener("focus", function () {
+    if (state.rv) return;
+    load();
+  });
+
+  /* ============================================================
+     八、启动
+     ============================================================ */
+  function load() {
+    state.decks = readDecks();
+    state.gone = readGone();
+    /* 顺手清掉「墓碑还在、笔记和文档都没了」的残留，别让恢复条无限长大 */
+    var aliveNotes = {};
+    cardSources(InkStore.getNotes() || []).forEach(function (n) { aliveNotes[n.docId || ""] = 1; });
+    var pruned = false;
+    Object.keys(state.gone).forEach(function (docId) {
+      if (!aliveNotes[docId]) { delete state.gone[docId]; pruned = true; }
+    });
+    if (pruned) writeGone(state.gone);
+    return API.fetchCards().then(function (r) {
+      state.cards = (r && r.data) || {};
+      render();
+    }).catch(function () { state.cards = {}; render(); });
+  }
+  load();
+})();
+</script>
+</body>
+</html>

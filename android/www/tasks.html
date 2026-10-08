@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>墨读 InkRead · 任务</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+<script src="fonts.js"></script>
+<script src="theme.js"></script>
+</head>
+<body data-page="tasks">
+<div class="boot" id="boot" aria-hidden="true">
+  <span class="boot-seal">墨</span>
+  <span class="boot-name">墨读 InkRead</span>
+  <span class="boot-line"></span>
+</div>
+<div class="device">
+  <div class="screen" id="screen">
+    <main class="app-content" id="appContent">
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">任务</h1>
+            <p class="page-sub" id="tasksSub"></p>
+          </div>
+          <div class="row">
+            <a class="btn btn-ghost" href="reader.html?doc=plan-01"><span id="icSrc"></span>查看计划原文</a>
+            <button class="btn btn-accent" id="btnBatch"><span id="icBatch"></span>批量分配</button>
+          </div>
+        </div>
+
+        <div class="card card-pad mb-18">
+          <div class="row" style="gap:26px;flex-wrap:wrap">
+            <div class="row" style="gap:16px">
+              <div class="ring" id="dayRing"><i>0%</i></div>
+              <div>
+                <div class="card-title" style="margin:0 0 6px"><span id="icToday"></span>今日清单</div>
+                <div class="card-note" id="dayNote"></div>
+              </div>
+            </div>
+            <span class="spacer"></span>
+            <div class="row wrap" style="gap:10px" id="dayStats"></div>
+          </div>
+          <div class="hr"></div>
+          <div class="row-between mb-12">
+            <div class="seg" id="scopeSeg">
+              <button class="seg-btn on" data-scope="daily">今日清单</button>
+              <button class="seg-btn" data-scope="monthly">月度清单</button>
+            </div>
+            <span class="card-note" id="scopeNote"></span>
+          </div>
+          <div id="dailyWrap"></div>
+          <div id="monthlyWrap" style="display:none"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="modal-mask" id="batchMask" style="display:none">
+  <div class="modal">
+    <div class="modal-head">
+      <h3><span id="icBatchTitle"></span>批量分配任务</h3>
+      <button class="modal-x" id="batchX"></button>
+    </div>
+    <div class="modal-body">
+      <p class="card-note mb-18">把所选范围内的任务指派给同一成员，各端即时同步。</p>
+      <label class="field-label">范围</label>
+      <select class="field" id="batchScope">
+        <option value="daily">全部每日任务（5 项）</option>
+        <option value="monthly">全部月度任务（10 项）</option>
+        <option value="all">全部任务（15 项）</option>
+      </select>
+      <label class="field-label">指派给</label>
+      <select class="field" id="batchWho"></select>
+      <label class="field-label">处理方式</label>
+      <div class="row" style="gap:8px">
+        <button class="chip chip-btn on" id="onlyUndone">仅未打卡</button>
+        <button class="chip chip-btn" id="allTasks">含已打卡</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="batchCancel">取消</button>
+      <button class="btn btn-primary" id="batchConfirm">确认分配</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-root" id="toastRoot"></div>
+<script src="mock.js"></script>
+<script src="md.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+<script src="brain.js"></script>
+<script>
+(function () {
+  var state = { scope: "daily", onlyUndone: true };
+  var ck = InkStore.getCheckins();
+
+  var IC = { icSrc: "book-open", icBatch: "users", icToday: "calendar-days", icBatchTitle: "users" };
+  Object.keys(IC).forEach(function (id) { var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16); });
+  qs("#batchX").innerHTML = icon("x", 18);
+  qs("#batchWho").innerHTML = DB.assignees.map(function (a) { return "<option>" + esc(a) + "</option>"; }).join("");
+
+  /* 任务来源：mock 清单 + 本机导入任务 + 分配覆盖的合并视图（API.localTasks），
+     导入文档确认后生成的任务在这里立即可见；不直接改 mock 原对象。 */
+  var TASKS = (window.API && API.localTasks) ? API.localTasks() : DB.tasks.slice();
+  var impN = Math.max(0, TASKS.length - DB.tasks.length);   /* 导入任务条数 */
+  var daily = TASKS.filter(function (t) { return t.kind === "daily"; });
+  var monthly = TASKS.filter(function (t) { return t.kind === "monthly"; });
+
+  /* 批量分配弹窗里的范围选项：条数按合并后的真实清单给出 */
+  qsa("#batchScope option").forEach(function (o) {
+    var n = o.value === "daily" ? daily.length : o.value === "monthly" ? monthly.length : TASKS.length;
+    o.textContent = o.textContent.replace(/（.*）/, "（" + n + " 项）");
+  });
+
+  function done(id) { return !!ck[id]; }
+
+  function taskCard(t, inTimeline) {
+    var on = done(t.id);
+    var card =
+      '<div class="task-card' + (on ? " done" : "") + '" id="' + t.id + '">' +
+        '<div class="task-time">' + esc(t.time || t.monthLabel) + '<br><span style="font-size:10.5px;color:var(--ink-3)">' + esc(t.week || t.phase) + "</span></div>" +
+        '<div class="task-body">' +
+          '<div class="task-title">' + esc(t.title) + "</div>" +
+          '<div class="task-quote">' + esc(t.quote) +
+            (t.anchor ? '　<a href="reader.html?doc=' + t.docId + "#" + t.anchor + '">查看原文 ›</a>' : "") +
+          "</div>" +
+          '<div class="task-meta">' +
+            '<span class="chip">' + icon("layers", 12) + esc(t.src) + "</span>" +
+            '<span class="chip">' + icon("user", 12) + esc(t.assignee) + "</span>" +
+            (on ? '<span class="chip chip-green">' + icon("circle-check", 12) + "已打卡 " + esc(ck[t.id]) + "</span>"
+                : '<span class="chip chip-amber">' + icon("clock", 12) + "待完成</span>") +
+          "</div>" +
+        "</div>" +
+        '<div class="task-side">' +
+          '<select class="field" data-assign="' + t.id + '">' +
+            DB.assignees.map(function (a) { return "<option" + (a === t.assignee ? " selected" : "") + ">" + esc(a) + "</option>"; }).join("") +
+          "</select>" +
+          (on
+            ? '<span class="stamp">已打卡</span><button class="undo-link" data-undo="' + t.id + '">撤销打卡</button>'
+            : '<button class="btn btn-sm btn-accent" data-check="' + t.id + '">' + icon("stamp", 14) + "打卡</button>") +
+        "</div>" +
+      "</div>";
+    return inTimeline ? '<div class="tl-item' + (on ? " done" : "") + '">' + card + "</div>" : card;
+  }
+
+  function renderDaily() {
+    qs("#dailyWrap").innerHTML = '<div class="day-timeline">' + daily.map(function (t) { return taskCard(t, true); }).join("") + "</div>";
+  }
+
+  function renderMonthly() {
+    qs("#monthlyWrap").innerHTML = DB.months.map(function (m) {
+      var list = monthly.filter(function (t) { return t.month === m.key; });
+      var dn = list.filter(function (t) { return done(t.id); }).length;
+      var pct = list.length ? Math.round(dn / list.length * 100) : 0;
+      return '<div class="month-block">' +
+        '<div class="month-head"><h3>' + esc(m.label) + " · " + esc(m.phase) + "</h3>" +
+          '<span class="bar mh-bar"><i style="width:' + pct + '%"></i></span>' +
+          '<span class="mh-pct">' + dn + "/" + list.length + "</span></div>" +
+        list.map(function (t) { return taskCard(t, false); }).join("") +
+        "</div>";
+    }).join("");
+  }
+
+  function renderHead() {
+    var dn = daily.filter(function (t) { return done(t.id); }).length;
+    var pct = Math.round(dn / daily.length * 100);
+    var ring = qs("#dayRing");
+    ring.style.setProperty("--p", pct);
+    ring.querySelector("i").textContent = pct + "%";
+    var d = new Date();
+    var wk = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
+    qs("#dayNote").innerHTML = d.getFullYear() + " 年 " + (d.getMonth() + 1) + " 月 " + d.getDate() + " 日 · 周" + wk +
+      "<br>已完成 " + dn + " / " + daily.length + " 项" +
+      (impN > 0 ? " · 含导入任务 " + impN + " 项" : " · 来自《2026 考研英语备考全程规划》第四章");
+    var mAll = monthly.length, mDone = monthly.filter(function (t) { return done(t.id); }).length;
+    var total = TASKS.length, tDone = TASKS.filter(function (t) { return done(t.id); }).length;
+    /* 连续打卡没有日期维度，按「今天有打卡 = 1 天，否则 0 天」的保守口径 */
+    var hasCheckin = Object.keys(ck || {}).length > 0;
+    qs("#dayStats").innerHTML = [
+      { k: "今日完成", v: dn + "/" + daily.length, i: "check" },
+      { k: "月度完成", v: mDone + "/" + mAll, i: "calendar-days" },
+      { k: "总完成率", v: Math.round(tDone / total * 100) + "%", i: "target" },
+      { k: "连续打卡", v: (hasCheckin ? 1 : 0) + " 天", i: "flame" }
+    ].map(function (c) {
+      return '<div class="chip" style="padding:7px 13px">' + icon(c.i, 14) + c.k + "　<b>" + c.v + "</b></div>";
+    }).join("");
+    qs("#scopeNote").textContent = state.scope === "daily"
+      ? "每日例行任务 · 与文档第四章逐条对应"
+      : "月度任务 · 与文档第三章逐条对应";
+    qs("#tasksSub").textContent = "从计划文档解析出 " + DB.tasks.length + " 项任务" +
+      (impN > 0 ? " · 另有导入任务 " + impN + " 项" : "") +
+      " · 打卡与分配本地保存";
+  }
+
+  function renderAll() { renderHead(); renderDaily(); renderMonthly(); }
+
+  /* 打卡 / 撤销 / 分配 */
+  document.addEventListener("click", async function (e) {
+    var c = e.target.closest("[data-check]");
+    var u = e.target.closest("[data-undo]");
+    if (c) {
+      var id = c.dataset.check;
+      c.disabled = true;
+      var r = await API.checkin(id);
+      ck = InkStore.getCheckins();
+      InkFX.flash();
+      document.dispatchEvent(new CustomEvent("ink:checkins"));   /* 侧栏 streak 卡即时重画 */
+      renderAll();
+      var el = qs("#" + id);
+      if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+      toast("已打卡 " + r.data.time + " · 已本地保存", "stamp");
+    } else if (u) {
+      await API.undoCheckin(u.dataset.undo);
+      ck = InkStore.getCheckins();
+      document.dispatchEvent(new CustomEvent("ink:checkins"));
+      renderAll();
+      toast("已撤销打卡", "undo-2");
+    }
+  });
+
+  /* 分配落库（inkread.tasks.v1）后同步本会话副本，界面即时反映 */
+  function applyLocalAssign(id, who) {
+    TASKS.forEach(function (t) { if (t.id === id) t.assignee = who; });
+  }
+
+  document.addEventListener("change", async function (e) {
+    var s = e.target.closest("select[data-assign]");
+    if (!s) return;
+    await API.assign(s.dataset.assign, s.value);
+    applyLocalAssign(s.dataset.assign, s.value);
+    renderAll();
+    toast("已分配给 " + s.value + " · 已本地保存", "users");
+  });
+
+  /* 范围切换 */
+  qsa("#scopeSeg .seg-btn").forEach(function (b) {
+    b.addEventListener("click", function () {
+      qsa("#scopeSeg .seg-btn").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on");
+      state.scope = b.dataset.scope;
+      qs("#dailyWrap").style.display = state.scope === "daily" ? "block" : "none";
+      qs("#monthlyWrap").style.display = state.scope === "monthly" ? "block" : "none";
+      renderHead();
+    });
+  });
+
+  /* 批量分配 */
+  var mask = qs("#batchMask");
+  qs("#btnBatch").addEventListener("click", function () { mask.style.display = "grid"; });
+  qs("#batchX").addEventListener("click", function () { mask.style.display = "none"; });
+  qs("#batchCancel").addEventListener("click", function () { mask.style.display = "none"; });
+  mask.addEventListener("click", function (e) { if (e.target === mask) mask.style.display = "none"; });
+  /* Esc 关闭批量分配弹窗（与 index.html 导入弹窗同一套约定） */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || mask.style.display !== "grid") return;
+    mask.style.display = "none";
+  });
+  qs("#onlyUndone").addEventListener("click", function () {
+    state.onlyUndone = true;
+    qs("#onlyUndone").classList.add("on"); qs("#allTasks").classList.remove("on");
+  });
+  qs("#allTasks").addEventListener("click", function () {
+    state.onlyUndone = false;
+    qs("#allTasks").classList.add("on"); qs("#onlyUndone").classList.remove("on");
+  });
+  qs("#batchConfirm").addEventListener("click", async function () {
+    var scope = qs("#batchScope").value, who = qs("#batchWho").value;
+    var list = TASKS.filter(function (t) {
+      if (scope === "daily" && t.kind !== "daily") return false;
+      if (scope === "monthly" && t.kind !== "monthly") return false;
+      if (state.onlyUndone && done(t.id)) return false;
+      return true;
+    });
+    for (var i = 0; i < list.length; i++) {
+      await API.assign(list[i].id, who);
+      applyLocalAssign(list[i].id, who);
+    }
+    mask.style.display = "none";
+    renderAll();
+    toast("已批量分配 " + list.length + " 项给 " + who, "users");
+  });
+
+  renderAll();
+
+  if (location.hash) {
+    setTimeout(function () {
+      var el = qs("#" + CSS.escape(location.hash.slice(1)));
+      if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("flash"); setTimeout(function () { el.classList.remove("flash"); }, 1900); }
+    }, 160);
+  }
+})();
+</script>
+</body>
+</html>

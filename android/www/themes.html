@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>墨读 InkRead · 主题商城</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+<script src="fonts.js"></script>
+<script src="voices-data.js"></script>
+<script src="voices.js"></script>
+<script src="theme.js"></script>
+</head>
+<body data-page="themes">
+<div class="boot" id="boot" aria-hidden="true">
+  <span class="boot-seal">墨</span>
+  <span class="boot-name">墨读 InkRead</span>
+  <span class="boot-line"></span>
+</div>
+<div class="device">
+  <div class="screen" id="screen">
+    <main class="app-content" id="appContent">
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">主题商城</h1>
+            <p class="page-sub" id="thSub"></p>
+          </div>
+          <div class="row">
+            <button class="btn btn-ghost" id="btnNew"><span id="icNew"></span>新建主题</button>
+            <button class="btn btn-ghost" id="btnImport"><span id="icImp"></span>导入主题</button>
+          </div>
+        </div>
+
+        <div class="th-bar">
+          <label class="th-search">
+            <span id="icSearch"></span>
+            <input class="field" id="thSearch" type="search" placeholder="搜索主题名 / 分组 / 描述" aria-label="搜索主题">
+          </label>
+          <div class="seg th-tabs" id="thTabs" role="tablist" aria-label="主题分区">
+            <button class="seg-btn on" data-tab="mine" role="tab" aria-selected="true">我的主题</button>
+            <button class="seg-btn" data-tab="store" role="tab" aria-selected="false">主题商城</button>
+            <button class="seg-btn" data-tab="custom" role="tab" aria-selected="false">我的创作</button>
+            <button class="seg-btn" data-tab="font" role="tab" aria-selected="false">字体</button>
+            <button class="seg-btn" data-tab="voice" role="tab" aria-selected="false">音色</button>
+          </div>
+        </div>
+
+        <div class="th-groups" id="thGroups" role="tablist" aria-label="按分组筛选"></div>
+
+        <div id="thBody"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- 预览弹层 -->
+<div class="modal-mask" id="pvMask" style="display:none">
+  <div class="modal th-modal">
+    <div class="modal-head">
+      <h3><span id="pvIco"></span><span id="pvTitle">主题预览</span></h3>
+      <button class="modal-x" id="pvClose" aria-label="关闭"></button>
+    </div>
+    <div class="modal-body">
+      <div class="th-sample" id="pvBody" data-theme="paper"></div>
+      <div class="th-audit" id="pvAudit"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="pvCopy">基于此主题创建副本</button>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="pvCancel">关闭</button>
+      <button class="btn btn-accent" id="pvApply">应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 主题编辑器（我的创作） -->
+<div class="modal-mask" id="edMask" style="display:none">
+  <div class="modal th-modal">
+    <div class="modal-head">
+      <h3><span id="edIco"></span><span id="edTitle">编辑主题</span></h3>
+      <button class="modal-x" id="edClose" aria-label="关闭"></button>
+    </div>
+    <div class="modal-body">
+      <div class="th-ed-grid">
+        <div class="th-ed-form">
+          <label class="field-label" for="edName">主题名</label>
+          <input class="field" id="edName" type="text" maxlength="12" placeholder="我的主题">
+
+          <label class="field-label">取色</label>
+          <div class="th-colors" id="edColors"></div>
+
+          <label class="field-label" for="edBase">以某套主题为起点</label>
+          <select class="field" id="edBase"></select>
+
+          <div class="th-audit" id="edAudit"></div>
+        </div>
+        <div class="th-ed-pv">
+          <div class="th-sample" id="edPv" data-theme="paper"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="edReset">回到起点</button>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="edCancel">取消</button>
+      <button class="btn btn-primary" id="edSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="thFile" accept="application/json,.json" style="display:none">
+<div class="toast-root" id="toastRoot"></div>
+<script src="mock.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+<script src="brain.js"></script>
+<script>
+(function () {
+  var T = window.InkTheme;
+  var state = { tab: "mine", ftab: "mine", vtab: "mine", group: "all", q: "", draft: null, editK: null, baseK: "paper" };
+
+  var IC = { icNew: "plus", icImp: "upload", icSearch: "search", pvIco: "eye", edIco: "palette" };
+  Object.keys(IC).forEach(function (id) {
+    var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 15);
+  });
+  qs("#pvClose").innerHTML = icon("x", 17);
+  qs("#edClose").innerHTML = icon("x", 17);
+
+  /* ---------- 小工具 ---------- */
+  function toneLabel(t) { return t.tone === "dark" ? "暗底" : "浅底"; }
+  function groupName(g) { return (T.GROUPS.filter(function (x) { return x.k === g; })[0] || {}).name || "主题"; }
+  function hexOf(v) { return T.toHex(v); }
+  /* 从某套内置主题读出 L1 四原色（挂个隐藏节点让 CSS 解析） */
+  function l1Of(k) {
+    var meta = T.metaOf(k);
+    if (meta && meta.custom) return Object.assign({}, meta.l1);
+    var d = document.createElement("div");
+    d.setAttribute("data-theme", k);
+    d.style.cssText = "position:absolute;left:-9999px;top:0;width:1px;height:1px";
+    document.body.appendChild(d);
+    var cs = getComputedStyle(d);
+    var out = {
+      paper: hexOf(cs.getPropertyValue("--paper")),
+      ink: hexOf(cs.getPropertyValue("--ink")),
+      accent: hexOf(cs.getPropertyValue("--accent")),
+      accent2: hexOf(cs.getPropertyValue("--accent-2"))
+    };
+    d.remove();
+    return out;
+  }
+  function toneOf(l1) {
+    var c = l1.paper.replace("#", "");
+    var r = parseInt(c.substr(0, 2), 16) / 255, g = parseInt(c.substr(2, 2), 16) / 255, b = parseInt(c.substr(4, 2), 16) / 255;
+    var lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return lum < 0.35 ? "dark" : "light";
+  }
+  /* 局部套色：给预览样张注入该主题的 L1，不污染全站 */
+  var pvStyle = null;
+  function tintPreview(el, t) {
+    if (!pvStyle) { pvStyle = document.createElement("style"); document.head.appendChild(pvStyle); }
+    if (t.custom) {
+      var id = el.id;
+      pvStyle.textContent = T.l1CSS("#" + id, t) + T.l1CSS("#" + id + " .th-mini", t);
+      el.setAttribute("data-theme", "custom");
+    } else {
+      pvStyle.textContent = "";
+      el.setAttribute("data-theme", t.k);
+    }
+    el.setAttribute("data-tone", t.tone);
+  }
+
+  var SAMPLE =
+    '<div class="th-mini">' +
+      '<h3>第三章 · 阅读的节奏</h3>' +
+      '<p class="th-mini-meta">2026 · 认知科学笔记 · 约 12 分钟</p>' +
+      '<p>阅读的舒适度取决于版心宽度、行高与字距三者的配合。此段用真实正文渲染，便于比较不同主题与版式。</p>' +
+      '<blockquote>好的排版是隐形的——读者只记得内容，不记得字号。</blockquote>' +
+      '<ul class="md-list"><li>行宽控制在每行 40 字以内</li><li>字距与行高同向放大更稳</li></ul>' +
+      '<pre><code>const read = { fs: 17, lh: 2.0 };</code></pre>' +
+      '<p class="th-mini-fx">C<sub>total</sub> = α t̄ + β r + γ L</p>' +
+    "</div>";
+
+  function sampleHTML() { return SAMPLE; }
+
+  /* ---------- 卡片 ---------- */
+  function stateChip(k) {
+    if (T.resolve(T.read()) === k) return '<span class="chip chip-accent th-st">使用中</span>';
+    if (T.isInstalled(k)) return '<span class="chip th-st">已安装</span>';
+    return '<span class="chip th-st th-st-off">未安装</span>';
+  }
+
+  function actsFor(t, ctx) {
+    var cur = T.resolve(T.read()) === t.k;
+    var a = [];
+    if (ctx === "store") {
+      a.push('<button class="btn btn-accent btn-sm" data-a="install">' + icon("download", 13) + "下载</button>");
+      return a.join("");
+    }
+    if (cur) {
+      a.push('<button class="btn btn-sm th-on" disabled aria-disabled="true">' + icon("check", 13) + "使用中</button>");
+      a.push('<button class="btn btn-ghost btn-sm" data-a="retire">停用</button>');
+      a.push('<button class="btn btn-ghost btn-sm" data-a="uninstall" disabled title="使用中的主题不可卸载，请先停用">卸载</button>');
+    } else {
+      a.push('<button class="btn btn-accent btn-sm" data-a="apply">应用</button>');
+      if (ctx === "custom") {
+        a.push('<button class="btn btn-ghost btn-sm" data-a="edit">编辑</button>');
+        a.push('<button class="btn btn-ghost btn-sm" data-a="export">导出</button>');
+        a.push('<button class="btn btn-ghost btn-sm" data-a="remove">删除</button>');
+      } else {
+        a.push('<button class="btn btn-ghost btn-sm" data-a="copy">副本</button>');
+        a.push('<button class="btn btn-ghost btn-sm" data-a="uninstall">卸载</button>');
+      }
+    }
+    return a.join("");
+  }
+
+  /* 主题卡同步显示该主题的字体配对，形成「主题 + 字体」一体化选择 */
+  function pairLineHTML(k) {
+    if (!window.InkFonts) return "";
+    var pn = InkFonts.pairNames(k);
+    /* 品牌族等带 latinBody 的主题：标题字与拉丁正文面分列，如「思源宋体 · Poppins / Lora」 */
+    var latin = pn.latinBody ? esc(pn.latin) + " / " + esc(pn.latinBody) : esc(pn.latin);
+    return '<div class="th-fonts" title="该主题的字体配对：标题 ' + esc(pn.latin) +
+      (pn.latinBody ? "、拉丁正文 " + esc(pn.latinBody) : "") + '">' + icon("type", 12) +
+      "<span>" + esc(pn.zh) + "</span><i>·</i><span>" + latin + "</span></div>";
+  }
+
+  function cardHTML(t, ctx) {
+    /* 自建主题把 L1 四原色写成行内变量：多张自建卡同屏时各自套色，互不串色 */
+    return '<article class="th-card" data-k="' + t.k + '" data-ctx="' + ctx + '">' +
+      '<button class="th-face" data-a="preview" data-theme="' + (t.custom ? "custom" : t.k) +
+        '" data-tone="' + t.tone + '" style="' + (t.custom ? T.l1Vars(t) : "") +
+        '" aria-label="预览 ' + esc(t.name) + '">' +
+        '<i class="th-sw"><b></b></i>' +
+        '<span class="th-face-nm">' + esc(t.name) + "</span>" +
+      "</button>" +
+      '<div class="th-info">' +
+        '<div class="th-nm"><b>' + esc(t.name) + "</b>" + stateChip(t.k) + "</div>" +
+        '<div class="th-desc">' + esc(t.d || "") + "</div>" +
+        '<div class="th-tags"><span class="chip th-tag">' + (t.custom ? "我的创作" : groupName(t.g)) + "</span>" +
+          '<span class="chip th-tag">' + toneLabel(t) + "</span></div>" +
+        pairLineHTML(t.k) +
+        '<div class="th-acts">' + actsFor(t, ctx) + "</div>" +
+      "</div>" +
+    "</article>";
+  }
+
+  /* ---------- 数据筛选 ---------- */
+  function match(t) {
+    if (state.group !== "all" && t.g !== state.group) return false;
+    if (!state.q) return true;
+    var s = (t.name + " " + (t.d || "") + " " + groupName(t.g)).toLowerCase();
+    return s.indexOf(state.q) >= 0;
+  }
+
+  function render() {
+    var inst = T.installed(), cur = T.resolve(T.read());
+    var mine = T.storeList().filter(function (t) { return t.installed; }).concat(T.customList());
+    var store = T.storeList().filter(function (t) { return !t.installed; });
+    var custom = T.customList();
+
+    qsa("#thTabs .seg-btn").forEach(function (b) {
+      var on = b.dataset.tab === state.tab;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on);
+    });
+    qs("#thSearch").placeholder = state.tab === "font" ? "搜索字体名 / 英文名 / 气质"
+      : state.tab === "voice" ? "搜索音色名 / 嗓音 / 用途" : "搜索主题名 / 分组 / 描述";
+
+    /* 字体是独立资产，与主题并列成第四分区 */
+    if (state.tab === "font") { renderFonts(); return; }
+    /* 音色是朗读的「配置资产」，与字体同构，并列成第五分区 */
+    if (state.tab === "voice") { renderVoices(); return; }
+
+    var list = state.tab === "mine" ? mine : state.tab === "store" ? store : custom;
+    list = list.filter(match);
+
+    var body = qs("#thBody");
+    if (!list.length) {
+      body.innerHTML = '<div class="empty">' + icon("palette", 30) + "<p>" +
+        (state.tab === "store" ? "商城里的主题都已安装 —— 去「我的主题」看看" :
+         state.tab === "custom" ? "还没有自建主题。任选一套主题，点「副本」即可开始调色。" :
+         "没有匹配的主题，换个关键词试试") + "</p></div>";
+    } else {
+      body.innerHTML = '<div class="th-grid">' + list.map(function (t) {
+        return cardHTML(t, state.tab === "store" ? "store" : state.tab === "custom" ? "custom" : "mine");
+      }).join("") + "</div>";
+    }
+
+    qs("#thSub").textContent = "已安装 " + (inst.length + custom.length) + " 套 · 商城可下载 " +
+      store.length + " 套 · 我的创作 " + custom.length + " 套 · 当前「" + nameOf(cur) + "」";
+
+    renderGroups();
+  }
+
+  /* ---------- 字体分区：我的字体 / 字体商城 ---------- */
+  /* 样张按需加载：卡片滚进视口才注入字体，避免一次性拉 20+ 款 CJK */
+  var fObs = null;
+  function observeSamples() {
+    var els = qsa(".ft-face[data-fk]");
+    if (!("IntersectionObserver" in window)) { els.forEach(function (el) { InkFonts.ensure(el.dataset.fk); }); return; }
+    if (fObs) fObs.disconnect();
+    fObs = new IntersectionObserver(function (ents) {
+      ents.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        InkFonts.ensure(en.target.dataset.fk);
+        fObs.unobserve(en.target);
+      });
+    }, { rootMargin: "240px" });
+    els.forEach(function (el) { fObs.observe(el); });
+  }
+
+  /* 某款字体被哪些主题配对使用 —— 让「主题 × 字体」的关系可回溯 */
+  function usedBy(k) {
+    var out = [];
+    Object.keys(InkFonts.PAIR).forEach(function (tk) {
+      var p = InkFonts.PAIR[tk];
+      if ((p.zh === k || p.latin === k || p.latinBody === k) && T.metaOf(tk)) out.push(T.metaOf(tk).name);
+    });
+    return out;
+  }
+
+  function fontCardHTML(f, ctx) {
+    var builtin = InkFonts.PRELOAD.indexOf(f.k) >= 0;
+    var acts = ctx === "store"
+      ? '<button class="btn btn-accent btn-sm" data-fa="enable">' + icon("download", 13) + "启用</button>"
+      : (builtin
+          ? '<button class="btn btn-sm th-on" disabled>' + icon("check", 13) + "内置常备</button>"
+          : '<button class="btn btn-accent btn-sm" data-fa="apply">应用为正文</button>' +
+            '<button class="btn btn-ghost btn-sm" data-fa="disable">停用</button>');
+    var ub = usedBy(f.k);
+    return '<article class="ft-card" data-fk="' + f.k + '" data-ctx="' + ctx + '">' +
+      '<div class="ft-face" data-fk="' + f.k + '" style="font-family:var(--font-' + f.k + ')" aria-hidden="true">' +
+        '<span class="ft-big">' + (f.kind === "zh" ? "墨读字里" : "InkRead") + "</span>" +
+        '<span class="ft-aa">Aa Bb 0123</span>' +
+      "</div>" +
+      '<div class="ft-info">' +
+        '<div class="ft-nm"><b style="font-family:var(--font-' + f.k + ')">' + esc(f.name) + "</b>" +
+          '<span class="chip th-tag">' + (f.kind === "zh" ? "中文" : "拉丁") + "</span>" +
+          (builtin ? '<span class="chip th-st">内置</span>' : "") + "</div>" +
+        '<div class="ft-en">' + esc(f.en) + " · " + esc(f.mood) + "</div>" +
+        '<div class="ft-desc">' + esc(f.d) + "</div>" +
+        (ub.length ? '<div class="ft-used">' + icon("palette", 11) + " 配于 " + esc(ub.slice(0, 3).join("、")) +
+          (ub.length > 3 ? " 等 " + ub.length + " 套主题" : "") + "</div>" : "") +
+        '<div class="th-acts">' + acts + "</div>" +
+      "</div>" +
+    "</article>";
+  }
+
+  function renderFonts() {
+    if (!window.InkFonts) return;
+    var all = InkFonts.list();
+    var q = state.q;
+    function hit(f) { return !q || (f.name + " " + f.en + " " + f.mood + " " + f.d).toLowerCase().indexOf(q) >= 0; }
+    var mine = all.filter(function (f) { return f.installed && hit(f); });
+    var store = all.filter(function (f) { return !f.installed && hit(f); });
+    var list = state.ftab === "mine" ? mine : store;
+
+    qs("#thGroups").innerHTML =
+      '<button class="chip chip-btn' + (state.ftab === "mine" ? " on" : "") + '" data-ftab="mine">我的字体 ' + mine.length + "</button>" +
+      '<button class="chip chip-btn' + (state.ftab === "store" ? " on" : "") + '" data-ftab="store">字体商城 ' + store.length + "</button>";
+
+    var body = qs("#thBody");
+    if (!list.length) {
+      body.innerHTML = '<div class="empty">' + icon("type", 30) + "<p>" +
+        (state.ftab === "store" ? "字体商城里的字体都已启用 —— 去「我的字体」看看" : "没有匹配的字体，换个关键词试试") + "</p></div>";
+    } else {
+      body.innerHTML = '<div class="th-grid th-grid-font">' + list.map(function (f) {
+        return fontCardHTML(f, state.ftab === "store" ? "store" : "mine");
+      }).join("") + "</div>";
+      observeSamples();
+    }
+
+    qs("#thSub").textContent = "共 " + all.length + " 款字体（中文 " +
+      all.filter(function (f) { return f.kind === "zh"; }).length + " · 拉丁 " +
+      all.filter(function (f) { return f.kind === "latin"; }).length +
+      "）· 已启用 " + all.filter(function (f) { return f.installed; }).length +
+      " 款 · 每套主题自带配对";
+  }
+
+  /* ---------- 音色分区：我的音色 / 音色商城 ----------
+     目录来自 Mossland Studio 公开音色库：每款带语言 / 性别 / 年龄 / 品类 / 气质标签，
+     并附官方试听样音。试听优先播样音（真声），拉不到才退回本机声线按参数念样文。
+     语速 / 音高只在走本机声线兜底时起作用。 */
+  function voiceUsedBy(k) {
+    if (!window.InkVoice) return [];
+    return InkVoice.usedBy(k).map(function (tk) {
+      var m = T.metaOf(tk); return m ? m.name : tk;
+    });
+  }
+
+  var LANG_NM = { zh: "中文", en: "英文", ja: "日文" };
+  function voiceCardHTML(v, ctx) {
+    var builtin = InkVoice.PRELOAD.indexOf(v.k) >= 0;
+    var cur = InkVoice.current() === v.k;
+    var acts = ctx === "store"
+      ? '<button class="btn btn-accent btn-sm" data-va="install">' + icon("download", 13) + "启用</button>" +
+        '<button class="btn btn-ghost btn-sm" data-va="audition">' + icon("play", 13) + "试听</button>"
+      : (cur
+          ? '<button class="btn btn-sm th-on" disabled>' + icon("check", 13) + "当前音色</button>" +
+            '<button class="btn btn-ghost btn-sm" data-va="audition">' + icon("play", 13) + "试听</button>"
+          : '<button class="btn btn-accent btn-sm" data-va="use">' + icon("check", 13) + "设为朗读</button>" +
+            '<button class="btn btn-ghost btn-sm" data-va="audition">' + icon("play", 13) + "试听</button>" +
+            (builtin ? "" : '<button class="btn btn-ghost btn-sm" data-va="uninstall">停用</button>'));
+    var ub = voiceUsedBy(v.k);
+    var meta = (LANG_NM[v.lang] || v.lang) + " · " + (v.gender === "m" ? "男声" : "女声") +
+      (v.age ? " · " + v.age : "") + (v.cat ? " · " + v.cat : "");
+    return '<article class="vc-card" data-vk="' + v.k + '" data-ctx="' + ctx + '">' +
+      '<div class="vc-face" aria-hidden="true">' +
+        '<span class="vc-wave"><i></i><i></i><i></i><i></i><i></i></span>' +
+        '<span class="vc-tag">' + esc(v.mood) + "</span>" +
+      "</div>" +
+      '<div class="vc-info">' +
+        '<div class="vc-nm"><b>' + esc(v.name) + "</b>" +
+          (v.cloud ? '<span class="chip chip-accent">云音色</span>' : "") +
+          (builtin ? '<span class="chip th-st">内置</span>' : "") +
+          (cur ? '<span class="chip chip-accent">使用中</span>' : "") + "</div>" +
+        '<div class="vc-meta">' + esc(meta) + "</div>" +
+        '<div class="vc-desc">' + esc(v.d) + "</div>" +
+        '<div class="vc-params">语速 <b>' + v.rate.toFixed(2) + "</b><i>·</i>音高 <b>" + v.pitch.toFixed(2) + "</b></div>" +
+        (ub.length ? '<div class="vc-used">' + icon("palette", 11) + " 配于 " + esc(ub.slice(0, 3).join("、")) +
+          (ub.length > 3 ? " 等 " + ub.length + " 套主题" : "") + "</div>" : "") +
+        '<div class="th-acts">' + acts + "</div>" +
+      "</div>" +
+    "</article>";
+  }
+
+  function renderVoices() {
+    if (!window.InkVoice) return;
+    var all = InkVoice.list();
+    var q = state.q;
+    function hit(v) { return !q || (v.name + " " + v.mood + " " + v.d).toLowerCase().indexOf(q) >= 0; }
+    var mine = all.filter(function (v) { return v.installed && hit(v); });
+    var store = all.filter(function (v) { return !v.installed && hit(v); });
+    var list = state.vtab === "mine" ? mine : store;
+
+    qs("#thGroups").innerHTML =
+      '<button class="chip chip-btn' + (state.vtab === "mine" ? " on" : "") + '" data-vtab="mine">我的音色 ' + mine.length + "</button>" +
+      '<button class="chip chip-btn' + (state.vtab === "store" ? " on" : "") + '" data-vtab="store">音色商城 ' + store.length + "</button>";
+
+    var body = qs("#thBody");
+    if (!list.length) {
+      body.innerHTML = '<div class="empty">' + icon("audio-lines", 30) + "<p>" +
+        (state.vtab === "store" ? "音色商城里的音色都已启用 —— 去「我的音色」看看" : "没有匹配的音色，换个关键词试试") + "</p></div>";
+    } else {
+      body.innerHTML = '<div class="th-grid th-grid-voice">' + list.map(function (v) {
+        return voiceCardHTML(v, state.vtab === "store" ? "store" : "mine");
+      }).join("") + "</div>";
+    }
+
+    qs("#thSub").textContent = "共 " + all.length + " 款音色 · 已启用 " +
+      all.filter(function (v) { return v.installed; }).length +
+      " 款 · 朗读仅对书籍开放 · 每套主题自带配对";
+  }
+
+  /* 试听：优先播 Mossland 官方样音 —— 真声，每款天生不同、也不是机械音。
+     样音拉不到（离线 / 链接过期）才退回 Web Speech，用「该音色自己语言的样文」
+     + 同一套选声线逻辑（语言池 → 关键词 → 性别）。
+     —— 旧版只走 Web Speech：中文系统声线就那两三条，24 款音色听着完全一样、
+        且都是机械音；英文音色配中文样文，不是没声就是念成女声。 */
+  var _aud = null;                 /* 正在试听的样音播放器 */
+  function stopAudition() {
+    try { if (_aud) { _aud.pause(); _aud = null; } } catch (e) {}
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
+  }
+  /* 在线 TTS 是否可用：填了密钥、且账号里至少有一款云音色。
+     安卓端（APK）没有本机 /api/tts，试听与朗读都以这条云端链路为主。 */
+  function cloudReady() {
+    try {
+      var c = JSON.parse(localStorage.getItem("inkread.tts.v1") || "{}");
+      if (!c.key) return false;
+      var cv = window.InkVoice ? InkVoice.cloud().filter(function (x) { return x.moss; })[0] : null;
+      return !!(cv && window.API && API.speak);
+    } catch (e) { return false; }
+  }
+  function auditionVoice(k) {
+    var v = window.InkVoice && InkVoice.meta(k);
+    if (!v) return;
+    stopAudition();
+    var tag = "「" + v.name + "」（" + (v.gender === "m" ? "男声" : "女声") +
+      " · " + String(v.lang || "").toUpperCase() + "）";
+    var text = v.demo || InkVoice.DEMO[v.lang] || InkVoice.DEMO.zh;
+    /* ① 神经语音（本地 /api/tts）：与「朗读」同源，真·神经语音、有感情起伏 */
+    if (v.edge && InkVoice.ttsUrl) {
+      var url = InkVoice.ttsUrl(v, text);
+      var a = new Audio(url);
+      _aud = a;
+      var fell = false;
+      var fallback = function () {
+        if (fell) return;
+        fell = true;
+        if (_aud === a) _aud = null;
+        if (cloudReady()) { toast("试听 " + tag + " · 云音色", "audio-lines"); API.speak(text, { voice: v.k }); return; }
+        webSpeak(v, tag);
+      };
+      a.onerror = fallback;
+      a.onended = function () { if (_aud === a) _aud = null; };
+      a.onplay = function () { toast("试听 " + tag + " · 神经语音", "audio-lines"); };
+      /* 8s 还没出声（离线 / 静态托管没有该路由）—— 退回本机声线 */
+      var guard = setTimeout(function () { if (!fell && a.paused) fallback(); }, 8000);
+      a.addEventListener("playing", function () { clearTimeout(guard); });
+      try { a.play().catch(fallback); } catch (e) { fallback(); }
+      return;
+    }
+    /* ② 云端音色自带样音（Moss 等上传录音） */
+    if (v.sample) {
+      var s = new Audio(v.sample);
+      _aud = s;
+      var fell2 = false;
+      var fb2 = function () {
+        if (fell2) return;
+        fell2 = true;
+        if (_aud === s) _aud = null;
+        webSpeak(v, tag);
+      };
+      s.onerror = fb2;
+      s.onended = function () { if (_aud === s) _aud = null; };
+      s.onplay = function () { toast("试听 " + tag + " · 云端样音", "audio-lines"); };
+      var g2 = setTimeout(function () { if (!fell2 && s.paused) fb2(); }, 2500);
+      s.addEventListener("playing", function () { clearTimeout(g2); });
+      try { s.play().catch(fb2); } catch (e) { fb2(); }
+      return;
+    }
+    if (cloudReady()) { toast("试听 " + tag + " · 云音色", "audio-lines"); API.speak(text, { voice: v.k }); return; }
+    webSpeak(v, tag);
+  }
+  window.addEventListener("pagehide", stopAudition);
+  /* 兜底：本机声线，按语言池 + 性别挑，哑火就换下一条 */
+  function webSpeak(v, tag) {
+    var synth = window.speechSynthesis, U = window.SpeechSynthesisUtterance;
+    if (!synth || typeof U !== "function") { toast("本机无可用声线", "alert-triangle"); return; }
+    var text = v.demo || InkVoice.DEMO[v.lang] || InkVoice.DEMO.zh;
+    function tryOne(list, i) {
+      if (i >= list.length) { toast("本机没有「" + v.name + "」可用的声线", "alert-triangle"); return; }
+      var sys = list[i];
+      var u = new U(text);
+      u.voice = sys;
+      u.lang = sys.lang || (v.lang === "en" ? "en-US" : v.lang === "ja" ? "ja-JP" : "zh-CN");
+      u.rate = v.rate; u.pitch = v.pitch;
+      var done = false, ok = false;
+      var t = setTimeout(function () { if (done || ok) return; done = true; tryOne(list, i + 1); }, 1400);
+      u.onstart = function () { ok = true; };
+      u.onend = function () { if (done) return; done = true; clearTimeout(t); };
+      u.onerror = function () { if (done) return; done = true; clearTimeout(t); tryOne(list, i + 1); };
+      try { synth.speak(u); } catch (e) { clearTimeout(t); if (!done) { done = true; tryOne(list, i + 1); } }
+    }
+    var list = (InkVoice.candidates(v, text, synth.getVoices() || []) || []).filter(Boolean);
+    if (!list.length) { toast("本机暂无可用声线", "alert-triangle"); return; }
+    tryOne(list, 0);
+    toast("试听 " + tag + " · 本机声线", "audio-lines");
+  }
+
+  function nameOf(k) { var m = T.metaOf(k); return m ? m.name : k; }
+
+  function renderGroups() {
+    var html = '<button class="chip chip-btn' + (state.group === "all" ? " on" : "") +
+      '" data-group="all">全部</button>' + T.GROUPS.map(function (g) {
+        return '<button class="chip chip-btn' + (state.group === g.k ? " on" : "") +
+          '" data-group="' + g.k + '" title="' + g.note + '">' + g.name + "</button>";
+      }).join("");
+    qs("#thGroups").innerHTML = html;
+  }
+
+  /* ---------- 预览弹层 ---------- */
+  var pvK = null;
+  function openPreview(k) {
+    var t = T.metaOf(k);
+    if (!t) return;
+    pvK = k;
+    qs("#pvTitle").textContent = t.name;
+    var body = qs("#pvBody");
+    body.innerHTML = sampleHTML();
+    tintPreview(body, t);
+    /* 样张按该主题的字体配对渲染，做到「主题 + 字体」一起预览 */
+    var pn = window.InkFonts ? InkFonts.pairFor(k) : null;
+    if (pn) {
+      InkFonts.ensure(pn.zh); InkFonts.ensure(pn.latin);
+      if (pn.latinBody) InkFonts.ensure(pn.latinBody);
+      var docStack = pn.latinBody ? "var(--font-" + pn.latinBody + "), var(--font-" + pn.zh + ")"
+        : "var(--font-" + pn.zh + ")";
+      body.style.setProperty("--doc-font", docStack);
+      body.style.setProperty("--display-font", "var(--font-" + pn.latin + "), var(--font-" + pn.zh + "), var(--font-song)");
+    }
+    var l1 = l1Of(k);
+    var a = T.auditTheme({ l1: l1 });
+    var pnN = window.InkFonts ? InkFonts.pairNames(k) : null;
+    qs("#pvAudit").innerHTML = auditHTML(a, l1, true) +
+      (pnN ? '<div class="pv-fonts">' + icon("type", 12) + "字体配对：<b>" +
+        esc(pnN.zh) + "</b><i>·</i><b>" + esc(pnN.latin) + "</b>" +
+        (pnN.latinBody ? "（拉丁正文 <b>" + esc(pnN.latinBody) + "</b>）" : "") + "</div>" : "");
+    var btn = qs("#pvApply");
+    if (T.resolve(T.read()) === k) {
+      btn.textContent = "使用中";
+      btn.disabled = true;
+    } else if (T.isInstalled(k)) {
+      btn.innerHTML = "应用";
+      btn.disabled = false;
+    } else {
+      btn.innerHTML = icon("download", 14) + "下载并应用";
+      btn.disabled = false;
+    }
+    qs("#pvMask").style.display = "grid";
+  }
+  function closePreview() {
+    qs("#pvMask").style.display = "none";
+    pvK = null;
+  }
+
+  /* 对比度读数：把「看着像」变成「量得出」 */
+  function auditHTML(a, l1, showHex) {
+    var rows = [
+      ["正文 墨 / 纸", a.body, 7, "AAA"],
+      ["实底 字色 / 强调", a.on, 4.5, "AA"]
+    ];
+    return rows.map(function (r) {
+      var ok = r[1] >= r[2];
+      return '<div class="th-audit-row"><span>' + r[0] + "</span><b class=\"" + (ok ? "ok" : "bad") + "\">" +
+        r[1].toFixed(1) + ":1</b><i>" + (ok ? "达标 " + r[3] : "低于 " + r[3] + " " + r[2] + ":1") + "</i></div>";
+    }).join("") +
+    (showHex ? '<div class="ap-readout">' + [["纸", l1.paper], ["墨", l1.ink], ["主强调", l1.accent], ["副强调", l1.accent2]]
+      .map(function (it) {
+        return '<div class="ap-rd"><i style="--c:' + it[1] + '"></i><span>' + it[0] + " " + it[1] + "</span></div>";
+      }).join("") + "</div>" : "");
+  }
+
+  /* ---------- 编辑器 ---------- */
+  var COLS = [["paper", "纸 · 底色"], ["ink", "墨 · 正文"], ["accent", "主强调"], ["accent2", "副强调"]];
+
+  function renderColors(l1) {
+    qs("#edColors").innerHTML = COLS.map(function (c) {
+      return '<div class="th-color" data-c="' + c[0] + '">' +
+        '<input type="color" id="ed-' + c[0] + '" value="' + l1[c[0]] + '" aria-label="' + c[1] + '">' +
+        '<span class="th-color-k">' + c[1] + "</span>" +
+        '<input class="field th-hex" id="edh-' + c[0] + '" type="text" maxlength="7" value="' + l1[c[0]] + '" aria-label="' + c[1] + ' 十六进制值">' +
+      "</div>";
+    }).join("");
+  }
+
+  function draft() {
+    var l1 = state.draft.l1;
+    return { k: state.draft.k, name: qs("#edName").value.trim() || "未命名主题", tone: toneOf(l1), l1: l1, d: "自建主题", custom: true };
+  }
+
+  function edRefresh() {
+    var t = draft();
+    var pv = qs("#edPv");
+    tintPreview(pv, t);
+    var a = T.auditTheme(t);
+    qs("#edAudit").innerHTML = auditHTML(a, t.l1, false) +
+      '<div class="th-audit-note">' + (a.ok
+        ? "符合「正文 AAA 不变式」，可以保存。"
+        : "未达标：正文需 ≥7:1、实底字色需 ≥4.5:1，请调整纸/墨或强调色。") + "</div>";
+    qs("#edSave").disabled = !a.ok;
+    /* 边调边看：把草稿临时套到全站，界面外壳即时变色 */
+    T.previewCustom(t);
+  }
+
+  function openEditor(k, isNew) {
+    var base = k;
+    if (isNew) base = T.resolve(T.read());
+    var l1 = l1Of(base);
+    state.baseK = base;
+    state.editK = isNew ? null : k;
+    state.draft = { k: isNew ? "my-" + Date.now().toString(36) : k, l1: l1 };
+    var meta = isNew ? null : T.metaOf(k);
+    qs("#edTitle").textContent = isNew ? "新建主题" : "编辑主题";
+    qs("#edName").value = meta ? meta.name : (nameOf(base) + " 副本");
+
+    qs("#edBase").innerHTML = T.available().map(function (t) {
+      return '<option value="' + t.k + '"' + (t.k === base ? " selected" : "") + ">" + esc(t.name) + "</option>";
+    }).join("");
+
+    renderColors(l1);
+    edRefresh();
+    qs("#edMask").style.display = "grid";
+    qs("#edName").focus();
+  }
+  function closeEditor() {
+    qs("#edMask").style.display = "none";
+    state.draft = null;
+    state.editK = null;
+    T.endPreview();
+  }
+
+  /* ---------- 动作 ---------- */
+  async function doAction(act, k, ctx, el) {
+    var t = T.metaOf(k);
+    if (act === "preview") { openPreview(k); return; }
+    if (act === "apply") {
+      T.commit({ theme: k });
+      toast("已应用「" + t.name + "」", "palette");
+      render(); return;
+    }
+    if (act === "retire") {
+      T.commit({ theme: "paper" });
+      toast("已停用「" + t.name + "」，文件仍保留", "rotate-ccw");
+      render(); return;
+    }
+    if (act === "install") {
+      if (el) { el.disabled = true; el.innerHTML = icon("loader-circle", 13) + "下载中"; }
+      await API.installTheme(k);
+      toast("已下载「" + t.name + "」，点「应用」启用", "download");
+      render(); return;
+    }
+    if (act === "uninstall") {
+      if (T.resolve(T.read()) === k) { toast("使用中的主题不可卸载，请先停用", "alert-triangle"); return; }
+      await API.uninstallTheme(k);
+      toast("已卸载「" + t.name + "」", "trash-2");
+      render(); return;
+    }
+    if (act === "copy") { openEditor(k, true); return; }
+    if (act === "edit") { openEditor(k, false); return; }
+    if (act === "export") {
+      var txt = JSON.stringify({ name: t.name, tone: t.tone, l1: t.l1 }, null, 2);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(function () { toast("主题 JSON 已复制", "clipboard-check"); },
+          function () { toast("复制失败，请检查浏览器权限", "clipboard-check"); });
+      } else toast("当前环境不支持复制", "clipboard-check");
+      return;
+    }
+    if (act === "remove") {
+      if (T.resolve(T.read()) === k) { toast("使用中的主题不可删除，请先停用", "alert-triangle"); return; }
+      await API.deleteTheme(k);
+      toast("已删除「" + t.name + "」", "trash-2");
+      render();
+    }
+  }
+
+  /* ---------- 事件 ---------- */
+  qs("#thBody").addEventListener("click", function (e) {
+    /* 音色卡：启用 / 设为朗读 / 试听 / 停用 */
+    var vb = e.target.closest("[data-va]");
+    if (vb) {
+      var vcard = vb.closest(".vc-card");
+      var vk = vcard.dataset.vk, v = window.InkVoice && InkVoice.meta(vk);
+      if (!v) return;
+      var vact = vb.dataset.va;
+      if (vact === "install") {
+        InkVoice.install(vk);
+        toast("已启用音色「" + v.name + "」", "download");
+      } else if (vact === "uninstall") {
+        if (InkVoice.current() === vk) { toast("当前音色不可停用，请先换一个", "alert-triangle"); return; }
+        InkVoice.uninstall(vk);
+        toast("已停用「" + v.name + "」", "rotate-ccw");
+      } else if (vact === "use") {
+        InkVoice.setCurrent(vk);
+        toast("朗读音色已切到「" + v.name + "」", "audio-lines");
+      } else if (vact === "audition") {
+        auditionVoice(vk);
+        return;
+      }
+      render();
+      return;
+    }
+    /* 字体卡：启用 / 停用 / 应用为正文 */
+    var fb = e.target.closest("[data-fa]");
+    if (fb) {
+      var card = fb.closest(".ft-card");
+      var k = card.dataset.fk, f = window.InkFonts && InkFonts.meta(k);
+      if (!f) return;
+      var act = fb.dataset.fa;
+      if (act === "enable") {
+        InkFonts.ensure(k); InkFonts.enable(k);
+        toast("已启用「" + f.name + "」，可在 Aa 面板选用", "download");
+      } else if (act === "disable") {
+        InkFonts.disable(k);
+        toast("已停用「" + f.name + "」", "rotate-ccw");
+      } else if (act === "apply") {
+        InkFonts.ensure(k); InkFonts.enable(k);
+        T.commit({ font: k });
+        toast("正文字体已切到「" + f.name + "」", "type");
+      }
+      render();
+      return;
+    }
+    var b = e.target.closest("[data-a]");
+    if (!b) return;
+    var tcard = b.closest(".th-card");
+    doAction(b.dataset.a, tcard.dataset.k, tcard.dataset.ctx, b);
+  });
+
+  qs("#thTabs").addEventListener("click", function (e) {
+    var b = e.target.closest(".seg-btn");
+    if (!b) return;
+    state.tab = b.dataset.tab;
+    render();
+  });
+  qs("#thGroups").addEventListener("click", function (e) {
+    var b = e.target.closest(".chip-btn");
+    if (!b) return;
+    /* 字体分区复用这一行做二级切换：我的字体 / 字体商城 */
+    if (b.dataset.ftab) { state.ftab = b.dataset.ftab; renderFonts(); return; }
+    /* 音色分区复用这一行做二级切换：我的音色 / 音色商城 */
+    if (b.dataset.vtab) { state.vtab = b.dataset.vtab; renderVoices(); return; }
+    state.group = b.dataset.group;
+    render();
+  });
+  qs("#thSearch").addEventListener("input", function () {
+    state.q = this.value.trim().toLowerCase();
+    render();
+  });
+
+  qs("#pvClose").addEventListener("click", closePreview);
+  qs("#pvCancel").addEventListener("click", closePreview);
+  qs("#pvMask").addEventListener("click", function (e) { if (e.target === this) closePreview(); });
+  qs("#pvCopy").addEventListener("click", function () { var k = pvK; closePreview(); openEditor(k, true); });
+  qs("#pvApply").addEventListener("click", async function () {
+    var k = pvK;
+    if (!T.isInstalled(k)) { await API.installTheme(k); }
+    T.commit({ theme: k });
+    toast("已应用「" + nameOf(k) + "」", "palette");
+    closePreview();
+    render();
+  });
+
+  qs("#edClose").addEventListener("click", closeEditor);
+  qs("#edCancel").addEventListener("click", closeEditor);
+  qs("#edMask").addEventListener("click", function (e) { if (e.target === this) closeEditor(); });
+  qs("#edName").addEventListener("input", edRefresh);
+
+  qs("#edColors").addEventListener("input", function (e) {
+    var wrap = e.target.closest(".th-color");
+    if (!wrap) return;
+    var key = wrap.dataset.c;
+    var v = e.target.value.trim();
+    if (e.target.type === "color") {
+      state.draft.l1[key] = v;
+      qs("#edh-" + key).value = v;
+    } else {
+      if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
+      state.draft.l1[key] = v.toLowerCase();
+      qs("#ed-" + key).value = v.toLowerCase();
+    }
+    edRefresh();
+  });
+
+  qs("#edBase").addEventListener("change", function () {
+    state.baseK = this.value;
+    var l1 = l1Of(this.value);
+    state.draft.l1 = l1;
+    renderColors(l1);
+    edRefresh();
+  });
+
+  qs("#edReset").addEventListener("click", function () {
+    var l1 = l1Of(state.baseK);
+    state.draft.l1 = l1;
+    renderColors(l1);
+    edRefresh();
+  });
+
+  qs("#edSave").addEventListener("click", async function () {
+    var t = draft();
+    if (!T.auditTheme(t).ok) { toast("对比度未达标，暂不能保存", "alert-triangle"); return; }
+    await API.saveTheme(t);
+    T.commit({ theme: t.k });
+    toast("已保存并应用「" + t.name + "」", "circle-check");
+    closeEditor();
+    state.tab = "custom";
+    render();
+  });
+
+  qs("#btnNew").addEventListener("click", function () { openEditor(null, true); });
+  qs("#btnImport").addEventListener("click", function () { qs("#thFile").click(); });
+  qs("#thFile").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = async function () {
+      try {
+        var j = JSON.parse(rd.result);
+        if (!j.l1 || !j.l1.paper || !j.l1.ink) throw new Error("bad");
+        var t = {
+          k: "my-" + Date.now().toString(36),
+          name: (j.name || "导入主题").slice(0, 12),
+          tone: j.tone || toneOf(j.l1),
+          l1: { paper: j.l1.paper, ink: j.l1.ink, accent: j.l1.accent || j.l1.ink, accent2: j.l1.accent2 || j.l1.accent || j.l1.ink },
+          d: "导入的主题", custom: true
+        };
+        if (!T.auditTheme(t).ok) { toast("该主题未通过对比度校验，已拒绝导入", "alert-triangle"); return; }
+        await API.saveTheme(t);
+        toast("已导入「" + t.name + "」", "upload");
+        state.tab = "custom";
+        render();
+      } catch (err) { toast("文件格式不正确", "alert-triangle"); }
+    };
+    rd.readAsText(f);
+    this.value = "";
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (qs("#edMask").style.display !== "none") closeEditor();
+    else if (qs("#pvMask").style.display !== "none") closePreview();
+  });
+
+  document.addEventListener("ink:read", render);
+
+  renderGroups();
+  render();
+})();
+</script>
+</body>
+</html>

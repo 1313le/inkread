@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>墨读 InkRead · 书架</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+<style id="index-extra">
+/* ---------- 导入弹窗 · 归类区（仅书架页生效） ----------
+   复用 .seg/.field/.card-title 既有样式，这里只管布局与两处小动效：
+   dropzone 的拖入态、新卡片的一次性描边高亮。 */
+.imp-cls { margin-top: 18px; }
+.imp-cls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px 16px; }
+.imp-cls-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.imp-cls-item.imp-cls-wide { grid-column: 1 / -1; }
+.imp-cls-k { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-3); }
+#impKindSeg { align-self: flex-start; flex-wrap: wrap; }   /* 8 类：宽屏一行，窄屏折行不溢出 */
+#impKindSeg .seg-btn { min-width: 52px; }
+#impGroupNew { margin-top: 2px; }
+/* dropzone 拖入悬停态（drop 事件由页内 JS 处理） */
+#dropzone.dragover { border-color: var(--accent-ink); background: var(--accent-wash); }
+/* 新导入卡片的一次性描边高亮：动画播完由 JS 摘除 .bc-new，不残留样式 */
+@keyframes bcNewGlow {
+  0%, 55% { box-shadow: 0 0 0 3px var(--accent-wash), 0 0 0 1.5px var(--accent-ink); }
+  100% { box-shadow: 0 0 0 3px transparent, 0 0 0 1.5px transparent; }
+}
+.cover-grid .book-card.bc-new { border-radius: var(--r-sm); animation: bcNewGlow 2.2s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .cover-grid .book-card.bc-new { animation: none; box-shadow: 0 0 0 1.5px var(--accent-ink); }
+}
+
+/* ---------- v2.6 · 类别体系（8 类）----------
+   类别配色全部取自既有 token（--green / --amber / --blue / --accent / --ink），
+   四类复合色用 color-mix 由这些 token 现调，不新增一个色值。列表顺序与类别表一致：
+   书籍 / 教材 / 论文 / 报告 / 计划 / 笔记 / 漫画 / 其他。 */
+[data-kind="book"]     { --kc: var(--green); }
+[data-kind="textbook"] { --kc: var(--amber); }
+[data-kind="paper"]    { --kc: var(--blue); }
+[data-kind="report"]   { --kc: color-mix(in oklab, var(--blue) 62%, var(--amber) 38%); }
+[data-kind="plan"]     { --kc: var(--accent); }
+[data-kind="note"]     { --kc: color-mix(in oklab, var(--amber) 62%, var(--ink) 38%); }
+[data-kind="comic"]    { --kc: color-mix(in oklab, var(--accent) 55%, var(--blue) 45%); }
+[data-kind="other"]    { --kc: color-mix(in oklab, var(--ink) 55%, transparent); }
+/* 类别徽标：书架卡片（标题下）、继续阅读卡（chip 内）共用同一份配方 */
+.kchip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; letter-spacing: .08em; line-height: 1;
+  padding: 3px 8px; border-radius: 999px;
+  color: var(--kc, var(--ink-3));
+  border: 1px solid color-mix(in srgb, var(--kc, var(--ink-3)) 42%, transparent);
+  background: color-mix(in oklab, var(--kc, var(--ink-3)) 12%, transparent);
+  white-space: nowrap;
+}
+.kchip .ic { width: 12px; height: 12px; }
+/* 卡下徽标是 .book-meta 里的 span，styles.css 的 .book-meta span（颜色 / 字号）
+   优先级更高，这里必须显式抬回来 —— 否则类徽标只剩底色、文字全是灰的。 */
+.book-meta span.kchip { color: var(--kc, var(--ink-3)); font-size: 10.5px; }
+.book-meta span.kchip .ic { width: 11px; height: 11px; }
+.chip.kchip { color: var(--kc, var(--accent-ink)); font-size: 12px; gap: 6px; }   /* 继续阅读卡：与同排状态 chip 同号 */
+
+/* 类别推荐行（分段下方）：识别中 → AI 推荐 / 按规则推荐；用户手改后整行变灰 */
+.imp-kind-hint {
+  display: flex; align-items: flex-start; gap: 6px; margin-top: 7px;
+  font-size: 11.5px; line-height: 1.65; letter-spacing: .03em;
+  color: var(--kc, var(--accent-ink));
+}
+.imp-kind-hint[hidden] { display: none; }
+.imp-kind-hint .ic { margin-top: 2px; }
+.imp-kind-hint.loading, .imp-kind-hint.off { color: var(--ink-3); }
+.imp-kind-hint.off { opacity: .58; }
+.imp-kind-hint.loading .ic { animation: impSpin .9s linear infinite; }
+@keyframes impSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .imp-kind-hint.loading .ic { animation: none; } }
+
+/* 书架筛选：全部 + 8 类共 9 档 —— 整条横向滚动而不换行爆版；
+   滚动条隐去，末端被裁的按钮本身就是「可以横滑」的提示。 */
+.shelf-tools #kindSeg {
+  flex-wrap: nowrap; max-width: 100%; min-width: 0;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.shelf-tools #kindSeg::-webkit-scrollbar { display: none; }
+.shelf-tools #kindSeg .seg-btn { flex: none; white-space: nowrap; }
+
+/* ≤600px：归类控件竖排，类别分段平铺满行，不溢出；导入弹窗 8 类两行四列 */
+@media (max-width: 600px) {
+  .imp-cls-grid { grid-template-columns: 1fr; }
+  #impKindSeg { display: flex; align-self: stretch; }
+  #impKindSeg .seg-btn { flex: 1 1 22%; min-width: 0; }
+}
+</style>
+<script src="fonts.js"></script>
+<script src="theme.js"></script>
+<script src="scene.js"></script>
+</head>
+<body data-page="library">
+<div class="boot" id="boot" aria-hidden="true">
+  <span class="boot-seal">墨</span>
+  <span class="boot-name">墨读 InkRead</span>
+  <span class="boot-line"></span>
+</div>
+<div class="device">
+  <div class="screen" id="screen">
+    <main class="app-content" id="appContent">
+      <!-- 天幕：主题自带的静态分层场景；动效只在翻页 / 换章 / 进出沉浸那一刻发生一次 -->
+      <div class="scene-band" data-scene-host aria-hidden="true"></div>
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">书架</h1>
+            <p class="page-sub">6 本藏书 · 1 篇论文待批注 · 计划类文档已生成 15 项任务</p>
+          </div>
+          <div class="row">
+            <a class="btn btn-ghost" href="themes.html"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>主题商城</a>
+            <button class="btn btn-ghost" id="btnSync"><span id="syncIco"></span>双端同步</button>
+            <button class="btn btn-accent" id="btnImport"><span id="importIco"></span>导入文档</button>
+          </div>
+        </div>
+
+        <div class="card continue-card" id="continueCard"></div>
+
+        <div class="stat-strip" id="statStrip"></div>
+
+        <div class="shelf-tools">
+          <div class="seg" id="kindSeg">
+            <button class="seg-btn on" data-kind="all">全部</button>
+            <button class="seg-btn" data-kind="book">书籍</button>
+            <button class="seg-btn" data-kind="textbook">教材</button>
+            <button class="seg-btn" data-kind="paper">论文</button>
+            <button class="seg-btn" data-kind="report">报告</button>
+            <button class="seg-btn" data-kind="plan">计划</button>
+            <button class="seg-btn" data-kind="note">笔记</button>
+            <button class="seg-btn" data-kind="comic">漫画</button>
+            <button class="seg-btn" data-kind="other">其他</button>
+          </div>
+          <select class="field" id="groupSel" aria-label="按分组筛选"></select>
+          <div class="search-box">
+            <span id="searchIco"></span>
+            <input class="field" id="shelfSearch" type="search" placeholder="搜索书名、作者或标签…">
+          </div>
+          <span class="spacer"></span>
+          <span class="card-note" id="shelfCount"></span>
+          <button class="btn btn-ghost btn-sm" id="btnManage"></button>
+        </div>
+
+        <div class="cover-grid" id="coverGrid"></div>
+
+        <div class="batch-bar" id="batchBar" hidden>
+          <span class="bb-n">已选 <b id="batchN">0</b> 本</span>
+          <span class="spacer"></span>
+          <select class="field" id="batchGroup" aria-label="移动到分组"></select>
+          <button class="btn btn-ghost btn-sm" id="batchMove" disabled>移动到分组</button>
+          <button class="btn btn-ghost btn-sm" id="batchDel" disabled>删除</button>
+          <button class="btn btn-ghost btn-sm" id="batchCancel">退出管理</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="modal-mask" id="editMask" style="display:none">
+  <div class="modal">
+    <div class="modal-head">
+      <h3><span id="editIco"></span>编辑藏书</h3>
+      <button class="modal-x" id="editClose"></button>
+    </div>
+    <div class="modal-body">
+      <div class="edit-src" id="editSrc"></div>
+      <div class="form-grid">
+        <div class="form-row wide">
+          <label for="fTitle">书名 / 标题</label>
+          <input class="field" id="fTitle" type="text" placeholder="未命名">
+        </div>
+        <div class="form-row">
+          <label for="fAuthor">作者 / 来源</label>
+          <input class="field" id="fAuthor" type="text">
+        </div>
+        <div class="form-row">
+          <label for="fType">分类</label>
+          <select class="field" id="fType">
+            <option value="book">书籍</option>
+            <option value="textbook">教材</option>
+            <option value="paper">论文</option>
+            <option value="report">报告</option>
+            <option value="plan">计划</option>
+            <option value="note">笔记</option>
+            <option value="comic">漫画</option>
+            <option value="other">其他</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="fGroup">分组</label>
+          <input class="field" id="fGroup" type="text" list="groupList" placeholder="未分组">
+          <datalist id="groupList"></datalist>
+        </div>
+        <div class="form-row">
+          <label for="fStatus">阅读状态</label>
+          <select class="field" id="fStatus">
+            <option value="">在读 / 可读</option>
+            <option value="pending">待解析</option>
+          </select>
+        </div>
+        <div class="form-row wide">
+          <label for="fTags">标签（顿号或逗号分隔）</label>
+          <input class="field" id="fTags" type="text" placeholder="文学、散文体">
+        </div>
+        <div class="form-row wide">
+          <label for="fDesc">简介 / 备注</label>
+          <textarea class="field" id="fDesc" placeholder="这本书讲了什么、适合什么时候读…"></textarea>
+        </div>
+        <div class="form-row wide">
+          <label>封面</label>
+          <div class="cover-pick" id="fCover" role="radiogroup" aria-label="封面样式"></div>
+          <div class="cover-img-row">
+            <label class="btn btn-ghost btn-sm" for="fCoverImg">上传封面图片</label>
+            <input type="file" id="fCoverImg" accept="image/*" hidden>
+            <button class="btn btn-ghost btn-sm" id="fCoverImgClear" type="button">清除图片</button>
+            <span class="card-note" id="fCoverImgNote"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="editReset">恢复原值</button>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="editCancel">取消</button>
+      <button class="btn btn-primary" id="editSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="importMask" style="display:none">
+  <div class="modal">
+    <div class="modal-head">
+      <h3><span id="impTitleIco"></span>导入文档 · 解析任务</h3>
+      <button class="modal-x" id="impClose"></button>
+    </div>
+    <div class="modal-body">
+      <div class="dropzone" id="dropzone">
+        <span id="dropIco"></span>
+        <h3>拖入文档，或点击选择文件</h3>
+        <p>支持 Markdown / TXT 全文导入与任务抽取 · DOCX / PDF 暂只归档不解析</p>
+      </div>
+      <input type="file" id="impFile" accept=".md,.markdown,.txt,.pdf,.docx,.png,.jpg,.jpeg,.webp" hidden>
+      <div class="imp-cls" id="impCls">
+        <div class="row-between mb-12">
+          <div class="card-title" style="margin:0"><span id="impClsIco"></span>归类</div>
+          <span class="card-note" id="impClsNote"></span>
+        </div>
+        <div class="imp-cls-grid">
+          <div class="imp-cls-item">
+            <label class="imp-cls-k">类别</label>
+            <div class="seg" id="impKindSeg" role="radiogroup" aria-label="导入类别">
+              <button type="button" class="seg-btn on" data-kind="book">书籍</button>
+              <button type="button" class="seg-btn" data-kind="textbook">教材</button>
+              <button type="button" class="seg-btn" data-kind="paper">论文</button>
+              <button type="button" class="seg-btn" data-kind="report">报告</button>
+              <button type="button" class="seg-btn" data-kind="plan">计划</button>
+              <button type="button" class="seg-btn" data-kind="note">笔记</button>
+              <button type="button" class="seg-btn" data-kind="comic">漫画</button>
+              <button type="button" class="seg-btn" data-kind="other">其他</button>
+            </div>
+            <div class="imp-kind-hint" id="impKindHint" hidden></div>
+          </div>
+          <div class="imp-cls-item">
+            <label class="imp-cls-k" for="impGroup">分组</label>
+            <select class="field" id="impGroup" aria-label="导入分组"></select>
+            <input class="field" id="impGroupNew" type="text" placeholder="输入新分组名" autocomplete="off" style="display:none">
+          </div>
+          <div class="imp-cls-item imp-cls-wide">
+            <label class="imp-cls-k" for="impTags">标签</label>
+            <input class="field" id="impTags" type="text" placeholder="逗号或空格分隔 · 如：考研 词汇（可选）">
+          </div>
+        </div>
+      </div>
+      <div class="steps-panel" id="stepsPanel" style="display:none"></div>
+      <div id="parseResult" style="display:none">
+        <div class="hr"></div>
+        <div class="row-between mb-12">
+          <div class="card-title" style="margin:0"><span id="resIco"></span>解析结果</div>
+          <span class="card-note" id="resNote"></span>
+        </div>
+        <div id="resList"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="impCancel">取消</button>
+      <button class="btn btn-primary" id="impConfirm" disabled>确认导入</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-root" id="toastRoot"></div>
+<script src="mock.js"></script>
+<script src="md.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+<script src="brain.js"></script>
+<script>
+(function () {
+  var progress = InkStore.getProgress();
+  var state = { kind: "all", group: "", q: "", manage: false, sel: {} };
+
+  qs("#syncIco").innerHTML = icon("refresh-cw", 16);
+  qs("#importIco").innerHTML = icon("file-input", 16);
+  qs("#searchIco").innerHTML = icon("search", 16);
+  qs("#impTitleIco").innerHTML = icon("file-input", 18);
+  qs("#dropIco").innerHTML = icon("upload", 32);
+  qs("#resIco").innerHTML = icon("list-checks", 18);
+  qs("#impClsIco").innerHTML = icon("layers", 18);
+  qs("#impClose").innerHTML = icon("x", 18);
+  qs("#impCancel").innerHTML = "";
+  qs("#editIco").innerHTML = icon("pen-line", 18);
+  qs("#editClose").innerHTML = icon("x", 18);
+  qs("#btnManage").innerHTML = icon("list-checks", 15) + "管理";
+
+  /* ---------- 类别体系（v2.6 · 8 类）----------
+     app.js 里的 COVER_KIND / COVER_ICON 只有旧 4 类，这里在页内续上（不改 app.js；
+     旧 4 键不动，mock 数据继续原样显示）—— 名称与图标与类别表一一对应，
+     图标全部取自 app.js ICONS（file-text / circle-ellipsis 未收录，用 scan-text / ellipsis）。 */
+  Object.assign(window.COVER_KIND, { textbook: "教材", report: "报告", note: "笔记", other: "其他" });
+  Object.assign(window.COVER_ICON, {
+    book: "book-open", textbook: "graduation-cap", paper: "scan-text", report: "clipboard-check",
+    plan: "list-checks", note: "notebook-pen", comic: "grid-2x2", other: "ellipsis"
+  });
+  var KINDS8 = ["book", "textbook", "paper", "report", "plan", "note", "comic", "other"];
+  function kindName(t) { return COVER_KIND[t] || "书籍"; }
+  /* 卡下类别徽标（配色由 index-extra 里的 [data-kind] → --kc 供给） */
+  function kindBadge(t) {
+    var k = KINDS8.indexOf(t) >= 0 ? t : "book";
+    return '<span class="kchip" data-kind="' + k + '">' + icon(typeIcon(k), 11) + kindName(k) + '</span>';
+  }
+
+  function pctOf(d) { return Math.max(d.progress || 0, progress[d.id] || 0); }
+  function selectedIds() { return Object.keys(state.sel); }
+
+  /* 继续阅读 */
+  function renderContinue() {
+    var list = shelfList();
+    var d = list.filter(function (x) { return pctOf(x) > 0 && pctOf(x) < 100; })[0] || list[0];
+    if (!d) { qs("#continueCard").style.display = "none"; return; }
+    qs("#continueCard").style.display = "";
+    var p = pctOf(d);
+    /* v2.8：剩余时间 = 该书总字数 × 剩余比例 ÷ 实测速度（原为写死的假文案）。
+       书没存字数（words）时如实显示「待测」，不编一个数。 */
+    var sp = (window.API && API.readSpeed) ? API.readSpeed(d.type) : { wpm: 300, source: "default" };
+    var wpm = Math.max(80, Math.min(1200, sp.wpm || 300));
+    var wpx = Number(d.words) || 0;
+    var remainTxt;
+    if (wpx > 0 && p < 100) {
+      var min = Math.max(1, Math.ceil(wpx * (100 - p) / 100 / wpm));
+      remainTxt = "剩余约 " + (min >= 60 ? (min / 60).toFixed(1) + " 小时" : min + " 分钟");
+    } else {
+      remainTxt = p >= 100 ? "已读完" : "剩余时长待测";
+    }
+    var KIND_NM2 = { book: "书籍", textbook: "教材", paper: "论文", report: "报告", plan: "计划", note: "笔记", comic: "漫画", other: "其他" };
+    var remainTip = sp.source === "default"
+      ? "按平均速度 300 字/分估算 · 多读一会儿将自动用你的实测速度"
+      : sp.source === "kind"
+        ? "按你读「" + (KIND_NM2[sp.kind] || sp.kind) + "」类文档的实测速度 " + wpm + " 字/分估算（越读越准）"
+        : "按你的实测阅读速度 " + wpm + " 字/分估算";
+    qs("#continueCard").innerHTML =
+      '<div class="cover cc-cover"' + coverAttrs(d) + ' style="' + coverStyle(d) + '">' +
+        coverInner(d, { pct: p, progress: false }) +
+      '</div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap">' +
+          '<span class="chip kchip" data-kind="' + (KINDS8.indexOf(d.type) >= 0 ? d.type : "book") + '">' + icon(typeIcon(d.type), 13) + '继续阅读 · ' + kindName(d.type) + '</span>' +
+          '<span class="chip" title="' + esc(remainTip) + '">' + icon("clock", 13) + '已读 ' + p + '% · ' + esc(remainTxt) + '</span></div>' +
+        '<h3>' + esc(d.title) + '</h3>' +
+        '<div class="cc-sub">' + esc(d.author) + ' · ' + esc(d.meta) + '</div>' +
+        '<div class="bar bar-accent" style="max-width:420px"><i style="width:' + p + '%"></i></div>' +
+        '<div class="card-note mt-8">已读 ' + p + '% · 共 ' + (d.pages || 0) + ' 页 · 已标注 15 项任务出处</div>' +
+      '</div>' +
+      '<a class="btn btn-primary" href="reader.html?doc=' + d.id + '">继续</a>';
+  }
+
+  /* ---------- 阅读统计（v2.7 · 四卡升级）----------
+     ① 连续打卡：大数字 + 火焰（InkFlame，30 天周期自底向上填充）；
+     ② 阅读时长 / ③ 阅读字数：卡内小分段「日 · 周 · 月 · 累计」，单位自适应（分钟/小时、字/万字）；
+     ④ 已解析任务：维持原口径（含导入任务的合并视图）。
+     数据链：优先另一组的 API.statsRange / statsStreak（同步或异步皆可），
+     未就绪、抛错、形状不对一律回落 InkStats 页内直读 inkread.stats.v1 自算 —— 两条路径同口径
+     （周一起算周、月年按本机日期、累计取 total、streak 从今天/昨天回数 checks>0）。
+     切档偏好存 inkread.read.v1 的 statSeg.{sec,words}（非法值回落「日」）。
+     刷新时机：加载 + ink:checkins + ink:daychange + storage + 每 60 秒（InkStats.watch）。 */
+  var SEGDEF = [["day", "日"], ["week", "周"], ["month", "月"], ["total", "累计"]];
+  var segFocus = "";
+  function segPref() {
+    var s = (InkStore.getRead() || {}).statSeg || {};
+    function ok(k) {
+      for (var i = 0; i < SEGDEF.length; i++) if (SEGDEF[i][0] === k) return k;
+      return "day";
+    }
+    return { sec: ok(s.sec), words: ok(s.words) };
+  }
+  function segHTML(which, cur, label) {
+    return '<div class="seg stat-seg" role="group" aria-label="' + esc(label) + '">' +
+      SEGDEF.map(function (p) {
+        return '<button type="button" class="seg-btn' + (p[0] === cur ? " on" : "") +
+          '" data-seg="' + which + '" data-k="' + p[0] + '" aria-pressed="' + (p[0] === cur) + '">' + p[1] + "</button>";
+      }).join("") + "</div>";
+  }
+  /* 单卡数值重画：只有这一处 DOM 被换（异步 API 回来校正时用，不动分段状态） */
+  function setStatVal(which, val) {
+    var slot = qs('#statStrip .sc-v[data-v="' + which + '"]');
+    if (slot) slot.innerHTML = val[0] + "<small>" + val[1] + "</small>";
+  }
+  var statSeq = 0;
+  function renderStats() {
+    var seq = ++statSeq;
+    var pref = segPref();
+    var streak = InkStats.streakSmart();
+    /* range 回的是 {sec, words, days}；异步 API 回来时经回调只换那一格的数字 */
+    var secR = InkStats.range(pref.sec, function (r) { if (seq === statSeq) setStatVal("sec", InkStats.fmtSec(r.sec)); });
+    var wordR = InkStats.range(pref.words, function (r) { if (seq === statSeq) setStatVal("words", InkStats.fmtWords(r.words)); });
+    var secVal = InkStats.fmtSec(secR.sec), wordVal = InkStats.fmtWords(wordR.words);
+    var tasksAll = API.localTasks ? API.localTasks() : DB.tasks.slice();
+    var cells = [
+      '<div class="stat-cell sc-streak"><div class="sc-k">' + icon("flame", 14) + "连续打卡</div>" +
+        '<div class="sc-v sc-row"><span class="sc-num' + (streak > 0 ? " is-hot" : "") + '">' + streak + "</span><small>天</small>" +
+          '<span class="sc-flame" title="每 30 天填满一格">' + InkFlame.svg(34, streak) + "</span></div></div>",
+      '<div class="stat-cell"><div class="sc-k">' + icon("clock", 14) + "阅读时长</div>" +
+        '<div class="sc-v" data-v="sec">' + secVal[0] + "<small>" + secVal[1] + "</small></div>" +
+        segHTML("sec", pref.sec, "阅读时长统计口径") + "</div>",
+      '<div class="stat-cell"><div class="sc-k">' + icon("activity", 14) + "阅读字数</div>" +
+        '<div class="sc-v" data-v="words">' + wordVal[0] + "<small>" + wordVal[1] + "</small></div>" +
+        segHTML("words", pref.words, "阅读字数统计口径") + "</div>",
+      '<div class="stat-cell"><div class="sc-k">' + icon("list-checks", 14) + "已解析任务</div>" +
+        '<div class="sc-v">' + tasksAll.length + "<small>项</small></div></div>"
+    ];
+    qs("#statStrip").innerHTML = cells.join("");
+    /* 重画会丢焦点：把焦点还给刚点过的那颗分段按钮 */
+    if (segFocus) {
+      var parts = segFocus.split(":"), b = qs('#statStrip .seg-btn[data-seg="' + parts[0] + '"][data-k="' + parts[1] + '"]');
+      segFocus = "";
+      if (b && b.focus) b.focus();
+    }
+  }
+  /* 切档：点击即换口径并落库（同一口径重复点击不写库） */
+  qs("#statStrip").addEventListener("click", function (e) {
+    var b = e.target.closest(".seg-btn[data-seg]");
+    if (!b) return;
+    var which = b.dataset.seg, k = b.dataset.k, pref = segPref();
+    if (pref[which] === k) return;
+    pref[which] = k;
+    InkStore.setRead({ statSeg: pref });
+    segFocus = which + ":" + k;
+    renderStats();
+  });
+
+  /* 分组下拉：筛选用、批量用、编辑表单的候选值共用同一份 */
+  function fillGroups() {
+    var groups = InkStore.shelfGroups();
+    qs("#groupSel").innerHTML = '<option value="">全部分组</option>' + groups.map(function (g) {
+      return '<option value="' + esc(g.name) + '">' + esc(g.name) + '（' + g.n + '）</option>';
+    }).join("");
+    qs("#groupSel").value = state.group;
+    qs("#groupList").innerHTML = groups.map(function (g) {
+      return '<option value="' + esc(g.name) + '"></option>';
+    }).join("");
+    var names = groups.map(function (g) { return g.name; }).filter(function (n) { return n !== "未分组"; });
+    qs("#batchGroup").innerHTML = '<option value="">未分组</option>' + names.map(function (n) {
+      return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
+    }).join("");
+  }
+
+  /* 封面墙 */
+  function renderGrid() {
+    var list = shelfList().filter(function (d) {
+      if (state.kind !== "all" && d.type !== state.kind) return false;
+      if (state.group && (d.group || "未分组") !== state.group) return false;
+      if (state.q) {
+        var hay = (d.title + d.author + (d.tags || []).join("") + (d.group || "")).toLowerCase();
+        if (hay.indexOf(state.q.toLowerCase()) < 0) return false;
+      }
+      return true;
+    });
+    qs("#shelfCount").textContent = "共 " + list.length + " 本";
+    if (!list.length) {
+      qs("#coverGrid").innerHTML = '<div class="empty" style="grid-column:1/-1">' + icon("search", 30) + '<p>没有匹配的藏书<br>试试其它关键词或切换分类</p></div>';
+      return;
+    }
+    qs("#coverGrid").innerHTML = list.map(function (d) {
+      var p = pctOf(d);
+      var badge = d.status === "pending" ? "待解析" : p > 0 ? "在读" : "未读";
+      return '<div class="book-card' + (state.sel[d.id] ? " on" : "") + '" data-id="' + d.id + '" data-kind="' + (KINDS8.indexOf(d.type) >= 0 ? d.type : "book") + '">' +
+        '<span class="bc-pick">' + icon("check", 14) + '</span>' +
+        '<button class="bc-edit" type="button" data-edit="' + d.id + '" title="编辑" aria-label="编辑《' + esc(d.title) + '》">' + icon("pen-line", 14) + '</button>' +
+        '<a class="bc-link" href="reader.html?doc=' + d.id + '">' +
+          '<div class="cover"' + coverAttrs(d) + ' style="' + coverStyle(d) + '">' +
+            coverInner(d, { pct: p, badge: badge }) +
+          '</div>' +
+          '<div class="book-meta"><b>' + esc(d.title) + '</b>' + kindBadge(d.type) + '<span>' + esc(d.meta) + '</span>' +
+            (d.group ? '<span class="bc-group">' + icon("layers", 12) + esc(d.group) + '</span>' : "") +
+            '<div class="book-tags">' + (d.tags || []).map(function (t) { return '<span class="chip">' + esc(t) + '</span>'; }).join("") + '</div>' +
+          '</div>' +
+        '</a>' +
+      '</div>';
+    }).join("");
+  }
+
+  function refresh() { fillGroups(); renderGrid(); }
+
+  /* ---------- 编辑 / 批量：卡上点击的分派 ---------- */
+  qs("#coverGrid").addEventListener("click", function (e) {
+    var edit = e.target.closest("[data-edit]");
+    if (edit) { openEdit(edit.dataset.edit); return; }
+    if (!state.manage) return;
+    var card = e.target.closest(".book-card");
+    if (!card) return;
+    var id = card.dataset.id;
+    if (state.sel[id]) delete state.sel[id]; else state.sel[id] = 1;
+    card.classList.toggle("on", !!state.sel[id]);
+    syncBatch();
+  });
+
+  /* 分类 / 分组 / 搜索 */
+  qsa("#kindSeg .seg-btn").forEach(function (b) {
+    b.addEventListener("click", function () {
+      qsa("#kindSeg .seg-btn").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on");
+      state.kind = b.dataset.kind;
+      renderGrid();
+    });
+  });
+  qs("#groupSel").addEventListener("change", function (e) { state.group = e.target.value; renderGrid(); });
+  qs("#shelfSearch").addEventListener("input", function (e) { state.q = e.target.value.trim(); renderGrid(); });
+
+  /* ---------- 管理模式 ---------- */
+  qs("#btnManage").addEventListener("click", function () {
+    state.manage = !state.manage;
+    state.sel = {};
+    document.body.classList.toggle("shelf-manage", state.manage);
+    qs("#btnManage").innerHTML = icon(state.manage ? "x" : "list-checks", 15) + (state.manage ? "完成" : "管理");
+    qs("#batchBar").hidden = !state.manage;
+    resetDel();
+    renderGrid();
+    syncBatch();
+  });
+
+  function exitManage() {
+    state.manage = false;
+    state.sel = {};
+    document.body.classList.remove("shelf-manage");
+    qs("#btnManage").innerHTML = icon("list-checks", 15) + "管理";
+    qs("#batchBar").hidden = true;
+    resetDel();
+    refresh();
+  }
+  qs("#batchCancel").addEventListener("click", exitManage);
+
+  function syncBatch() {
+    var n = selectedIds().length;
+    qs("#batchN").textContent = n;
+    qs("#batchMove").disabled = !n;
+    qs("#batchDel").disabled = !n;
+  }
+
+  qs("#batchMove").addEventListener("click", function () {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    var g = qs("#batchGroup").value || "未分组";
+    InkStore.moveDocs(ids, g);
+    toast("已把 " + ids.length + " 本移到「" + g + "」", "layers");
+    exitManage();
+  });
+
+  /* 删除不可撤销：先变红示警，3.2s 内再点一次才真删 */
+  var delTimer = null;
+  function resetDel() {
+    clearTimeout(delTimer);
+    delTimer = null;
+    var b = qs("#batchDel");
+    if (!b) return;
+    b.dataset.armed = "";
+    b.textContent = "删除";
+    b.classList.remove("btn-accent");
+  }
+  qs("#batchDel").addEventListener("click", function () {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    var b = qs("#batchDel");
+    if (b.dataset.armed !== "1") {
+      b.dataset.armed = "1";
+      b.textContent = "再点一次确认";
+      b.classList.add("btn-accent");
+      delTimer = setTimeout(resetDel, 3200);
+      return;
+    }
+    InkStore.removeDocs(ids);
+    resetDel();
+    InkFX.flash();
+    toast("已删除 " + ids.length + " 本藏书", "trash-2");
+    exitManage();
+  });
+
+  /* ---------- 编辑弹窗 ---------- */
+  var editId = null, editOriginal = null, editCover = "spine", editCoverImg = "";
+
+  /* 预览里的封面用「正在编辑的值」，而不是库里的旧值 —— 换排布、换图片要立刻看见 */
+  function editPreviewDoc() {
+    var d = InkStore.getDoc(editId) || {};
+    return Object.assign({}, d, { cover: editCover, coverImg: editCoverImg });
+  }
+  function renderEditSrc() {
+    var d = InkStore.getDoc(editId);
+    if (!d) return;
+    var pv = editPreviewDoc();
+    qs("#editSrc").innerHTML =
+      '<span class="cover es-cover"' + coverAttrs(pv) + ' style="' + coverStyle(pv) + '">' +
+        coverInner(pv, { progress: false }) + '</span>' +
+      '<div><b>' + esc(d.title) + '</b><span class="es-meta">' + (COVER_KIND[d.type] || "书籍") + ' · ' +
+        esc(d.meta || "导入") + ' · ' + (d.pages || 0) + ' 页</span></div>';
+  }
+  /* 六款排布各给一枚小样张：样张用这本书自己的 tone 上色，所见即所得 */
+  function renderCoverPick() {
+    var tone = (InkStore.getDoc(editId) || {}).tone || ["#efe7d6", "#2b2823"];
+    qs("#fCover").innerHTML = COVERS.map(function (c) {
+      var on = c.id === editCover;
+      return '<button type="button" class="cp-btn' + (on ? " on" : "") + '" data-cover-id="' + c.id +
+        '" role="radio" aria-checked="' + on + '" title="' + esc(c.note) + '">' +
+        '<span class="cover cp-sw"' + (editCoverImg ? ' data-img="on"' : "") + ' data-cover="' + c.id +
+          '" style="' + coverStyle({ tone: tone, coverImg: editCoverImg }) + '">' +
+          coverInner({ title: c.name, author: "", motif: "grid", type: "book" }, { progress: false }) +
+        '</span><em>' + esc(c.name) + '</em></button>';
+    }).join("");
+    qs("#fCoverImgNote").textContent = editCoverImg ? "已用图片封面" : "未用图片封面";
+    qs("#fCoverImgClear").disabled = !editCoverImg;
+  }
+  function setEditCover(id) {
+    if (!window.coverById(id)) return;
+    editCover = id;
+    renderCoverPick();
+    renderEditSrc();
+  }
+
+  function openEdit(id) {
+    var d = InkStore.getDoc(id);
+    if (!d) return;
+    editId = id;
+    editOriginal = Object.assign({}, d);
+    editCover = coverOf(d);
+    editCoverImg = d.coverImg || "";
+    renderEditSrc();
+    renderCoverPick();
+    qs("#fTitle").value = d.title || "";
+    qs("#fAuthor").value = d.author || "";
+    qs("#fType").value = d.type || "book";
+    qs("#fGroup").value = d.group || "";
+    qs("#fStatus").value = d.status || "";
+    qs("#fTags").value = (d.tags || []).join("、");
+    qs("#fDesc").value = d.desc || "";
+    qs("#editMask").style.display = "grid";
+  }
+  function closeEdit() {
+    qs("#editMask").style.display = "none";
+    editId = null;
+    editOriginal = null;
+  }
+  qs("#editClose").addEventListener("click", closeEdit);
+  qs("#editCancel").addEventListener("click", closeEdit);
+  qs("#editMask").addEventListener("click", function (e) { if (e.target === qs("#editMask")) closeEdit(); });
+
+  qs("#fCover").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-cover-id]");
+    if (b) setEditCover(b.dataset.coverId);
+  });
+  qs("#fCoverImg").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    qs("#fCoverImgNote").textContent = "正在处理图片…";
+    coverImageFromFile(f).then(function (dataUrl) {
+      editCoverImg = dataUrl;
+      renderCoverPick();
+      renderEditSrc();
+      toast("封面图片已就绪，保存后生效", "image");
+    }).catch(function (err) {
+      renderCoverPick();
+      toast(err.message || "图片处理失败", "alert-triangle");
+    });
+  });
+  qs("#fCoverImgClear").addEventListener("click", function () {
+    editCoverImg = "";
+    renderCoverPick();
+    renderEditSrc();
+  });
+  /* 改标题/作者/分类时预览要跟着走 —— 预览是「保存后会是什么样」的答案 */
+  ["#fTitle", "#fAuthor", "#fType"].forEach(function (sel) {
+    qs(sel).addEventListener("input", function () {
+      if (sel === "#fType") renderCoverPick();
+    });
+    qs(sel).addEventListener("change", renderEditSrc);
+  });
+
+  qs("#editReset").addEventListener("click", function () {
+    if (!editOriginal) return;
+    var d = editOriginal;
+    editCover = coverOf(d);
+    editCoverImg = d.coverImg || "";
+    renderCoverPick();
+    renderEditSrc();
+    qs("#fTitle").value = d.title || "";
+    qs("#fAuthor").value = d.author || "";
+    qs("#fType").value = d.type || "book";
+    qs("#fGroup").value = d.group || "";
+    qs("#fStatus").value = d.status || "";
+    qs("#fTags").value = (d.tags || []).join("、");
+    qs("#fDesc").value = d.desc || "";
+  });
+
+  qs("#editSave").addEventListener("click", function () {
+    if (!editId) return;
+    var tags = qs("#fTags").value.split(/[、,，;；\s]+/).map(function (t) { return t.trim(); }).filter(Boolean);
+    var patch = {
+      title: qs("#fTitle").value.trim() || "未命名",
+      author: qs("#fAuthor").value.trim() || "未署名",
+      type: qs("#fType").value,
+      group: qs("#fGroup").value.trim(),
+      status: qs("#fStatus").value,
+      tags: tags,
+      desc: qs("#fDesc").value.trim(),
+      cover: editCover,
+      coverImg: editCoverImg
+    };
+    var hit = InkStore.updateDoc(editId, patch);
+    InkFX.flash();
+    toast("已保存《" + (hit ? hit.title : patch.title) + "》", "circle-check");
+    closeEdit();
+    refresh();
+    renderContinue();
+  });
+
+  /* ---------- 双端同步（演示）---------- */
+  /* v2.3 真同步：拉取 + 推送走本地服务快照（InkSync，见 app.js）。
+     两端（桌面 / 局域网里的手机访问同一服务）真共享一份数据，不再是演示。 */
+  qs("#btnSync").addEventListener("click", async function () {
+    var b = qs("#btnSync");
+    b.disabled = true;
+    qs("#syncIco").innerHTML = icon("loader-circle", 16);
+    var r = await InkSync.now();
+    qs("#syncIco").innerHTML = icon("refresh-cw", 16);
+    b.disabled = false;
+    InkFX.flash();
+    if (r.offline) { toast("同步服务不可达 · 本机数据仍即时保存", "wifi-off"); return; }
+    if (r.pulled > 0) {
+      toast("已从另一端同步 " + r.pulled + " 项 · 即将刷新", "refresh-cw");
+      setTimeout(function () { location.reload(); }, 900);
+    } else {
+      toast(r.pushed > 0 ? "已推送本机变更 " + r.pushed + " 项" : "两端已一致 · 无需同步", "circle-check");
+    }
+  });
+
+  /* ---------- 导入 / 解析 / 分配 ---------- */
+  var mask = qs("#importMask"), parsed = null;
+  var DEMO_FILE = "2026 考研英语备考全程规划.md";  /* 示例文档：没选真实文件时用 mock 计划的正文演示 */
+  var impFile = null;       /* 拖入 / 选择的 File 对象 */
+  var impText = null;       /* 文件文本（.md/.markdown/.txt 才读得到；DOCX / PDF 为 null） */
+  var impKindManual = "";   /* 用户手动点选的类别（"" = 尚未手动选） */
+  var impKindAuto = "";     /* 识别推荐（AI 或规则）自动选中的类别 */
+  var impGroupSel = "";     /* 分组下拉的非「新建」所选值（"" = 未分组） */
+  var parsedOwners = {};    /* 解析结果里逐条选择的负责人（确认导入时随任务一起落库） */
+
+  /* ---------- 轻量 Markdown → 正文块解析器 ----------
+     按行解析：#/##/### 标题；- / * / + 无序列表；1. 有序列表；> 引文；
+     其余每行成段；空行只作分隔。块形状与 mock DB.contents 一致，
+     确认导入后经 importDoc 落 inkread.contents.v1，阅读页即可读。 */
+  function mdToBlocks(text) {
+    var lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+    var out = [], cur = null, hn = 0;
+    var flush = function () { if (cur && cur.items && cur.items.length) out.push(cur); cur = null; };
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (!t) { flush(); continue; }
+      var h = t.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        flush();
+        out.push({ type: "h" + Math.min(3, h[1].length), id: "h-" + (++hn), x: h[2].trim() });
+        continue;
+      }
+      if (/^[-*+]\s+/.test(t)) {
+        if (!cur || cur.type !== "list") { flush(); cur = { type: "list", items: [] }; }
+        cur.items.push(t.replace(/^[-*+]\s+/, "").trim());
+        continue;
+      }
+      if (/^\d+[.、)]\s+/.test(t)) {
+        if (!cur || cur.type !== "olist") { flush(); cur = { type: "olist", items: [] }; }
+        cur.items.push(t.replace(/^\d+[.、)]\s+/, "").trim());
+        continue;
+      }
+      if (/^>\s?/.test(t)) { flush(); out.push({ type: "quote", x: t.replace(/^>\s?/, "").trim() }); continue; }
+      if (/^(-{3,}|\*{3,})$/.test(t)) { flush(); continue; }   /* 分隔线跳过 */
+      flush();
+      out.push({ type: "p", x: t });
+    }
+    flush();
+    return out;
+  }
+
+  /* 只有纯文本类文件读得出内容；DOCX / PDF / 图片是二进制，原型不硬啃（不生成 blocks） */
+  function isTextFile(name) { return /\.(md|markdown|txt)$/i.test(String(name || "")); }
+  function readFileText(f) {
+    return new Promise(function (resolve) {
+      if (!f || !isTextFile(f.name)) { resolve(null); return; }
+      var fr = new FileReader();
+      fr.onerror = function () { resolve(null); };
+      fr.onload = function () { resolve(String(fr.result || "")); };
+      fr.readAsText(f);
+    });
+  }
+
+  /* 示例文档的文本：从 mock 计划的正文块反拼（标题 + 列表 + 引文），保持演示完整 */
+  function demoText() {
+    var lines = [];
+    (DB.contents["plan-01"] || []).forEach(function (b) {
+      if (b.type === "h1") lines.push("# " + b.x);
+      else if (b.type === "h2") lines.push("## " + b.x);
+      else if (b.type === "h3") lines.push("### " + b.x);
+      else if (b.type === "quote") lines.push("> " + b.x);
+      else if (b.items) b.items.forEach(function (it) { lines.push("- " + (typeof it === "string" ? it : it.x)); });
+    });
+    return lines.join("\n");
+  }
+
+  /* 类别分段：只高亮某一档 */
+  function setImpKindSeg(kind) {
+    qsa("#impKindSeg .seg-btn").forEach(function (b) {
+      b.classList.toggle("on", b.dataset.kind === kind);
+    });
+  }
+
+  /* ---------- 类别识别与推荐（v2.6 · 任务 2）----------
+     选定文件、解析跑完后异步调 API.classifyDoc：
+       · 有模型 → AI 做 8 选 1 的「选择题」（system 里附 kindmap 个性化上下文）；
+       · 无模型 / 失败 → 本地规则（文件名 / 正文 → 关键词表，先查 kindmap 历史归类）。
+     结果自动选中推荐项，并在分段下方给出推荐行；用户点其他类别 = 手改，推荐行变灰。 */
+  var impRec = null;      /* {kind, reason, by, learned, off, loading} —— 本次识别结果 */
+  var impRecSeq = 0;      /* 代际令牌：换文件 / 关弹窗后丢弃迟到的旧响应 */
+  var impKindPromise = null;   /* 在飞的识别请求：确认导入时给它一个短宽限期（见下） */
+
+  function renderKindHint() {
+    var el = qs("#impKindHint");
+    if (!impRec) {
+      el.hidden = true; el.className = "imp-kind-hint"; el.removeAttribute("data-kind"); el.innerHTML = "";
+      return;
+    }
+    el.hidden = false;
+    el.className = "imp-kind-hint" + (impRec.loading ? " loading" : "") + (impRec.off ? " off" : "");
+    if (impRec.loading) {
+      el.removeAttribute("data-kind");
+      el.innerHTML = icon("loader-circle", 13) + "<span>正在识别类别…</span>";
+      return;
+    }
+    el.setAttribute("data-kind", impRec.kind);
+    var label = impRec.by === "ai" ? "AI 推荐：" : impRec.learned ? "按规则推荐（依据你的历史归类）：" : "按规则推荐：";
+    el.innerHTML = icon(impRec.by === "ai" ? "sparkles" : "filter", 13) +
+      "<span>" + esc(label) + esc(kindName(impRec.kind)) + (impRec.reason ? " · " + esc(impRec.reason) : "") + "</span>";
+  }
+
+  async function classifyForImport(fileName, text) {
+    var seq = ++impRecSeq;
+    impRec = { loading: true, off: false };
+    renderKindHint();
+    qs("#impClsNote").textContent = "识别中…";
+    var r;
+    try {
+      r = await API.classifyDoc({ fileName: fileName, text: text || "" });
+    } catch (e) {
+      r = { kind: "book", reason: "识别出错，默认按书籍归类", by: "rule" };
+    }
+    /* 弹窗已关 / 又换过文件：这次结果的落地位置已不存在，丢弃 */
+    if (seq !== impRecSeq || mask.style.display !== "grid") return;
+    impRec = { kind: r.kind, reason: r.reason || "", by: r.by, learned: !!r.learned, off: false };
+    qs("#impClsNote").textContent = "";
+    if (impKindManual) {
+      impRec.off = impKindManual !== impRec.kind;   /* 用户已先手选：推荐行如实变灰 */
+    } else {
+      impKindAuto = impRec.kind;                    /* 未手选：自动选中推荐项 */
+      setImpKindSeg(impKindAuto);
+    }
+    renderKindHint();
+  }
+  /* 分组下拉：现有组名 + 未分组 + 新建分组…（每次打开按书架现况重建，临时选项随之清掉） */
+  function fillImpGroups() {
+    var names = InkStore.shelfGroups().map(function (g) { return g.name; })
+      .filter(function (n) { return n && n !== "未分组"; });
+    var sel = qs("#impGroup");
+    sel.innerHTML = names.map(function (n) {
+      return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
+    }).join("") + '<option value="">未分组</option><option value="__new__">新建分组…</option>';
+    sel.value = "";
+    impGroupSel = "";
+    qs("#impGroupNew").value = "";
+    qs("#impGroupNew").style.display = "none";
+  }
+
+  /* 打开弹窗：归类区复位（默认书籍、未分组、无标签） */
+  function resetImpCls() {
+    impFile = null;
+    impText = null;
+    parsedOwners = {};
+    impKindManual = "";
+    impKindAuto = "";
+    impRec = null;
+    impKindPromise = null;
+    impRecSeq++;                 /* 作废上一轮迟到的识别结果 */
+    setImpKindSeg("book");
+    qs("#impClsNote").textContent = "";
+    qs("#impTags").value = "";
+    renderKindHint();
+    fillImpGroups();
+  }
+
+  function openImport() { resetImpCls(); mask.style.display = "grid"; }
+  function closeImport() {
+    mask.style.display = "none";
+    impRecSeq++;                 /* 关窗即作废在飞的识别 */
+    impRec = null;
+    renderKindHint();
+    qs("#stepsPanel").style.display = "none";
+    qs("#parseResult").style.display = "none";
+    qs("#stepsPanel").innerHTML = "";
+    qs("#resList").innerHTML = "";
+    qs("#impConfirm").disabled = true;
+    qs("#dropzone").style.display = "block";
+    qs("#impGroupNew").style.display = "none";
+    parsed = null;
+  }
+  qs("#btnImport").addEventListener("click", openImport);
+  qs("#impClose").addEventListener("click", closeImport);
+  qs("#impCancel").addEventListener("click", closeImport);
+  mask.addEventListener("click", function (e) { if (e.target === mask) closeImport(); });
+  /* Esc 关闭导入弹窗（与 themes 页同一套约定）；新分组输入框里先收起输入框，再按一次才关弹窗 */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || mask.style.display !== "grid") return;
+    closeImport();
+  });
+
+  /* 类别点选 = 手动选择，之后自动推荐不再覆盖；推荐行变灰（表示已手改） */
+  qsa("#impKindSeg .seg-btn").forEach(function (b) {
+    b.addEventListener("click", function () {
+      impKindManual = b.dataset.kind;
+      setImpKindSeg(impKindManual);
+      qs("#impClsNote").textContent = "";
+      if (impRec && !impRec.loading) {
+        impRec.off = impRec.kind !== impKindManual;   /* 改回推荐项就不再是「已手改」 */
+        renderKindHint();
+      }
+    });
+  });
+
+  /* 分组：选「新建分组…」时行内展开输入框 */
+  qs("#impGroup").addEventListener("change", function () {
+    if (qs("#impGroup").value === "__new__") {
+      var inp = qs("#impGroupNew");
+      inp.style.display = "block";
+      inp.focus();
+    } else {
+      impGroupSel = qs("#impGroup").value;
+      qs("#impGroupNew").style.display = "none";
+    }
+  });
+  /* 回车 / 失焦即把输入的名字作为所选分组，并临时带进下拉选项里 */
+  function commitImpGroupNew() {
+    var inp = qs("#impGroupNew"), sel = qs("#impGroup");
+    if (inp.style.display === "none") return;
+    var name = inp.value.trim();
+    if (name) {
+      var opt = null;
+      qsa("#impGroup option").forEach(function (o) { if (o.value === name) opt = o; });
+      if (!opt) {
+        opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        sel.insertBefore(opt, sel.querySelector('option[value=""]'));  /* 排在「未分组」前，视同现有组 */
+      }
+      sel.value = name;
+      impGroupSel = name;
+    } else {
+      sel.value = impGroupSel;  /* 没输入名字：回到进入前的选择 */
+    }
+    inp.value = "";
+    inp.style.display = "none";
+  }
+  qs("#impGroupNew").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitImpGroupNew();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();  /* 先收起新分组框，别把整个弹窗关了 */
+      qs("#impGroupNew").value = "";
+      commitImpGroupNew();
+    }
+  });
+  qs("#impGroupNew").addEventListener("blur", commitImpGroupNew);
+
+  /* 提交前归并分组：未选 / 未分组 / 新建框留空 → ""（未分组） */
+  function resolveImpGroup() {
+    var v = qs("#impGroup").value;
+    if (v === "__new__") return qs("#impGroupNew").value.trim();  /* 失焦已提交过，这里兜底 */
+    return v;
+  }
+
+  /* 选择 / 拖入文件：读得出文本的（md / markdown / txt）读全文，
+     二进制的只取文件名 —— 解析与正文都如实按「拿不到内容」处理 */
+  qs("#dropzone").addEventListener("click", function () { qs("#impFile").click(); });
+  qs("#impFile").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    impFile = f;
+    readFileText(f).then(function (txt) { impText = txt; runParse(f.name, txt); });
+  });
+  /* 选择被取消：回退到示例文档，保证「点一下就能看完整个演示」 */
+  qs("#impFile").addEventListener("cancel", function () {
+    impFile = null;
+    impText = demoText();
+    runParse(DEMO_FILE, impText);
+  });
+  qs("#dropzone").addEventListener("dragover", function (e) {
+    e.preventDefault();
+    qs("#dropzone").classList.add("dragover");
+  });
+  qs("#dropzone").addEventListener("dragleave", function () { qs("#dropzone").classList.remove("dragover"); });
+  qs("#dropzone").addEventListener("drop", function (e) {
+    e.preventDefault();
+    qs("#dropzone").classList.remove("dragover");
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    impFile = f;
+    readFileText(f).then(function (txt) { impText = txt; runParse(f.name, txt); });
+  });
+  /* 拖拽只认弹窗里的 dropzone：别处松手不让浏览器直接把文件打开 */
+  document.addEventListener("dragover", function (e) { e.preventDefault(); });
+  document.addEventListener("drop", function (e) { e.preventDefault(); });
+
+  /* 解析步骤：分步动画照旧；文本真的交给 API.parseDocument 逐行抽取 */
+  async function runParse(fileName, text) {
+    var steps = [
+      { name: "读取文档结构", note: "按行扫描 · 跳过代码块与空行" },
+      { name: "识别条目前缀", note: "- / * / 1. 列表行" },
+      { name: "匹配动词与时间词", note: "完成 · 复习 · 提交 · 每日 / 每周 / 每月" },
+      { name: "归组生成清单", note: "命中条数在下方如实给出" }
+    ];
+    parsedOwners = {};
+    qs("#dropzone").style.display = "none";
+    var panel = qs("#stepsPanel");
+    panel.style.display = "block";
+    panel.innerHTML = steps.map(function (s, i) {
+      return '<div class="step" id="st' + i + '"><span class="step-dot">' + (i + 1) + '</span><span>' + s.name + '</span><span class="step-note">' + s.note + '</span></div>';
+    }).join("");
+
+    var res = await API.parseDocument(fileName, text || "", function (i, st) {
+      var el = qs("#st" + i);
+      el.classList.remove("doing", "done");
+      el.classList.add(st);
+      if (st === "done") el.querySelector(".step-dot").innerHTML = "✓";
+    });
+    parsed = res.data;
+    if (mask.style.display !== "grid") { parsed = null; return; }  /* 弹窗已关：丢弃这次解析 */
+    renderParsed(parsed);
+    impKindPromise = classifyForImport(parsed.fileName, impText || "");   /* 类别识别（异步，不阻塞解析结果） */
+  }
+
+  /* 解析结果：渲染真实抽取出的任务条目（parsed.tasks），可逐条指定负责人 */
+  function renderParsed(d) {
+    var tasks = (d && d.tasks) || [];
+    qs("#parseResult").style.display = "block";
+    qs("#resNote").textContent = "来源：" + (d.fileName || "文档") + " · 共 " + tasks.length + " 项";
+    if (!tasks.length) {
+      qs("#resList").innerHTML = '<div class="card-note" style="padding:14px 0">' +
+        icon("info", 14) + ' 未识别到任务条目 · 文档仍会作为藏书导入' + (impText == null ? "（DOCX / PDF 暂不解析内容）" : "") + '</div>';
+      qs("#impConfirm").disabled = false;
+      return;
+    }
+    qs("#resList").innerHTML = tasks.map(function (t) {
+      var owner = parsedOwners[t.id] || DB.assignees[0];
+      parsedOwners[t.id] = owner;
+      return '<div class="parse-row">' +
+        '<span class="pr-check">' + icon("circle-check", 17) + '</span>' +
+        '<div class="pr-body"><div class="pr-title">' + esc(t.x) + '</div>' +
+          '<div class="pr-src">导入任务 ｜ ' + esc(d.fileName || "本地导入") + '</div></div>' +
+        '<select class="field" data-assign="' + t.id + '">' +
+          DB.assignees.map(function (a) { return '<option' + (a === owner ? " selected" : "") + '>' + esc(a) + '</option>'; }).join("") +
+        '</select>' +
+      '</div>';
+    }).join("");
+    qs("#impConfirm").disabled = false;
+  }
+
+  /* 逐条指定负责人：先记在 parsedOwners，确认导入时随任务一起落库 */
+  qs("#resList").addEventListener("change", function (e) {
+    var sel = e.target.closest("select[data-assign]");
+    if (!sel) return;
+    parsedOwners[sel.dataset.assign] = sel.value;
+    toast("已分配给 " + sel.value, "users");
+  });
+
+  /* 确认导入：类别取「手动点选 > 识别推荐 > 兜底书籍」，落书架 + 正文块 + 任务清单；
+     这一步同时是 kindmap 的学习时刻（importDoc 里按最终类别沉淀「文件名 → 类别」） */
+  qs("#impConfirm").addEventListener("click", async function () {
+    if (!parsed) return;
+    var b = qs("#impConfirm");
+    b.disabled = true;
+    b.textContent = "导入中…";
+    /* 识别还在飞？给它一小段宽限期：规则路径即时返回，AI 路径最多等 2.5 秒 ——
+       之后按当前选择导入，绝不因模型慢而卡住确认按钮 */
+    if (impKindPromise && !impKindManual && !impKindAuto) {
+      await Promise.race([impKindPromise.catch(function () {}), new Promise(function (r) { setTimeout(r, 2500); })]);
+    }
+    var fileName = parsed.fileName || "";
+    /* 兜底也不落空：AI 还在飞就先按本地规则定类（等价旧的 guessKind 兜底） */
+    var kind = impKindManual || impKindAuto ||
+      (API.classifyHeuristic ? API.classifyHeuristic(fileName, impText || "").kind : "book");
+    var group = resolveImpGroup();
+    var tags = qs("#impTags").value.split(/[、,，;；\s]+/).map(function (t) { return t.trim(); }).filter(Boolean);
+    var title = fileName.replace(/\.[^.]+$/, "").trim() || "未命名导入文档";
+    var blocks = impText ? mdToBlocks(impText) : [];
+    var words = impText ? impText.replace(/\s+/g, "").length : 0;
+    var tasks = (parsed.tasks || []).map(function (t) {
+      return { x: t.x, owner: parsedOwners[t.id] || DB.assignees[0] };
+    });
+    var r = await API.importDoc({ kind: kind, group: group, tags: tags, fileName: fileName, title: title, blocks: blocks, words: words, tasks: tasks });
+    b.textContent = "确认导入";
+    InkFX.flash();
+    toast("已导入《" + title + "》 · 书架可见" +
+      (r.data.tasks ? " · " + r.data.tasks + " 项任务入清单" : "") +
+      (r.data.readable ? "" : " · 暂无可预览正文"), "circle-check");
+    closeImport();
+    renderStats();  /* 任务统计随导入即时更新 */
+    refresh();      /* 重建分组下拉（新分组即时可选）+ 重画书架 */
+    highlightNewCard(r.data.docId);
+  });
+
+  /* 新导入卡片的一次性描边高亮（.bc-new 动画播完即摘除） */
+  function highlightNewCard(id) {
+    var card = qs('#coverGrid .book-card[data-id="' + id + '"]');
+    if (!card) return;
+    card.classList.add("bc-new");
+    if (card.scrollIntoView) card.scrollIntoView({ block: "nearest" });
+    setTimeout(function () { card.classList.remove("bc-new"); }, 2400);
+  }
+
+  renderContinue();
+  renderStats();
+  refresh();
+  /* 四卡刷新时机：打卡事件 / 跨天 / 其它页写库（storage）/ 每 60 秒（长开兜底） */
+  InkStats.watch(renderStats);
+})();
+</script>
+</body>
+</html>

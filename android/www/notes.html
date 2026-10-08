@@ -1,0 +1,1927 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="paper">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>墨读 InkRead · 笔记</title>
+<link rel="icon" href="data:,">
+<!-- 嵌入模式尽早标记（v2.5）：?embed=1 时给 <html> 加 .embed —— 首帧就按嵌窗布局，
+     不闪开场/外壳。正式的 body.embed 与 26px 嵌入条由页尾脚本挂上，
+     样式见 #notes-extra 的「嵌入模式」段（html.embed / body.embed 两种挂载点等价）。 -->
+<script>
+(function () {
+  try {
+    if (new URLSearchParams(location.search).get("embed") === "1") {
+      document.documentElement.classList.add("embed");
+    }
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="styles.css">
+<style id="notes-extra">
+/* ============================================================
+   笔记页增强（仅本页生效）：MD 双栏可拖拽分隔 · 沉浸栏宽可调 · 滑杆样式
+   约定：--md-a / --md-b 写在 #mdSplit 内联样式（左右栏 fr 配比），
+        --nw-measure 写在 documentElement（沉浸态正文窄列宽度）
+   ============================================================ */
+
+/* ---------- A. MD 双栏：中间 6px 分隔条，两侧最小 220px ---------- */
+#mdSplit { grid-template-columns: minmax(220px, var(--md-a, 1fr)) 6px minmax(220px, var(--md-b, 1fr)); }
+#mdSplit textarea { border-right: none; }   /* 分隔线交给 grip，避免双线 */
+#mdSplit .md-grip { position: relative; cursor: col-resize; touch-action: none; background: transparent; min-width: 0; }
+#mdSplit .md-grip::before {   /* 视觉线 */
+  content: ""; position: absolute; left: 50%; top: 14px; bottom: 14px; width: 2px;
+  transform: translateX(-50%); border-radius: 2px; background: var(--line-2);
+  transition: background .15s, top .15s, bottom .15s;
+}
+#mdSplit .md-grip::after {    /* 命中区扩到约 12px（≥10px） */
+  content: ""; position: absolute; top: 0; bottom: 0; left: -3px; right: -3px;
+}
+#mdSplit .md-grip:hover::before,
+#mdSplit .md-grip.drag::before { background: var(--accent); top: 0; bottom: 0; }
+body.md-col-drag { cursor: col-resize; user-select: none; -webkit-user-select: none; }
+
+/* 仅预览（普通态）：单栏，隐藏 grip —— 兼容 #btnPreview 原逻辑 */
+#mdSplit.preview-only { grid-template-columns: 1fr; }
+#mdSplit.preview-only .md-grip { display: none; }
+
+/* ---------- B. 沉浸态：未开预览 → 单栏窄列跟 --nw-measure；开预览 → 双栏 + grip 可拖 ---------- */
+body.nw .ol-wrap { max-width: var(--nw-measure, 680px); }
+body.nw .md-split:not(.preview-only) textarea { max-width: var(--nw-measure, 680px); }
+body.nw #mdSplit:not(.preview-only) { grid-template-columns: 1fr; }
+body.nw #mdSplit:not(.preview-only) .md-grip { display: none; }
+/* 沉浸 + 预览：不再强制单栏，编辑/预览双栏各占拖拽后的轨道 */
+body.nw #mdSplit.preview-only {
+  grid-template-columns: minmax(220px, var(--md-a, 1fr)) 6px minmax(220px, var(--md-b, 1fr));
+}
+body.nw #mdSplit.preview-only textarea { display: block; max-width: none; margin: 0; }
+body.nw #mdSplit.preview-only .md-preview { display: block; max-width: none; margin: 0; }
+body.nw #mdSplit.preview-only .md-grip { display: block; }  /* 沉浸双栏时 grip 恢复可拖（压过上面普通态仅预览的隐藏） */
+
+/* ---------- 沉浸浮条：栏宽滑杆（沿用全站设置抽屉的滑杆画法） ---------- */
+.nw-measure { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); }
+.nw-measure .ic { flex: none; }
+#nwWidth {
+  -webkit-appearance: none; appearance: none; width: 96px; height: 22px;
+  background: transparent; cursor: pointer; margin: 0; outline: none;
+}
+#nwWidth::-webkit-slider-runnable-track { height: 2px; background: var(--rule); border-radius: 2px; }
+#nwWidth::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 13px; height: 13px; margin-top: -5.5px; border: none;
+  border-radius: 50%; background: var(--ink-2);
+}
+#nwWidth::-moz-range-track { height: 2px; background: var(--rule); border-radius: 2px; }
+#nwWidth::-moz-range-thumb { width: 13px; height: 13px; border: none; border-radius: 50%; background: var(--ink-2); }
+#nwWidth:focus-visible::-webkit-slider-thumb { background: var(--accent); }
+.nw-wval { font-size: 11px; min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+
+/* ---------- 窄屏：单栏、隐藏 grip；浮条里滑杆让位，避免挤爆 ---------- */
+@media (max-width: 860px) {
+  #mdSplit,
+  body.nw #mdSplit.preview-only { grid-template-columns: 1fr; }
+  #mdSplit .md-grip,
+  body.nw #mdSplit.preview-only .md-grip { display: none; }
+  /* 手机沉浸 + 预览：沉浸态页面不滚动，双栏堆叠会被裁切，回退为仅预览单栏 */
+  body.nw #mdSplit.preview-only textarea { display: none; }
+  body.nw .ol-wrap,
+  body.nw #mdSplit textarea { max-width: none; }   /* 手机保持满宽，滑杆值让位 */
+  #nwWidth { width: 72px; }
+}
+@media (max-width: 640px) {
+  .nw-measure { display: none; }
+}
+
+/* ============================================================
+   笔记页增强 v15：幕布式大纲（折叠徽标 · 拖拽指示线）· 大纲⇄脑图一键切换 · Typora 式 MD
+   ============================================================ */
+
+/* ---------- 幕布大纲：折叠行的「+N」子级数徽标（灰字，点击展开） ---------- */
+.ol-foldn {
+  flex: none; margin: 3px 2px 0 0; padding: 2px 7px;
+  border: 1px dashed var(--rule); border-radius: 999px; background: none;
+  cursor: pointer; color: var(--ink-3); font-size: 10.5px; letter-spacing: .04em;
+  font-variant-numeric: tabular-nums; line-height: 1.4; transition: .18s;
+}
+.ol-foldn:hover { border-style: solid; border-color: var(--accent-ink); color: var(--accent-ink); }
+
+/* ---------- 幕布大纲：拖拽增强 —— 拖动行半透明；目标插入位画 3px 指示线 ----------
+   .drop-line = 落到该行上方；.drop-line.drop-end = 落到列表末尾（线画在该行下方） */
+#olList.dragging .ol-row.dragging { opacity: .45; }
+.ol-row.drop-line::before {
+  content: ""; position: absolute; left: 2px; right: 2px; top: -3px; height: 3px;
+  border-radius: 3px; background: var(--accent); pointer-events: none; z-index: 2;
+}
+.ol-row.drop-line.drop-end::before { top: auto; bottom: -3px; }
+
+/* ---------- MD 专注模式（Typora 式）—— 两种机制并存，CSS 注释说明 ----------
+   机制一 · 编辑器 textarea：textarea 无法按段着色 → 行高放大 + 上下固定线性遮罩渐隐
+   （mask-image 挂在元素框上，不随滚动移动，属调研允许的退化实现）；
+   机制二 · 预览区：真实 DOM，可按块降灰 —— 全部子块 opacity .35，hover 点亮当前块，
+   不随滚动自动跟踪（“hover/滚动不动”的静态方案）。 */
+body.md-focus #mdEditor {
+  line-height: 2.35;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 72px, #000 calc(100% - 72px), transparent 100%);
+          mask-image: linear-gradient(180deg, transparent 0, #000 72px, #000 calc(100% - 72px), transparent 100%);
+}
+body.md-focus .md-preview > * { opacity: .35; transition: opacity .25s; }
+body.md-focus .md-preview > *:hover { opacity: 1; }
+html[data-reduce="on"] body.md-focus .md-preview > * { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  body.md-focus .md-preview > * { transition: none; }
+}
+
+/* ============================================================
+   v2.5 · 嵌入模式（阅读页「完整笔记」悬浮窗的 iframe 宿主）
+   契约（与 reader 侧约定，勿改）：
+     · URL：notes.html?embed=1&doc=<docId>&note=<noteId 可选>
+     · 点嵌入条 ✕ → window.parent.postMessage({ type: "inkread:embed-close" }, "*")
+   状态类：html.embed —— <head> 内联脚本最早加上（首帧即嵌窗布局，不闪外壳）；
+          body.embed —— 页尾脚本加上的正式状态 + 挂 26px 嵌入条。
+   两处挂载点对样式等价；与沉浸态 body.nw 会打架的规则只用 body.embed 作用域（见 ·nw 组）。
+   非嵌入模式一条规则都不命中 → 原样不回归。
+   ============================================================ */
+
+/* ---------- 1. 藏外壳：开场 / 顶栏（app.js 注入）/ 侧导航 / 页头 ---------- */
+html.embed .boot, body.embed .boot,
+html.embed .device-topbar, body.embed .device-topbar,
+html.embed .app-nav, body.embed .app-nav,
+html.embed .page-head, body.embed .page-head { display: none !important; }
+
+/* ---------- 2. 外壳铺满 iframe 视口：边距 / 圆角 / 最大宽度清零 ----------
+   .device 同时关掉入页动画（appIn 有 0.46s 延迟）：嵌窗要即时可用 */
+html.embed .device, body.embed .device {
+  height: 100vh; height: 100dvh; min-height: 0; max-width: none;
+  margin: 0; padding: 0; border-radius: 0; box-shadow: none; animation: none;
+}
+html.embed .screen, body.embed .screen {
+  height: auto; min-height: 0; max-width: none;
+  margin: 0; border-radius: 0; box-shadow: none;
+}
+/* 顶部让出 26px 嵌入条；.app-content 的 overflow-y:auto 保持不动（内容区自己滚） */
+html.embed .app-content, body.embed .app-content { padding: 26px 0 0; }
+/* 页内边距收紧铺满；沉浸态自带 0 边距规则，故用 :not(.nw) 让位 */
+body.embed:not(.nw) .page { max-width: none; margin: 0; padding: 12px 14px 20px; }
+
+/* ---------- 3. 工作台：左栏收窄 240px（压过 1180px 断点的单栏回退） ---------- */
+html.embed .work-layout, body.embed .work-layout { grid-template-columns: 240px 1fr; }
+/* 页头藏了，给三视图页签条（.view-bar）补一条顶部安全间距 */
+body.embed:not(.nw) .view-bar { padding-top: 6px; }
+/* 沉浸态在嵌窗里照旧单栏铺满：nw 规则在前，这里用更高优先级压回 */
+body.embed.nw .work-layout { grid-template-columns: 1fr; gap: 0; height: 100%; }
+
+/* 窄浮窗（<820px）：左栏整体让位，只留编辑器 */
+@media (max-width: 819.98px) {
+  html.embed .work-layout, body.embed .work-layout { grid-template-columns: 1fr; }
+  html.embed .work-layout > .card:first-child,
+  body.embed .work-layout > .card:first-child { display: none; }
+}
+
+/* ---------- 4. 嵌入条：26px 细条（fixed 顶），纸色 + 底边线 ----------
+   z-index 200 < 沉浸浮条 260：沉浸态里由 nw-bar 盖住（藏外壳的一致语义），
+   .app-content 的 26px 让位在沉浸态同样成立，不会裁切内容 */
+.embed-bar {
+  position: fixed; left: 0; right: 0; top: 0; z-index: 200; height: 26px;
+  display: flex; align-items: center; gap: 10px; padding: 0 6px 0 12px;
+  background: var(--paper); border-bottom: 1px solid var(--line);
+  font-size: 11.5px; letter-spacing: .06em; color: var(--ink-3);
+}
+.embed-bar .eb-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.embed-bar .eb-title b { font-weight: 600; letter-spacing: .04em; color: var(--ink-2); }
+.embed-bar .eb-x {
+  margin-left: auto; flex: none; width: 20px; height: 20px; display: grid; place-items: center;
+  background: none; border: none; border-radius: var(--r-xs); color: var(--ink-3);
+  cursor: pointer; transition: color .18s, background .18s;
+}
+.embed-bar .eb-x:hover { color: var(--ink); background: var(--paper-3); }
+.embed-bar .eb-x:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+/* ============================================================
+   v2.9.2 · 列表卡片对齐优化（用户实测反馈）
+   —— 原问题：底部行「形态徽标 vs 文档名」在两个尺寸上打架：
+      文档名窄容器折成两行、徽标随 flex center 悬浮在两行之间；
+      另有些卡片预览行数不同造成底部行高低参差。
+   —— 修法：文档名单行截断不参与折行；整行垂直居中即天然齐平；
+      顶部行圆点/类型/时间用固定节奏对齐。 */
+#notesList .note-row { display: flex; flex-direction: column; }
+#notesList .nr-top { align-items: center; }
+#notesList .nr-top .nr-dot { flex: none; }
+#notesList .nr-top > .ic { flex: none; }
+#notesList .nr-foot { gap: 8px; }
+#notesList .nr-ntype { flex: none; line-height: 1.45; }
+#notesList .nr-doc {
+  flex: 0 1 auto; min-width: 0;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 11px; letter-spacing: .04em; color: var(--ink-3);
+  text-align: right;
+}
+/* 预览区恒占两行高：一行预览的卡片与两行的卡片底缘一致，列表看着成行 */
+#notesList .nr-prev { min-height: 2.2em; }
+/* 标题与预览的节奏固定（不随字体档变化打架） */
+#notesList .nr-title { margin-bottom: 4px; }
+
+/* 标题限 2 行：个别超长标题原本折 3 行把卡片撑高，列表高度参差的主因 */
+#notesList .nr-title {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ============================================================
+   v2.9.3 · 左右两栏底边对齐（用户实测反馈：右编辑器卡早早结束、
+   左列表还在延伸，底部差一大截）。
+   —— 根因：.work-layout 用 align-items:start，两卡各按自身内容高结束。
+   —— 修法：stretch 让两卡等高（行高取两者较大者），左卡内部改为
+      flex 列、列表区吃满余量并在卡内滚动 —— 列表再长也不会把版式
+      撑成两屏，底边永远与右卡齐平。 */
+.work-layout { align-items: stretch; }
+.work-layout > .card:first-child { display: flex; flex-direction: column; min-height: 0; }
+.work-layout > .card:first-child .notes-list { flex: 1 1 auto; min-height: 0; }
+/* 右卡在拉伸后编辑区自然增高（.work-card 已是 flex 列、min-height 560 保留） */
+</style>
+<script src="fonts.js"></script>
+<script src="theme.js"></script>
+</head>
+<body data-page="notes">
+<div class="boot" id="boot" aria-hidden="true">
+  <span class="boot-seal">墨</span>
+  <span class="boot-name">墨读 InkRead</span>
+  <span class="boot-line"></span>
+</div>
+<div class="device">
+  <div class="screen" id="screen">
+    <main class="app-content" id="appContent">
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">笔记</h1>
+            <p class="page-sub" id="notesSub"></p>
+          </div>
+          <div class="row">
+            <button class="btn btn-ghost" id="btnExport"><span id="icExport"></span>导出 Markdown</button>
+            <button class="btn btn-accent" id="btnNew"><span id="icNew"></span>新建笔记</button>
+          </div>
+        </div>
+
+        <div class="work-layout">
+          <!-- 左：筛选 + 列表 -->
+          <div class="card card-pad">
+            <div class="seg mb-12" id="kindSeg">
+              <button class="seg-btn on" data-kind="all">全部</button>
+              <button class="seg-btn" data-kind="highlight">高亮</button>
+              <button class="seg-btn" data-kind="note">笔记</button>
+              <button class="seg-btn" data-kind="bookmark">书签</button>
+            </div>
+            <div class="seg mb-12" id="ntypeSeg">
+              <button class="seg-btn on" data-ntype="all">全部视图</button>
+              <button class="seg-btn" data-ntype="outline">大纲</button>
+              <button class="seg-btn" data-ntype="mindmap">脑图</button>
+              <button class="seg-btn" data-ntype="md">MD</button>
+            </div>
+            <div class="row mb-12" style="gap:8px">
+              <span class="theme-dots" id="colorDots">
+                <span class="theme-dot on" data-color="all" style="background:var(--ink-3)"></span>
+                <span class="theme-dot" data-color="accent" style="background:var(--accent)"></span>
+                <span class="theme-dot" data-color="green" style="background:var(--green)"></span>
+                <span class="theme-dot" data-color="amber" style="background:var(--amber)"></span>
+                <span class="theme-dot" data-color="blue" style="background:var(--blue)"></span>
+              </span>
+              <span class="spacer"></span>
+              <span class="card-note" id="listCount"></span>
+            </div>
+            <select class="field mb-12" id="docFilter"></select>
+            <div class="notes-list" id="notesList"></div>
+          </div>
+
+          <!-- 右：同一份笔记 · 三视图工作台 -->
+          <div class="card work-card">
+            <div class="wb-head">
+              <input class="field" id="titleInput" placeholder="笔记标题（可选）">
+              <span class="wb-src" id="srcChip" style="display:none"></span>
+              <button class="tool-btn wb-imm" id="btnImm" title="沉浸写作（F）" aria-label="进入沉浸写作模式"><span id="icImm"></span></button>
+            </div>
+
+            <div class="view-bar">
+              <div class="ntype-tabs" id="viewTabs" role="tablist" aria-label="笔记视图">
+                <button class="ntype-tab active" data-view="outline" role="tab" aria-selected="true"><span id="tabIcOutline"></span>大纲</button>
+                <button class="ntype-tab" data-view="mindmap" role="tab" aria-selected="false"><span id="tabIcMind"></span>脑图</button>
+                <button class="ntype-tab" data-view="md" role="tab" aria-selected="false"><span id="tabIcMd"></span>Markdown · LaTeX</button>
+              </div>
+              <button class="tool-btn wide" id="btnViewSwap" title="一键切换到思维导图"><span id="icViewSwap"></span><span id="btnViewSwapLabel">导图视图</span></button>
+              <span class="view-sync" id="viewSync"><span id="icSyncView"></span>同一份笔记 · 三视图实时同步</span>
+            </div>
+
+            <!-- 一、文字大纲（含递进 / 优先级 / 分类） -->
+            <div class="npane on" data-view="outline">
+              <div class="md-toolbar">
+                <button class="tool-btn" id="olIndent" title="缩进一级（Tab）"><span id="icIndent"></span></button>
+                <button class="tool-btn" id="olOutdent" title="反缩进（Shift+Tab）"><span id="icOutdent"></span></button>
+                <span class="sep"></span>
+                <button class="tool-btn" id="olUp" title="上移"><span id="icUp"></span></button>
+                <button class="tool-btn" id="olDown" title="下移"><span id="icDown"></span></button>
+                <span class="sep"></span>
+                <button class="tool-btn" id="olAdd" title="新增同级条目"><span id="icOlAdd"></span></button>
+                <span class="spacer"></span>
+                <span class="card-note">行首 ○ 切优先级 · 行尾加分类</span>
+              </div>
+              <div class="ol-wrap">
+                <div class="ol-hint">
+                  <span id="olHintIc"></span>
+                  分点写作：<kbd>Enter</kbd> 起新条目，<kbd>Tab</kbd> 降为子级，<kbd>Shift</kbd>+<kbd>Tab</kbd> 升回上级；行首标记切换优先级，行尾加分类标签。
+                </div>
+                <div id="olList"></div>
+              </div>
+            </div>
+
+            <!-- 二、思维导图（同一棵树的图形视图） -->
+            <div class="npane" data-view="mindmap">
+              <div class="mm-stage" id="mmStage">
+                <svg class="mm-svg" id="mmSvg"></svg>
+                <div class="mm-tools">
+                  <input class="field" id="mmEdit" placeholder="选中节点后改文字" style="width:168px">
+                  <button class="tool-btn" id="mmAdd" title="添加子节点"><span id="icMmAdd"></span></button>
+                  <button class="tool-btn" id="mmDel" title="删除节点"><span id="icMmDel"></span></button>
+                  <button class="tool-btn" id="mmOrder" title="按脑图布局重排大纲"><span id="icMmOrder"></span></button>
+                </div>
+                <div class="mm-hint">拖节点移动 · 拖空白平移 · 滚轮缩放 · 双击空白新建 · 位置为视图信息，不写入正文</div>
+                <div class="mm-zoom">
+                  <button class="tool-btn" id="mmZoomOut" title="缩小"><span id="icZoomOut"></span></button>
+                  <span class="mm-zval" id="mmZoomVal">100%</span>
+                  <button class="tool-btn" id="mmZoomIn" title="放大"><span id="icZoomIn"></span></button>
+                  <button class="tool-btn" id="mmFit" title="适应画布"><span id="icFit"></span></button>
+                </div>
+                <div class="mm-empty" id="mmEmpty">还没有条目<br>双击空白处新建，或先在大纲视图分点，再回到这里</div>
+              </div>
+            </div>
+
+            <!-- 三、Markdown · LaTeX（树的实时序列化） -->
+            <div class="npane" data-view="md">
+              <div class="md-toolbar">
+                <button class="tool-btn" data-md="**" title="加粗"><span id="icBold"></span></button>
+                <button class="tool-btn" data-md="*" title="斜体"><span id="icItalic"></span></button>
+                <button class="tool-btn" data-md="## " title="标题"><span id="icH"></span></button>
+                <span class="sep"></span>
+                <button class="tool-btn" data-md="- " title="无序列表"><span id="icList"></span></button>
+                <button class="tool-btn" data-md="1. " title="有序列表"><span id="icOlist"></span></button>
+                <button class="tool-btn" data-md="> " title="引用"><span id="icQuote"></span></button>
+                <span class="sep"></span>
+                <button class="tool-btn" data-md="`" title="行内代码"><span id="icCode"></span></button>
+                <button class="tool-btn" data-md="$$" title="公式块"><span id="icSigma"></span></button>
+                <button class="tool-btn" data-md="[文字](链接)" title="链接"><span id="icLink"></span></button>
+                <button class="tool-btn" data-md="table" title="表格"><span id="icTable"></span></button>
+                <span class="spacer"></span>
+                <button class="tool-btn" id="btnMdFocus" title="专注模式" aria-pressed="false"><span id="icMdFocus"></span></button>
+                <button class="tool-btn" id="btnPreview" title="切换预览"><span id="icEye"></span></button>
+              </div>
+              <div class="md-split" id="mdSplit">
+                <textarea id="mdEditor" spellcheck="false" placeholder="Markdown 是笔记树的实时序列化，改这里会同步回大纲与脑图。&#10;&#10;## 一级要点&#10;- 子条目（缩进 2 空格降一级）&#10;&#10;行内公式 $C_{total}=\alpha\bar{t}+\beta r+\gamma L$&#10;&#10;$$ r = \frac{n_{regress}}{n_{lines}} \times 100\% $$"></textarea>
+                <div class="md-grip" id="mdGrip" title="拖拽调整宽度 · 双击复位" aria-label="调整编辑区与预览宽度" role="separator" aria-orientation="vertical"></div>
+                <div class="md-preview" id="preview"></div>
+              </div>
+            </div>
+
+            <div class="wb-foot">
+              <button class="btn btn-accent btn-sm" id="btnSave"><span id="icSave"></span><span id="btnSaveLabel">保存</span></button>
+              <button class="btn btn-ghost btn-sm" id="btnDel" disabled><span id="icDel"></span>删除</button>
+              <span class="spacer"></span>
+              <a class="nc-goto" id="gotoSrc" style="display:none" href="#"></a>
+              <span class="ef-hint" id="editorHint">未命名笔记</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- 沉浸写作浮条：只在沉浸态出现，3.2s 无操作自动收起，任意移动/点击唤回 -->
+<div class="nw-bar hide" id="nwBar" aria-hidden="true" role="toolbar" aria-label="沉浸写作工具条">
+  <div class="nw-tabs" id="nwTabs" role="tablist" aria-label="笔记视图">
+    <button class="nw-tab active" data-view="outline" role="tab" aria-selected="true">大纲</button>
+    <button class="nw-tab" data-view="mindmap" role="tab" aria-selected="false">脑图</button>
+    <button class="nw-tab" data-view="md" role="tab" aria-selected="false">Markdown</button>
+  </div>
+  <span class="nw-sep"></span>
+  <span class="nw-meta" id="nwMeta"></span>
+  <span class="nw-measure" id="nwMeasureBox" title="栏宽（540 – 1180px）">
+    <span id="icNwWidth"></span>
+    <input type="range" id="nwWidth" min="540" max="1180" step="20" value="680" aria-label="正文栏宽">
+    <span class="nw-wval" id="nwWidthVal">680</span>
+  </span>
+  <span class="spacer"></span>
+  <span class="nw-dirty" id="nwDirty" data-dirty="off">已保存</span>
+  <button class="tool-btn" id="nwSave" title="保存（Ctrl+S）" aria-label="保存笔记"><span id="icNwSave"></span></button>
+  <button class="tool-btn" id="nwExit" title="退出沉浸（Esc）" aria-label="退出沉浸写作"><span id="icNwExit"></span></button>
+</div>
+
+<div class="toast-root" id="toastRoot"></div>
+<script src="mock.js"></script>
+<script src="md.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+<script src="brain.js"></script>
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+
+  /* ============================================================
+     嵌入模式（v2.5 · 阅读页「完整笔记」悬浮窗的 iframe 宿主）
+     契约：notes.html?embed=1&doc=<docId>&note=<noteId 可选>
+     点嵌入条 ✕ → window.parent.postMessage({ type: "inkread:embed-close" }, "*")
+     html.embed 已由 <head> 内联脚本加上（首帧即嵌窗布局）；
+     这里补 body.embed 正式状态，并挂上 26px 嵌入条。
+     doc= / note= 的落地在 boot() 里（过滤器 + 自动打开）。
+     ============================================================ */
+  var EMBED = params.get("embed") === "1";
+  var embedDocId = EMBED ? (params.get("doc") || "") : "";
+  var embedBook = null;   /* 该书在书架里的记录（查不到 → null，条上显示「全部笔记」） */
+  if (EMBED) {
+    document.body.classList.add("embed");
+    var embedShelf = (window.shelfList ? shelfList() : DB.shelf) || [];
+    embedBook = embedShelf.find(function (d) { return d.id === embedDocId; }) || null;
+    var embedBar = document.createElement("div");
+    embedBar.className = "embed-bar";
+    embedBar.id = "embedBar";
+    embedBar.setAttribute("role", "banner");
+    embedBar.innerHTML =
+      '<span class="eb-title">完整笔记 · <b class="eb-book">' +
+        (embedBook ? "《" + esc(embedBook.title) + "》" : "全部笔记") +
+      "</b></span>" +
+      '<button class="eb-x" id="embedClose" type="button" title="关闭" aria-label="关闭完整笔记窗口">' +
+        icon("x", 15) + "</button>";
+    document.body.insertBefore(embedBar, document.body.firstChild);
+    qs("#embedClose").addEventListener("click", function () {
+      try { window.parent.postMessage({ type: "inkread:embed-close" }, "*"); } catch (e) {}
+    });
+  }
+
+  /* ============================================================
+     单一真相源：state.tree（扁平文档序的结构树）
+     节点 = { id, lv, text, done, folded, pri, tag, md }
+       lv   0–4 层级（Tab / Shift+Tab 调整，拖拽整块移动）
+       pri  0–3 优先级（○ / ! / !! / !!!），行首标记循环切换
+       tag  分类标签，行尾 chip
+       md   挂在该条目下的非结构片段（公式块 / 代码块 / 表格），无损保留
+     state.mind = 视图配置（节点坐标），由树派生，不写入正文
+     state.tree ⇄ Markdown 由 serialize() / parse() 互转
+     ============================================================ */
+  var state = {
+    notes: [], kind: "all", ntype: "all", color: "all", doc: "all",
+    curId: null, view: "outline",
+    tree: [], olFocus: 0, olSel: null,
+    mind: null, mmSel: null, mmView: { x: 0, y: 0, k: 1 }, mmDrag: null,
+    mdTimer: null, dirty: false, saving: false, editSeq: 0
+  };
+
+  var PRI_MARK = ["○", "!", "!!", "!!!"];
+  var VSHORT = { outline: "大纲", mindmap: "脑图", md: "Markdown" };
+
+  var IC = {
+    icExport: "download", icNew: "plus",
+    tabIcOutline: "list-tree", tabIcMind: "network", tabIcMd: "sigma",
+    icSyncView: "refresh-cw",
+    icIndent: "indent-increase", icOutdent: "indent-decrease",
+    icUp: "arrow-up", icDown: "arrow-down", icOlAdd: "plus",
+    icMmAdd: "plus", icMmDel: "trash-2", icMmOrder: "list-tree",
+    icZoomIn: "zoom-in", icZoomOut: "zoom-out", icFit: "focus",
+    icBold: "bold", icItalic: "italic", icH: "heading", icList: "list", icOlist: "list-ordered",
+    icQuote: "quote", icCode: "code", icSigma: "sigma", icLink: "link", icTable: "table",
+    icEye: "eye", icMdFocus: "focus", icSave: "circle-check", icDel: "trash-2",
+    icImm: "maximize-2", icNwSave: "circle-check", icNwExit: "minimize",
+    icNwWidth: "columns-2"
+  };
+  Object.keys(IC).forEach(function (id) { var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16); });
+  qs("#olHintIc").innerHTML = icon("info", 14);
+
+  var COLOR_HEX = { accent: "var(--accent)", green: "var(--green)", amber: "var(--amber)", blue: "var(--blue)", ink: "var(--ink-3)" };
+  var KIND_LABEL = { highlight: "高亮", note: "笔记", bookmark: "书签", margin: "随笔" };
+  var NTYPE_ICON = { outline: "list-tree", mindmap: "network", md: "sigma" };
+
+  function docTitle(id) { var d = DB.shelf.find(function (x) { return x.id === id; }); return d ? d.title : "未知文档"; }
+  function curDocId() {
+    var n = state.notes.find(function (x) { return x.id === state.curId; });
+    if (n) return n.docId;
+    return state.doc !== "all" ? state.doc : "paper-01";
+  }
+  function titleText() { return qs("#titleInput").value.trim() || "中心主题"; }
+  function mindNode(id) {
+    if (!state.mind) return null;
+    return state.mind.nodes.find(function (n) { return n.id === id; }) || null;
+  }
+
+  qs("#docFilter").innerHTML = '<option value="all">全部文档</option>' + DB.shelf.map(function (d) {
+    return '<option value="' + d.id + '">' + esc(d.title) + "</option>";
+  }).join("");
+
+  /* ============================================================
+     树的基本操作
+     ============================================================ */
+  function newNode(lv, text) {
+    return { id: uid("o"), lv: lv | 0, text: text || "", done: false, folded: false, pri: 0, tag: "", md: "" };
+  }
+  function normRow(r) {
+    return {
+      id: r.id || uid("o"), lv: r.lv | 0, text: r.text || "",
+      done: !!r.done, folded: !!r.folded, pri: r.pri | 0, tag: r.tag || "", md: r.md || ""
+    };
+  }
+  /* 某行的子树结束位置（不含） */
+  function blockEnd(i) {
+    var lv = state.tree[i].lv, j = i + 1;
+    while (j < state.tree.length && state.tree[j].lv > lv) j++;
+    return j;
+  }
+  function isHidden(i) {
+    var lv = state.tree[i].lv;
+    for (var j = i - 1; j >= 0; j--) {
+      if (state.tree[j].lv < lv) {
+        if (state.tree[j].folded) return true;
+        lv = state.tree[j].lv;
+      }
+    }
+    return false;
+  }
+
+  /* 缩进 / 反缩进：整块（含全部后代）一起动，块内相对层级不变（幕布语义）。
+     缩进限制：不超上一行 +1 级且不超 4 级；反缩进下限 0 级。成功返回 true。 */
+  function indentRow(i) {
+    var r = state.tree[i];
+    if (!r) return false;
+    var prev = state.tree[i - 1];
+    if (!prev || prev.lv < r.lv || r.lv >= 4) return false;
+    var end = blockEnd(i);
+    for (var j = i; j < end; j++) state.tree[j].lv = Math.min(4, state.tree[j].lv + 1);
+    return true;
+  }
+  function outdentRow(i) {
+    var r = state.tree[i];
+    if (!r || r.lv <= 0) return false;
+    var end = blockEnd(i);
+    for (var j = i; j < end; j++) state.tree[j].lv = Math.max(0, state.tree[j].lv - 1);
+    return true;
+  }
+
+  /* ============================================================
+     序列化 ⇄ 解析（树 ⇄ Markdown）
+     serialize：lv0 → ## 标题；lv≥1 → 缩进 (lv-1)*2 的 - 条目
+                行尾 ✔ 表完成，[!]/[!!]/[!!!] 表优先级，#标签 表分类
+     parse    ：反向；无法归入树的内容挂到最近条目作为附注（无损）
+     ============================================================ */
+  function serialize(tree) {
+    var out = [];
+    tree.forEach(function (r) {
+      var t = String(r.text || "").trim();
+      if (!t) return;
+      var pre = (r.pri | 0) > 0 ? "[" + new Array((r.pri | 0) + 1).join("!") + "] " : "";
+      var suf = (r.done ? " ✔" : "") + (r.tag ? " #" + r.tag : "");
+      if (r.lv <= 0) out.push("## " + pre + t + suf);
+      else out.push(new Array(r.lv).join("  ") + "- " + pre + t + suf);
+      if (r.md) {
+        var ind = r.lv <= 0 ? "" : new Array(r.lv + 1).join("  ");
+        String(r.md).split("\n").forEach(function (l) { out.push(ind + l); });
+      }
+    });
+    return out.join("\n");
+  }
+
+  function parseInline(lv, s) {
+    s = String(s);
+    var pri = 0, done = false, tag = "";
+    var m = s.match(/^\[(!{1,3})\]\s*/);
+    if (m) { pri = m[1].length; s = s.slice(m[0].length); }
+    var tm = s.match(/\s#([^\s#]+)\s*$/);
+    if (tm) { tag = tm[1]; s = s.slice(0, tm.index); }
+    if (/\s*✔\s*$/.test(s)) { done = true; s = s.replace(/\s*✔\s*$/, ""); }
+    return normRow({ lv: lv, text: s.trim(), done: done, pri: pri, tag: tag });
+  }
+
+  function parse(md) {
+    var lines = String(md || "").replace(/\r\n?/g, "\n").split("\n");
+    var tree = [], last = null, i = 0;
+    function attach(block) { if (last) last.md = (last.md ? last.md + "\n" : "") + block; }
+
+    while (i < lines.length) {
+      var raw = lines[i], t = raw.trim();
+      if (!t) { i++; continue; }
+
+      if (/^```/.test(t)) {
+        var buf = [raw]; i++;
+        while (i < lines.length && !/^```/.test(lines[i].trim())) { buf.push(lines[i]); i++; }
+        if (i < lines.length) { buf.push(lines[i]); i++; }
+        attach(buf.join("\n"));
+        continue;
+      }
+
+      if (t === "$$" || /^\$\$/.test(t)) {
+        var b2 = [raw], closed = t.length > 2 && /\$\$$/.test(t);
+        i++;
+        if (!closed) {
+          while (i < lines.length && !/\$\$$/.test(lines[i])) { b2.push(lines[i]); i++; }
+          if (i < lines.length) { b2.push(lines[i]); i++; }
+        }
+        attach(b2.join("\n"));
+        continue;
+      }
+
+      var h = t.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        if (h[1].length === 1) { i++; continue; }   /* # 留给笔记标题 */
+        var hn = parseInline(h[1].length - 2, h[2]);
+        tree.push(hn); last = hn; i++;
+        continue;
+      }
+
+      var li = raw.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
+      if (li) {
+        var indent = li[1].replace(/\t/g, "  ").length;
+        var ln = parseInline(Math.floor(indent / 2) + 1, li[3]);
+        tree.push(ln); last = ln; i++;
+        continue;
+      }
+
+      attach(raw);
+      i++;
+    }
+    return tree;
+  }
+
+  /* ============================================================
+     旧数据一次性迁移：无 outline 时由 mind / body / text 反推
+     ============================================================ */
+  function migrateNote(n) {
+    if (n.outline && n.outline.length) return false;
+    if (n.mind && n.mind.nodes && n.mind.nodes.length) {
+      var kids = {};
+      n.mind.nodes.forEach(function (x) { (kids[x.parent] = kids[x.parent] || []).push(x); });
+      var rows = [];
+      (function walk(id, lv) {
+        (kids[id] || []).slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; }).forEach(function (c) {
+          rows.push(normRow({ lv: Math.min(4, lv), text: c.text }));
+          walk(c.id, lv + 1);
+        });
+      })(n.mind.root, 0);
+      if (rows.length) { n.outline = rows; return true; }
+    }
+    if (n.body && String(n.body).trim()) {
+      n.outline = parse(n.body);
+      if (n.outline.length) return true;
+    }
+    if (n.text && String(n.text).trim()) {
+      n.outline = [normRow({ lv: 0, text: n.text })];
+      return true;
+    }
+    return false;
+  }
+
+  /* ============================================================
+     列表
+     ============================================================ */
+  function filtered() {
+    return state.notes.filter(function (n) {
+      if (state.kind !== "all" && n.kind !== state.kind) return false;
+      if (state.ntype !== "all" && nType(n) !== state.ntype) return false;
+      if (state.color !== "all" && n.color !== state.color) return false;
+      if (state.doc !== "all" && n.docId !== state.doc) return false;
+      return true;
+    });
+  }
+
+  function noteTitle(n) {
+    if (n.title) return n.title;
+    if (nType(n) === "mindmap" && n.mind && n.mind.nodes) {
+      var r = n.mind.nodes.find(function (x) { return x.id === n.mind.root; });
+      if (r && r.text) return r.text;
+    }
+    if (n.outline && n.outline.length) {
+      var f = n.outline.find(function (r) { return (r.text || "").trim(); });
+      if (f) return f.text;
+    }
+    if (n.body) return MD.plain(n.body).slice(0, 30);
+    return n.text ? n.text.slice(0, 30) : "书签";
+  }
+  function notePreview(n) {
+    if (n.outline && n.outline.length) {
+      return n.outline.map(function (r) { return (r.text || "").trim(); }).filter(Boolean).slice(0, 7).join(" · ");
+    }
+    if (n.mind && n.mind.nodes) return n.mind.nodes.map(function (x) { return x.text; }).slice(0, 9).join(" · ");
+    if (n.body) return MD.plain(n.body).slice(0, 70);
+    return n.text || "";
+  }
+
+  function renderList() {
+    var list = filtered();
+    qs("#listCount").textContent = list.length + " 条";
+    var docs = DB.shelf.filter(function (d) { return state.notes.some(function (n) { return n.docId === d.id; }); }).length;
+    qs("#notesSub").textContent = state.notes.length + " 条批注 · 覆盖 " + docs + " 份文档 · 一棵笔记树，大纲 / 脑图 / Markdown 三视图同源";
+    if (!list.length) {
+      qs("#notesList").innerHTML = '<div class="empty">' + icon("notebook-pen", 28) + "<p>没有符合条件的笔记<br>换个筛选条件试试</p></div>";
+      return;
+    }
+    qs("#notesList").innerHTML = list.map(function (n) {
+      return '<div class="note-row' + (n.id === state.curId ? " on" : "") + '" data-note="' + n.id + '">' +
+        '<div class="nr-top"><span class="nr-dot" style="background:' + (COLOR_HEX[n.color] || COLOR_HEX.accent) + '"></span>' +
+        KIND_LABEL[n.kind] + '<span class="spacer"></span>' + esc(n.at || "") + "</div>" +
+        '<div class="nr-title">' + esc(noteTitle(n) || "无标题") + "</div>" +
+        (function () {
+          /* v2.9.2：预览与标题重复（画线取原文当标题的常见情形）就不重复显示 —— 视觉噪音 */
+          var ttl = noteTitle(n) || "", pv = notePreview(n) || "";
+          var dup = ttl && pv && (pv === ttl || ttl.indexOf(pv.slice(0, 16)) === 0 || pv.indexOf(ttl.slice(0, 16)) === 0);
+          return dup ? "" : '<div class="nr-prev">' + esc(pv) + "</div>";
+        })() +
+        '<div class="nr-top nr-foot" style="margin:8px 0 0"><span class="nr-ntype">' + icon(NTYPE_ICON[nType(n)], 11) + NTYPE_LABEL[nType(n)] + "</span>" +
+        '<span class="spacer"></span><span class="nr-doc" title="' + esc(docTitle(n.docId)) + '">' + esc(docTitle(n.docId)) + "</span></div>" +
+        "</div>";
+    }).join("");
+    qsa("#notesList .note-row").forEach(function (r) {
+      r.addEventListener("click", function () { openNote(r.dataset.note); });
+    });
+  }
+
+  /* ============================================================
+     载入 / 视图切换
+     ============================================================ */
+  function openNote(id) {
+    var n = state.notes.find(function (x) { return x.id === id; });
+    if (!n) return;
+    state.curId = id;
+    qs("#titleInput").value = n.title || "";
+    qs("#srcChip").style.display = "inline-flex";
+    qs("#srcChip").innerHTML = icon("book-marked", 12) + esc(docTitle(n.docId)) + " · P" + (n.page || 1);
+    qs("#gotoSrc").style.display = "inline-flex";
+    qs("#gotoSrc").href = srcLink(n.docId, n.id);
+    qs("#gotoSrc").innerHTML = icon("arrow-up-right", 12) + "回到原文";
+    qs("#btnDel").disabled = false;
+
+    if (migrateNote(n)) InkStore.upsertNote(n);
+
+    state.tree = (n.outline || []).map(normRow);
+    state.olFocus = 0; state.olSel = null;
+    state.mind = n.mind ? JSON.parse(JSON.stringify(n.mind)) : null;
+    state.mmSel = state.mind ? state.mind.root : null;
+    qs("#mmEdit").value = state.mmSel ? (mindNode(state.mmSel) || {}).text || "" : "";
+
+    var v = (n.ntype === "mindmap" || n.ntype === "md" || n.ntype === "outline") ? n.ntype : "outline";
+    setView(v);
+    renderList();
+    setDirty(false);
+  }
+
+  function flushMd() {
+    var ta = qs("#mdEditor");
+    if (ta) state.tree = parse(ta.value);
+  }
+
+  function setView(v) {
+    if (state.view === "md" && v !== "md") flushMd();
+    state.view = v;
+    qsa("#viewTabs .ntype-tab").forEach(function (t) {
+      var on = t.dataset.view === v;
+      t.classList.toggle("active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    qsa(".npane").forEach(function (p) { p.classList.toggle("on", p.dataset.view === v); });
+
+    if (v === "outline") renderOutline();
+    else if (v === "mindmap") {
+      var relaid = syncMind();
+      if (relaid) fitMind();
+      renderMind();
+    } else {
+      qs("#mdEditor").value = serialize(state.tree);
+      syncPreview();
+    }
+    updateViewSwap();
+    updateHint();
+  }
+
+  /* 大纲 ⇄ 脑图 一键切换（幕布调研项）：只切当前视图，存储类型 ntype 不变 */
+  function updateViewSwap() {
+    var b = qs("#btnViewSwap"); if (!b) return;
+    if (state.view === "md") { b.style.display = "none"; return; }
+    b.style.display = "inline-flex";
+    var toMind = state.view === "outline";
+    b.title = toMind ? "一键切换到思维导图" : "返回大纲视图";
+    b.setAttribute("aria-label", b.title);
+    qs("#btnViewSwapLabel").textContent = toMind ? "导图视图" : "返回大纲";
+    qs("#icViewSwap").innerHTML = icon(toMind ? "network" : "list-tree", 14);
+  }
+  qs("#btnViewSwap").addEventListener("click", function () {
+    setView(state.view === "mindmap" ? "outline" : "mindmap");
+  });
+
+  qsa("#viewTabs .ntype-tab").forEach(function (t) {
+    t.addEventListener("click", function () {
+      if (t.dataset.view === state.view) return;
+      setView(t.dataset.view);
+      if (state.view === "outline" && !state.tree.length) {
+        state.tree = [newNode(0, "")];
+        renderOutline();
+        setTimeout(function () { focusRow(0, false); }, 20);
+      }
+    });
+  });
+
+  function updateHint() {
+    var t = qs("#titleInput").value.trim() || "未命名笔记";
+    var n = state.tree.filter(function (r) { return (r.text || "").trim(); }).length;
+    var hot = state.tree.filter(function (r) { return (r.pri | 0) >= 2; }).length;
+    qs("#editorHint").textContent = t + " · 条目 " + n + (hot ? " · 高优先 " + hot : "") + " · 当前视图 " + VSHORT[state.view];
+    immMeta(); immTabs();
+  }
+  qs("#titleInput").addEventListener("input", function () {
+    updateHint();
+    if (state.mind) { var r = mindNode(state.mind.root); if (r) { r.text = titleText(); renderMind(); } }
+  });
+
+  /* ============================================================
+     一、文字大纲
+     ============================================================ */
+  function autoGrow(ta) { ta.style.height = "auto"; ta.style.height = Math.max(26, ta.scrollHeight) + "px"; }
+
+  function renderOutline() {
+    var wrap = qs("#olList");
+    if (!state.tree.length) {
+      wrap.innerHTML = '<div class="ol-empty">按工具栏「新增」起第一条，或用 Enter 连续分点</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < state.tree.length; i++) {
+      var r = state.tree[i];
+      if (isHidden(i)) continue;
+      var hasKids = (i + 1 < state.tree.length && state.tree[i + 1].lv > r.lv);
+      var pri = r.pri | 0;
+      var nHide = (hasKids && r.folded) ? blockEnd(i) - i - 1 : 0;   /* 折叠时被藏住的后代数 */
+      html += '<div class="ol-row' + (r.done ? " done" : "") + (r.id === state.olSel ? " on" : "") + (pri >= 2 ? " hot" : "") +
+        '" data-i="' + i + '" data-lv="' + r.lv + '" data-pri="' + pri + '">' +
+        '<button class="ol-caret' + (hasKids ? "" : " leaf") + (r.folded ? " folded" : "") + '" data-act="fold" tabindex="-1" aria-label="折叠">' + icon("chevron-down", 13) + "</button>" +
+        '<button class="ol-pri" data-act="pri" tabindex="-1" title="优先级：点击循环（○ / ! / !! / !!!）" aria-label="优先级">' + PRI_MARK[pri] + "</button>" +
+        '<span class="ol-dot"></span>' +
+        '<textarea class="ol-input" rows="1" data-i="' + i + '" placeholder="' + (r.lv === 0 ? "一级要点" : "子要点") + '">' + esc(r.text) + "</textarea>" +
+        '<button class="ol-tag' + (r.tag ? " on" : "") + '" data-act="tag" tabindex="-1" title="分类标签" aria-label="分类标签">' +
+        (r.tag ? "#" + esc(r.tag) : icon("tag", 12)) + "</button>" +
+        (nHide ? '<button class="ol-foldn" data-act="fold" tabindex="-1" title="展开 ' + nHide + ' 条子级" aria-label="展开子级">+' + nHide + "</button>" : "") +
+        '<button class="ol-check" data-act="check" tabindex="-1" aria-label="标记完成">' + icon("check", 11) + "</button>" +
+        '<span class="ol-grip">' + icon("grip-vertical", 14) + "</span>" +
+        "</div>";
+    }
+    wrap.innerHTML = html;
+    qsa(".ol-input", wrap).forEach(autoGrow);
+  }
+
+  function focusRow(i, toEnd) {
+    var ta = qs('.ol-input[data-i="' + i + '"]', qs("#olList"));
+    if (!ta) return;
+    ta.focus();
+    var len = ta.value.length;
+    ta.selectionStart = ta.selectionEnd = toEnd === false ? 0 : len;
+  }
+
+  function moveBlock(i, dir) {
+    var lv = state.tree[i].lv, end = blockEnd(i);
+    var block = state.tree.slice(i, end);
+    if (dir < 0) {
+      var p = i - 1;
+      if (p < 0 || state.tree[p].lv !== lv) return;
+      var prevBlock = state.tree.slice(p, i);
+      state.tree.splice.apply(state.tree, [p, end - p].concat(prevBlock, block));
+      state.olFocus = p;
+    } else {
+      if (end >= state.tree.length || state.tree[end].lv !== lv) return;
+      var nNext = blockEnd(end), nextBlock = state.tree.slice(end, nNext);
+      state.tree.splice.apply(state.tree, [i, nNext - i].concat(nextBlock, block));
+      state.olFocus = i + nextBlock.length;
+    }
+    renderOutline(); focusRow(state.olFocus, true); updateHint();
+  }
+
+  qs("#olList").addEventListener("input", function (e) {
+    var ta = e.target.closest(".ol-input"); if (!ta) return;
+    state.tree[+ta.dataset.i].text = ta.value;
+    autoGrow(ta);
+    updateHint();
+  });
+
+  qs("#olList").addEventListener("focusin", function (e) {
+    var ta = e.target.closest(".ol-input"); if (!ta) return;
+    state.olFocus = +ta.dataset.i;
+    state.olSel = state.tree[state.olFocus] ? state.tree[state.olFocus].id : null;
+    qsa("#olList .ol-row").forEach(function (row) { row.classList.remove("on"); });
+    var row = ta.closest(".ol-row");
+    if (row) row.classList.add("on");
+  });
+
+  /* 幕布式条目键盘：Enter 拆行（光标后文字跟新行，有子级时落在整块之后）、
+     Tab / Shift+Tab 整块缩进反缩进、方向键微调层级、空行 Backspace 删除 */
+  qs("#olList").addEventListener("keydown", function (e) {
+    var ta = e.target.closest(".ol-input"); if (!ta) return;
+    var i = +ta.dataset.i, r = state.tree[i];
+    if (!r) return;
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      var head = ta.value.slice(0, ta.selectionStart);
+      var tail = ta.value.slice(ta.selectionEnd);
+      r.text = head;
+      var at = blockEnd(i);   /* 当前行有子级时新行插到整块之后，避免抢占子级 */
+      state.tree.splice(at, 0, newNode(r.lv, tail));
+      state.olFocus = at;
+      setDirty(true);
+      renderOutline(); focusRow(at, false); updateHint();
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+      var ok = e.shiftKey ? outdentRow(i) : indentRow(i);   /* 缩进不超上一行+1，反缩进下限 0 */
+      if (ok) { setDirty(true); renderOutline(); focusRow(i, true); updateHint(); }
+    } else if (e.key === "Backspace" && !ta.value) {
+      e.preventDefault();
+      if (state.tree.length > 1) {
+        state.tree.splice(i, 1);
+        state.olFocus = Math.max(0, i - 1);
+        setDirty(true);
+        renderOutline(); focusRow(state.olFocus, true);
+      }
+      updateHint();
+    } else if (e.key === "ArrowUp" && i > 0) {
+      e.preventDefault(); state.olFocus = i - 1; focusRow(i - 1, true);
+    } else if (e.key === "ArrowDown" && i < state.tree.length - 1) {
+      e.preventDefault(); state.olFocus = i + 1; focusRow(i + 1, true);
+    } else if (e.key === "ArrowLeft" && ta.selectionStart === 0 && ta.selectionEnd === 0) {
+      e.preventDefault(); if (outdentRow(i)) { setDirty(true); renderOutline(); focusRow(i, false); updateHint(); }
+    } else if (e.key === "ArrowRight" && ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length) {
+      e.preventDefault();
+      if (indentRow(i)) { setDirty(true); renderOutline(); focusRow(i, true); updateHint(); }
+    }
+  });
+
+  /* 行内标签编辑：点行尾 chip → 就地输入 */
+  function editTag(i, btn) {
+    var inp = document.createElement("input");
+    inp.className = "ol-tag-in";
+    inp.value = state.tree[i].tag || "";
+    inp.placeholder = "分类";
+    inp.setAttribute("aria-label", "分类标签");
+    btn.replaceWith(inp);
+    inp.focus(); inp.select();
+    var done = false;
+    function commit(save) {
+      if (done) return; done = true;
+      if (save) state.tree[i].tag = inp.value.trim().replace(/^#/, "").slice(0, 12);
+      renderOutline(); updateHint();
+    }
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); commit(true); }
+      else if (e.key === "Escape") { e.preventDefault(); commit(false); }
+    });
+    inp.addEventListener("blur", function () { commit(true); });
+  }
+
+  qs("#olList").addEventListener("click", function (e) {
+    var act = e.target.closest("[data-act]"); if (!act) return;
+    var row = act.closest(".ol-row"); if (!row) return;
+    var i = +row.dataset.i;
+    var a = act.dataset.act;
+    if (a === "fold") { state.tree[i].folded = !state.tree[i].folded; renderOutline(); }
+    else if (a === "check") { state.tree[i].done = !state.tree[i].done; renderOutline(); updateHint(); }
+    else if (a === "pri") { state.tree[i].pri = ((state.tree[i].pri | 0) + 1) % 4; renderOutline(); updateHint(); }
+    else if (a === "tag") { editTag(i, act); }
+  });
+
+  qs("#olIndent").addEventListener("click", function () {
+    var i = state.olFocus;
+    if (indentRow(i)) { setDirty(true); renderOutline(); focusRow(i, true); updateHint(); }
+  });
+  qs("#olOutdent").addEventListener("click", function () {
+    var i = state.olFocus;
+    if (outdentRow(i)) { setDirty(true); renderOutline(); focusRow(i, true); updateHint(); }
+  });
+  qs("#olUp").addEventListener("click", function () { moveBlock(state.olFocus, -1); });
+  qs("#olDown").addEventListener("click", function () { moveBlock(state.olFocus, 1); });
+  qs("#olAdd").addEventListener("click", function () {
+    var i = state.olFocus, r = state.tree[i];
+    var at = r ? i + 1 : 0;
+    state.tree.splice(at, 0, newNode(r ? r.lv : 0, ""));
+    state.olFocus = at;
+    renderOutline(); focusRow(at, false); updateHint();
+  });
+
+  /* ---------- 拖右侧手柄排序：整块（含子级）落到目标行 ---------- */
+  var olDrag = null;
+  function indexOfRowId(id) {
+    for (var i = 0; i < state.tree.length; i++) if (state.tree[i].id === id) return i;
+    return -1;
+  }
+  function dropIndexAt(clientY) {
+    var rows = qsa("#olList .ol-row");
+    if (!rows.length) return 0;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return +rows[i].dataset.i;
+    }
+    return blockEnd(+rows[rows.length - 1].dataset.i);
+  }
+  function moveBlockTo(from, to) {
+    var lv = state.tree[from].lv, end = blockEnd(from);
+    var block = state.tree.slice(from, end);
+    var rest = state.tree.slice(0, from).concat(state.tree.slice(end));
+    var t = to > from ? to - block.length : to;
+    t = Math.max(0, Math.min(rest.length, t));
+    state.tree = rest.slice(0, t).concat(block, rest.slice(t));
+    /* 层级合法化：新位置上一行即「新父行」，块根不得深过 父行+1（拖到顶视为父行 -1 级）；
+       深了就整块统一上提（负向平移），块内相对层级不变，后代一并夹回合法范围 */
+    var prev = t > 0 ? state.tree[t - 1] : null;
+    var pl = prev ? prev.lv : -1;
+    if (pl < lv) {
+      var d = Math.min(4, pl + 1) - lv;
+      for (var k = t; k < t + block.length; k++) state.tree[k].lv = Math.max(0, state.tree[k].lv + d);
+    }
+    state.olFocus = t;
+  }
+  /* 拖拽指示线：标到目标行上缘；落到列表末尾时标在最后一行下缘（.drop-end） */
+  function markDropLine(to) {
+    qsa("#olList .ol-row").forEach(function (r) { r.classList.remove("drop-line", "drop-end"); });
+    if (to < 0) return;
+    var el = qs('#olList .ol-row[data-i="' + to + '"]');
+    if (el) { el.classList.add("drop-line"); return; }
+    var rows = qsa("#olList .ol-row");
+    if (rows.length) rows[rows.length - 1].classList.add("drop-line", "drop-end");
+  }
+
+  qs("#olList").addEventListener("pointerdown", function (e) {
+    var grip = e.target.closest(".ol-grip");
+    if (!grip) return;
+    var row = grip.closest(".ol-row");
+    if (!row) return;
+    e.preventDefault();
+    olDrag = { id: state.tree[+row.dataset.i].id, moved: false };
+    qs("#olList").classList.add("dragging");
+    if (qs("#olList").setPointerCapture) qs("#olList").setPointerCapture(e.pointerId);
+  });
+
+  qs("#olList").addEventListener("pointermove", function (e) {
+    if (!olDrag) return;
+    e.preventDefault();
+    var from = indexOfRowId(olDrag.id);
+    if (from < 0) return;
+    var to = dropIndexAt(e.clientY), end = blockEnd(from);
+    if (to > from && to < end) { markDropLine(-1); return; }   /* 落在自己块内：无意义 */
+    if (to !== from && to !== end) {
+      moveBlockTo(from, to);
+      renderOutline();
+      var row = qs('#olList .ol-row[data-i="' + state.olFocus + '"]');
+      if (row) row.classList.add("dragging");
+      olDrag.moved = true;
+      markDropLine(dropIndexAt(e.clientY));   /* 移动后行号已变，按当前布局重算指示位置 */
+      updateHint();
+    } else {
+      markDropLine(to);
+    }
+  });
+
+  function endOlDrag() {
+    if (!olDrag) return;
+    var moved = olDrag.moved;
+    olDrag = null;
+    qs("#olList").classList.remove("dragging");
+    state.olSel = state.tree[state.olFocus] ? state.tree[state.olFocus].id : null;
+    renderOutline();
+    if (moved) setDirty(true);   /* 拖拽改了结构，走既有 2.5s 自动保存链路 */
+  }
+  qs("#olList").addEventListener("pointerup", endOlDrag);
+  qs("#olList").addEventListener("pointercancel", endOlDrag);
+
+  /* ============================================================
+     二、思维导图（同一棵树的图形视图）
+     ============================================================ */
+  function nodeBox(n) {
+    var w = Math.max(78, String(n.text || "").length * 13 + 26);
+    return { w: w, h: 30 };
+  }
+  function mmToWorld(cx, cy) {
+    var r = qs("#mmStage").getBoundingClientRect(), v = state.mmView;
+    return { x: (cx - r.left - v.x) / v.k, y: (cy - r.top - v.y) / v.k };
+  }
+
+  /* 由树自动布局出一张脑图；root 的文案取笔记标题 */
+  function mindFromTree(rows, rootText) {
+    var nodes = [{ id: "m0", text: rootText || "中心主题", x: 0, y: 0, parent: null }];
+    var stack = [{ lv: -1, id: "m0" }], depth = { m0: 0 }, seq = 1;
+    rows.forEach(function (r) {
+      while (stack.length > 1 && stack[stack.length - 1].lv >= r.lv) stack.pop();
+      var parent = stack[stack.length - 1].id;
+      var id = "m" + (seq++);
+      nodes.push({ id: id, text: (r.text || "").trim() || "…", x: 0, y: 0, parent: parent });
+      depth[id] = depth[parent] + 1;
+      stack.push({ lv: r.lv, id: id });
+    });
+    var kids = {};
+    nodes.forEach(function (n) { (kids[n.parent] = kids[n.parent] || []).push(n.id); });
+    var cursor = 0, y = {};
+    function walk(id) {
+      var ch = kids[id] || [];
+      if (!ch.length) { y[id] = cursor; cursor += 62; return y[id]; }
+      var ys = ch.map(walk);
+      y[id] = (ys[0] + ys[ys.length - 1]) / 2;
+      return y[id];
+    }
+    walk("m0");
+    nodes.forEach(function (n) { n.x = depth[n.id] * 208; n.y = y[n.id]; });
+    return { root: "m0", nodes: nodes };
+  }
+
+  /* 脑图节点的文档序（数组插入序 = 树序，拖动只改坐标不改序） */
+  function mindOrder(mind) {
+    if (!mind || !mind.nodes || !mind.nodes.length) return [];
+    var kids = {};
+    mind.nodes.forEach(function (n) { (kids[n.parent] = kids[n.parent] || []).push(n); });
+    var out = [];
+    (function walk(id) {
+      (kids[id] || []).forEach(function (c) { out.push(c.id); walk(c.id); });
+    })(mind.root);
+    return out;
+  }
+  function treeIndexOfMind(id) { return mindOrder(state.mind).indexOf(id); }
+
+  /* 结构一致则只同步文案、保留手动位置；结构变了则重新布局 */
+  function syncMind() {
+    var order = mindOrder(state.mind);
+    var same = order.length === state.tree.length && state.tree.length > 0;
+    if (same) {
+      var byId = {};
+      state.mind.nodes.forEach(function (n) { byId[n.id] = n; });
+      var depth = {};
+      function d(id) {
+        if (depth[id] != null) return depth[id];
+        var n = byId[id];
+        depth[id] = (!n || !n.parent || !byId[n.parent]) ? 0 : d(n.parent) + 1;
+        return depth[id];
+      }
+      for (var i = 0; i < state.tree.length; i++) {
+        var mn = byId[order[i]];
+        if (!mn || (d(order[i]) - 1) !== state.tree[i].lv) { same = false; break; }
+      }
+      if (same) {
+        for (var j = 0; j < state.tree.length; j++) {
+          byId[order[j]].text = (state.tree[j].text || "").trim() || "…";
+        }
+        if (!state.mmSel || !mindNode(state.mmSel)) state.mmSel = state.mind.root;
+        return false;
+      }
+    }
+    state.mind = state.tree.length ? mindFromTree(state.tree, titleText()) : null;
+    state.mmSel = state.mind ? state.mind.root : null;
+    return !!state.mind;
+  }
+
+  function renderMind() {
+    var svg = qs("#mmSvg"), mind = state.mind;
+    if (!mind || !mind.nodes || !mind.nodes.length) {
+      svg.innerHTML = "";
+      qs("#mmEmpty").style.display = "grid";
+      return;
+    }
+    qs("#mmEmpty").style.display = "none";
+    var byId = {}; mind.nodes.forEach(function (n) { byId[n.id] = n; });
+    var v = state.mmView;
+    var out = '<g transform="translate(' + v.x + ',' + v.y + ') scale(' + v.k + ')">';
+    mind.nodes.forEach(function (n) {
+      if (!n.parent || !byId[n.parent]) return;
+      var p = byId[n.parent], pb = nodeBox(p), nb = nodeBox(n);
+      var x1 = p.x + pb.w, y1 = p.y + pb.h / 2, x2 = n.x, y2 = n.y + nb.h / 2, mx = (x1 + x2) / 2;
+      out += '<path class="mm-edge" d="M' + x1 + " " + y1 + " C" + mx + " " + y1 + " " + mx + " " + y2 + " " + x2 + " " + y2 + '"/>';
+    });
+    mind.nodes.forEach(function (n) {
+      var b = nodeBox(n);
+      out += '<g class="mm-node' + (n.id === mind.root ? " root" : "") + (n.id === state.mmSel ? " sel" : "") + '" data-id="' + n.id + '" transform="translate(' + n.x + "," + n.y + ')">' +
+        '<rect width="' + b.w + '" height="' + b.h + '" rx="3"/>' +
+        '<text x="' + b.w / 2 + '" y="' + (b.h / 2 + 4) + '" text-anchor="middle">' + esc(n.text) + "</text>" +
+        '<g class="mm-plus" data-add="' + n.id + '" transform="translate(' + (b.w + 10) + "," + (b.h / 2) + ')">' +
+        '<circle r="8"/><line x1="-4" x2="4" y1="0" y2="0"/><line x1="0" x2="0" y1="-4" y2="4"/></g>' +
+        "</g>";
+    });
+    out += "</g>";
+    svg.innerHTML = out;
+    qs("#mmZoomVal").textContent = Math.round(v.k * 100) + "%";
+  }
+
+  function fitMind() {
+    if (!state.mind || !state.mind.nodes.length) return;
+    var stage = qs("#mmStage");
+    var W = stage.clientWidth || 640, H = stage.clientHeight || 470;
+    var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    state.mind.nodes.forEach(function (n) {
+      var b = nodeBox(n);
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + b.w); maxY = Math.max(maxY, n.y + b.h);
+    });
+    var pad = 64;
+    var k = Math.min(1.15, Math.min((W - pad * 2) / Math.max(1, maxX - minX), (H - pad * 2) / Math.max(1, maxY - minY)));
+    k = Math.max(0.35, k);
+    state.mmView.k = k;
+    state.mmView.x = (W - (maxX - minX) * k) / 2 - minX * k;
+    state.mmView.y = (H - (maxY - minY) * k) / 2 - minY * k;
+  }
+
+  function selectNode(id) {
+    state.mmSel = id;
+    var n = mindNode(id);
+    qs("#mmEdit").value = n ? n.text : "";
+    renderMind();
+  }
+
+  /* 脑图新增子节点 → 写回树（树为真相），随后重新布局 */
+  function mmAddChild(parentId) {
+    var order = mindOrder(state.mind);
+    var pIdx = order.indexOf(parentId);
+    var insertAt, lv;
+    if (pIdx < 0) { insertAt = state.tree.length; lv = 0; }
+    else { insertAt = blockEnd(pIdx); lv = Math.min(4, state.tree[pIdx].lv + 1); }
+    state.tree.splice(insertAt, 0, newNode(lv, "新节点"));
+    syncMind(); fitMind();
+    var order2 = mindOrder(state.mind);
+    selectNode(order2[insertAt]);
+    renderOutline(); updateHint();
+    qs("#mmEdit").focus(); qs("#mmEdit").select();
+  }
+
+  /* 脑图删除节点 → 子树整体上提一级（与树的层级语义一致） */
+  function mmDelNode() {
+    if (!state.mind || !state.mmSel) return;
+    if (state.mmSel === state.mind.root) { toast("根节点不可删除", "alert-triangle"); return; }
+    var idx = treeIndexOfMind(state.mmSel);
+    if (idx < 0) return;
+    var lv = state.tree[idx].lv;
+    state.tree.splice(idx, 1);
+    for (var j = idx; j < state.tree.length; j++) {
+      if (state.tree[j].lv > lv) state.tree[j].lv--; else break;
+    }
+    state.mmSel = null;
+    syncMind(); fitMind(); renderMind(); renderOutline(); updateHint();
+  }
+
+  /* 按脑图布局（先 y 后 x 的中序）重排大纲 */
+  function reorderByMind() {
+    if (!state.mind) return;
+    var byId = {}; state.mind.nodes.forEach(function (n) { byId[n.id] = n; });
+    var kids = {};
+    state.mind.nodes.forEach(function (n) { (kids[n.parent] = kids[n.parent] || []).push(n); });
+    var rows = [];
+    (function walk(id, lv) {
+      (kids[id] || []).slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; }).forEach(function (c) {
+        var idx = treeIndexOfMind(c.id);
+        var r = idx >= 0 ? state.tree[idx] : null;
+        if (r) { r.lv = Math.min(4, lv); rows.push(r); }
+        walk(c.id, lv + 1);
+      });
+    })(state.mind.root, 0);
+    if (rows.length !== state.tree.length) { toast("脑图与大纲条目不一致，先补齐再重排", "alert-triangle"); return; }
+    state.tree = rows;
+    syncMind(); renderMind(); renderOutline(); updateHint();
+    toast("已按脑图布局重排大纲", "list-tree");
+  }
+
+  qs("#mmEdit").addEventListener("input", function () {
+    var idx = treeIndexOfMind(state.mmSel);
+    if (idx < 0) return;
+    var v = qs("#mmEdit").value;
+    state.tree[idx].text = v;
+    var n = mindNode(state.mmSel); if (n) n.text = v || "…";
+    renderMind(); updateHint();
+  });
+  qs("#mmAdd").addEventListener("click", function () {
+    if (!state.tree.length) {
+      state.tree.push(newNode(0, "新节点"));
+      syncMind(); fitMind(); renderMind();
+      selectNode(mindOrder(state.mind)[0]);
+      renderOutline(); updateHint();
+      qs("#mmEdit").focus(); qs("#mmEdit").select();
+      return;
+    }
+    mmAddChild(state.mmSel || state.mind.root);
+  });
+  qs("#mmDel").addEventListener("click", mmDelNode);
+  qs("#mmOrder").addEventListener("click", reorderByMind);
+  qs("#mmZoomIn").addEventListener("click", function () { mmZoom(1.15); });
+  qs("#mmZoomOut").addEventListener("click", function () { mmZoom(0.87); });
+  qs("#mmFit").addEventListener("click", function () { fitMind(); renderMind(); });
+
+  function mmZoom(f) {
+    if (!state.mind) return;
+    var v = state.mmView, stage = qs("#mmStage");
+    var mx = stage.clientWidth / 2, my = stage.clientHeight / 2;
+    var k2 = Math.min(2.4, Math.max(0.35, v.k * f));
+    v.x = mx - (mx - v.x) * (k2 / v.k);
+    v.y = my - (my - v.y) * (k2 / v.k);
+    v.k = k2;
+    renderMind();
+  }
+
+  qs("#mmStage").addEventListener("pointerdown", function (e) {
+    if (e.target.closest(".mm-tools, .mm-zoom")) return;
+    var add = e.target.closest(".mm-plus");
+    if (add) { e.preventDefault(); mmAddChild(add.dataset.add); return; }
+    var node = e.target.closest(".mm-node");
+    if (node) {
+      var id = node.dataset.id;
+      selectNode(id);
+      var w = mmToWorld(e.clientX, e.clientY), n = mindNode(id);
+      state.mmDrag = { kind: "node", id: id, dx: n.x - w.x, dy: n.y - w.y };
+      if (qs("#mmStage").setPointerCapture) qs("#mmStage").setPointerCapture(e.pointerId);
+      return;
+    }
+    if (!state.mind || !state.mind.nodes.length) return;
+    state.mmDrag = { kind: "pan", sx: e.clientX, sy: e.clientY, vx: state.mmView.x, vy: state.mmView.y };
+    qs("#mmStage").classList.add("panning");
+    if (qs("#mmStage").setPointerCapture) qs("#mmStage").setPointerCapture(e.pointerId);
+  });
+
+  qs("#mmStage").addEventListener("pointermove", function (e) {
+    var d = state.mmDrag; if (!d) return;
+    e.preventDefault();
+    if (d.kind === "pan") {
+      state.mmView.x = d.vx + (e.clientX - d.sx);
+      state.mmView.y = d.vy + (e.clientY - d.sy);
+      renderMind();
+    } else {
+      var w = mmToWorld(e.clientX, e.clientY), n = mindNode(d.id);
+      if (n) { n.x = Math.round(w.x + d.dx); n.y = Math.round(w.y + d.dy); renderMind(); }
+    }
+  });
+
+  function endMmDrag() {
+    if (!state.mmDrag) return;
+    qs("#mmStage").classList.remove("panning");
+    state.mmDrag = null;
+  }
+  qs("#mmStage").addEventListener("pointerup", endMmDrag);
+  qs("#mmStage").addEventListener("pointercancel", endMmDrag);
+
+  qs("#mmStage").addEventListener("wheel", function (e) {
+    if (e.target.closest(".mm-tools, .mm-zoom")) return;
+    if (!state.mind || !state.mind.nodes.length) return;
+    e.preventDefault();
+    var v = state.mmView, r = qs("#mmStage").getBoundingClientRect();
+    var mx = e.clientX - r.left, my = e.clientY - r.top;
+    var k2 = Math.min(2.4, Math.max(0.35, v.k * (e.deltaY < 0 ? 1.12 : 0.89)));
+    v.x = mx - (mx - v.x) * (k2 / v.k);
+    v.y = my - (my - v.y) * (k2 / v.k);
+    v.k = k2;
+    renderMind();
+  }, { passive: false });
+
+  qs("#mmStage").addEventListener("dblclick", function (e) {
+    if (e.target.closest(".mm-node, .mm-plus, .mm-tools, .mm-zoom")) return;
+    var w = mmToWorld(e.clientX, e.clientY);
+    var first = !state.tree.length;
+    state.tree.push(newNode(0, "新节点"));
+    syncMind();
+    if (first) fitMind();
+    var order = mindOrder(state.mind);
+    var nid = order[order.length - 1];
+    var mn = mindNode(nid);
+    if (mn && !first) { mn.x = Math.round(w.x); mn.y = Math.round(w.y); }
+    selectNode(nid);
+    renderOutline(); updateHint();
+    qs("#mmEdit").focus(); qs("#mmEdit").select();
+  });
+
+  /* ============================================================
+     三、Markdown · LaTeX（树的实时序列化）
+     ============================================================ */
+  function syncPreview() {
+    qs("#preview").innerHTML = MD.render(qs("#mdEditor").value) || '<span class="ef-hint">预览区（空）</span>';
+  }
+  qs("#mdEditor").addEventListener("input", function () {
+    syncPreview();
+    clearTimeout(state.mdTimer);
+    state.mdTimer = setTimeout(function () {
+      state.tree = parse(qs("#mdEditor").value);
+      updateHint();
+    }, 300);
+  });
+
+  /* data-md 工具钮与 Ctrl+B / I / K 快捷键共用的插入逻辑（原点击逻辑原样提取） */
+  function applyMd(mk) {
+    var ta = qs("#mdEditor");
+    var s = ta.selectionStart, e = ta.selectionEnd, v = ta.value, sel = v.slice(s, e);
+    var ins;
+    if (mk === "table") ins = "\n| 列 A | 列 B |\n| --- | --- |\n| 值 1 | 值 2 |\n";
+    else if (mk === "$$") ins = "\n$$\n" + (sel || "C_{total}=\\alpha\\bar{t}+\\beta r+\\gamma L") + "\n$$\n";
+    else if (mk === "[文字](链接)") ins = "[" + (sel || "文字") + "](https://)";
+    else if (mk === "`") ins = "`" + (sel || "code") + "`";
+    else if (mk === "## " || mk === "- " || mk === "1. " || mk === "> ") ins = mk + (sel || "内容");
+    else ins = mk + (sel || "文本") + mk;
+    ta.value = v.slice(0, s) + ins + v.slice(e);
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = s + ins.length;
+    syncPreview();
+    state.tree = parse(ta.value);
+    updateHint();
+    setDirty(true);
+    if (imm.on) setTimeout(centerCaret, 0);
+  }
+
+  qsa("[data-md]").forEach(function (b) {
+    b.addEventListener("click", function () { applyMd(b.dataset.md); });
+  });
+
+  /* ---------- Typora 式快捷键：Ctrl/Cmd+B 加粗 · I 斜体 · K 链接 · Tab 列表缩进 ---------- */
+  qs("#mdEditor").addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+      var k = (e.key || "").toLowerCase();
+      if (k === "b") { e.preventDefault(); applyMd("**"); return; }
+      if (k === "i") { e.preventDefault(); applyMd("*"); return; }
+      if (k === "k") { e.preventDefault(); applyMd("[文字](链接)"); return; }
+    }
+    if (e.key === "Tab" && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      mdIndent(e.shiftKey);
+    }
+  });
+
+  /* Tab / Shift+Tab：列表行（- 、1. 、> 前缀）插 / 移两空格缩进（多行选区整块生效）；
+     普通行 Tab 在光标处插两空格（阻止默认失焦）；Shift+Tab 无处可退时不动 */
+  function mdIndent(outdent) {
+    var ta = qs("#mdEditor");
+    var v = ta.value, s = ta.selectionStart, e2 = ta.selectionEnd;
+    var ls = v.lastIndexOf("\n", s - 1) + 1;                    /* 选区首行行首 */
+    var le = v.indexOf("\n", e2); if (le < 0) le = v.length;    /* 选区末行行尾 */
+    var lines = v.slice(ls, le).split("\n");
+    var multi = lines.length > 1;
+    var first = lines[0];
+    var isList = /^(\s*)(?:[-*+]|\d+\.)\s/.test(first) || /^(\s*)>\s/.test(first);
+
+    if (!outdent && !isList && !multi) {
+      ta.value = v.slice(0, s) + "  " + v.slice(e2);
+      ta.selectionStart = ta.selectionEnd = s + 2;
+    } else if (isList || (outdent && /^\s/.test(first))) {
+      var d1 = 0;
+      var nl = lines.map(function (l, ix) {
+        if (!l.trim()) return l;                                /* 空行不动 */
+        if (outdent) {
+          var m = l.match(/^ {1,2}/), rm = m ? m[0].length : 0;
+          if (ix === 0) d1 = -rm;
+          return l.slice(rm);
+        }
+        if (ix === 0) d1 = 2;
+        return "  " + l;
+      }).join("\n");
+      ta.value = v.slice(0, ls) + nl + v.slice(le);
+      if (multi) ta.setSelectionRange(ls, ls + nl.length);
+      else ta.setSelectionRange(Math.max(ls, s + d1), Math.max(ls, e2 + d1));
+    } else {
+      return;
+    }
+    syncPreview();
+    state.tree = parse(ta.value);
+    updateHint();
+    setDirty(true);
+    if (imm.on) setTimeout(centerCaret, 0);
+  }
+
+  qs("#btnPreview").addEventListener("click", function () {
+    var split = qs("#mdSplit");
+    var only = split.classList.toggle("preview-only");
+    qs("#btnPreview").classList.toggle("active", only);
+    if (only) syncPreview();
+  });
+
+  /* ---------- B2 专注模式（Typora 式）：开关存 inkread.mdfocus.v1，body.md-focus 驱动 CSS ----------
+     编辑器走「行高放大 + 上下渐隐遮罩」，预览走「子块降灰 + hover 点亮」，机制见 CSS 注释 */
+  var LS_MDFOCUS = "inkread.mdfocus.v1";
+  function setMdFocus(on, persist) {
+    document.body.classList.toggle("md-focus", !!on);
+    var b = qs("#btnMdFocus");
+    if (b) { b.classList.toggle("active", !!on); b.setAttribute("aria-pressed", on ? "true" : "false"); }
+    if (persist) { try { localStorage.setItem(LS_MDFOCUS, on ? "1" : "0"); } catch (e) {} }
+  }
+  (function initMdFocus() {
+    var v = "0";
+    try { v = localStorage.getItem(LS_MDFOCUS) || "0"; } catch (e) {}
+    setMdFocus(v === "1", false);
+  })();
+  qs("#btnMdFocus").addEventListener("click", function () {
+    var on = !document.body.classList.contains("md-focus");
+    setMdFocus(on, true);
+    if (imm.on && state.view === "md") setTimeout(centerCaret, 30);   /* 行高变了，重定位光标 */
+    toast(on ? "专注模式开 · 预览块悬停可点亮" : "专注模式关", "focus");
+  });
+
+  /* ---------- B3 分栏滚动同步：编辑 ⇄ 预览按同比例互滚；rAF 节流 + 单向锁防同步循环 ---------- */
+  var mdSyncLock = null, mdSyncRaf = 0;
+  function mdSyncTo(src, dst) {
+    if (mdSyncLock && mdSyncLock !== src) return;   /* 正被对方同步：不回写 */
+    mdSyncLock = src;
+    if (mdSyncRaf) return;
+    mdSyncRaf = requestAnimationFrame(function () {
+      mdSyncRaf = 0;
+      var smax = src.scrollHeight - src.clientHeight;
+      var dmax = dst.scrollHeight - dst.clientHeight;
+      if (smax > 2 && dmax > 2) dst.scrollTop = (src.scrollTop / smax) * dmax;
+      setTimeout(function () { if (mdSyncLock === src) mdSyncLock = null; }, 90);
+    });
+  }
+  qs("#mdEditor").addEventListener("scroll", function () {
+    var pv = qs("#preview");
+    if (pv && pv.offsetParent) mdSyncTo(qs("#mdEditor"), pv);   /* 对方不可见（沉浸单栏 / 仅预览 / 非本视图）不同步 */
+  });
+  qs("#preview").addEventListener("scroll", function () {
+    var ed = qs("#mdEditor");
+    if (ed && ed.offsetParent) mdSyncTo(qs("#preview"), ed);
+  });
+
+  /* ============================================================
+     笔记页增强 v14：MD 双栏可拖拽分隔 · 沉浸栏宽可调 · 自动保存
+     布局变量：--md-a / --md-b（左右栏 fr 配比，写在 #mdSplit 内联样式）
+              --nw-measure（沉浸正文窄列宽度，写在 documentElement）
+     ============================================================ */
+  var LS_MDSPLIT = "inkread.mdsplit.v1";     /* 左栏占比 0~1 */
+  var LS_NWMEASURE = "inkread.nwmeasure.v1"; /* 沉浸栏宽 px */
+
+  /* ---------- A. MD 双栏拖拽（普通态 + 沉浸开预览态共用） ---------- */
+  var mdSplitEl = qs("#mdSplit"), mdGrip = qs("#mdGrip");
+  var mdRatio = null, gripDrag = null;
+  function setMdRatio(r, persist) {
+    mdRatio = Math.max(0.1, Math.min(0.9, r));
+    mdSplitEl.style.setProperty("--md-a", (mdRatio * 100).toFixed(2) + "fr");
+    mdSplitEl.style.setProperty("--md-b", ((1 - mdRatio) * 100).toFixed(2) + "fr");
+    if (persist) { try { localStorage.setItem(LS_MDSPLIT, String(mdRatio)); } catch (e) {} }
+  }
+  (function initMdSplit() {
+    var v = 0;
+    try { v = parseFloat(localStorage.getItem(LS_MDSPLIT)); } catch (e) {}
+    if (v >= 0.1 && v <= 0.9) setMdRatio(v, false);
+  })();
+  mdGrip.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    gripDrag = true;
+    mdGrip.classList.add("drag");
+    document.body.classList.add("md-col-drag");
+    if (mdGrip.setPointerCapture) mdGrip.setPointerCapture(e.pointerId);
+  });
+  mdGrip.addEventListener("pointermove", function (e) {
+    if (!gripDrag) return;
+    var r = mdSplitEl.getBoundingClientRect();
+    if (r.width > 0) setMdRatio((e.clientX - r.left) / r.width, false);
+  });
+  function endGripDrag() {
+    if (!gripDrag) return;
+    gripDrag = null;
+    mdGrip.classList.remove("drag");
+    document.body.classList.remove("md-col-drag");
+    if (mdRatio != null) setMdRatio(mdRatio, true);   /* 拖完落盘 */
+  }
+  mdGrip.addEventListener("pointerup", endGripDrag);
+  mdGrip.addEventListener("pointercancel", endGripDrag);
+  mdGrip.addEventListener("dblclick", function () {
+    mdRatio = null;
+    mdSplitEl.style.removeProperty("--md-a");
+    mdSplitEl.style.removeProperty("--md-b");
+    try { localStorage.removeItem(LS_MDSPLIT); } catch (e) {}
+  });
+
+  /* ---------- B. 沉浸栏宽：滑杆 → --nw-measure，进入沉浸自动生效 ---------- */
+  var NW_MIN = 540, NW_MAX = 1180, NW_STEP = 20, NW_DEFAULT = 680;
+  function applyMeasure(px, persist) {
+    px = Math.max(NW_MIN, Math.min(NW_MAX, Math.round(px / NW_STEP) * NW_STEP));
+    document.documentElement.style.setProperty("--nw-measure", px + "px");
+    qs("#nwWidth").value = String(px);
+    qs("#nwWidthVal").textContent = px;
+    if (persist) { try { localStorage.setItem(LS_NWMEASURE, String(px)); } catch (e) {} }
+    return px;
+  }
+  (function initMeasure() {
+    var v = 0;
+    try { v = parseInt(localStorage.getItem(LS_NWMEASURE), 10); } catch (e) {}
+    applyMeasure(v >= NW_MIN && v <= NW_MAX ? v : NW_DEFAULT, false);
+  })();
+  qs("#nwWidth").addEventListener("input", function (e) { applyMeasure(+e.target.value, false); });
+  qs("#nwWidth").addEventListener("change", function (e) { applyMeasure(+e.target.value, true); });
+
+  /* ============================================================
+     筛选 / 新建 / 保存 / 删除 / 导出
+     ============================================================ */
+  qsa("#kindSeg .seg-btn").forEach(function (b) {
+    b.addEventListener("click", function () {
+      qsa("#kindSeg .seg-btn").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on"); state.kind = b.dataset.kind; renderList();
+    });
+  });
+  qsa("#ntypeSeg .seg-btn").forEach(function (b) {
+    b.addEventListener("click", function () {
+      qsa("#ntypeSeg .seg-btn").forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on"); state.ntype = b.dataset.ntype; renderList();
+    });
+  });
+  qsa("#colorDots .theme-dot").forEach(function (d) {
+    d.addEventListener("click", function () {
+      qsa("#colorDots .theme-dot").forEach(function (x) { x.classList.remove("on"); });
+      d.classList.add("on"); state.color = d.dataset.color; renderList();
+    });
+  });
+  qs("#docFilter").addEventListener("change", function (e) { state.doc = e.target.value; renderList(); });
+
+  function newNote() {
+    state.curId = null;
+    qs("#titleInput").value = "";
+    qs("#srcChip").style.display = "none";
+    qs("#gotoSrc").style.display = "none";
+    qs("#btnDel").disabled = true;
+    state.tree = state.view === "mindmap" ? [] : [newNode(0, "")];
+    state.olFocus = 0; state.olSel = null;
+    state.mind = null; state.mmSel = null;
+    qs("#mmEdit").value = "";
+    setView(state.view);
+    renderList();
+    setTimeout(function () {
+      if (state.view === "outline") focusRow(0, false);
+      else if (state.view === "md") qs("#mdEditor").focus();
+      else qs("#mmEdit").focus();
+    }, 30);
+  }
+  qs("#btnNew").addEventListener("click", newNote);
+
+  /* ---------- 保存：手动 / 自动共用 saveNow；2.5s 防抖自动保存 ---------- */
+  var autoTimer = null;                          /* 自动保存防抖句柄 */
+  var lastSave = { at: null, auto: false };      /* 最近一次成功保存（用于状态文字） */
+  function pad2(x) { return ("0" + x).slice(-2); }
+  function hmOf(d) { return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
+
+  /* 状态文字：脏 → 「未保存」；干净 → 「已保存/已自动保存 HH:MM」（首次为「已保存」） */
+  function renderSaveStatus() {
+    var d = qs("#nwDirty"), b = qs("#btnSaveLabel");
+    if (!d) return;
+    if (state.dirty) {
+      d.dataset.dirty = "on"; d.textContent = "未保存";
+      if (b) b.textContent = "保存";
+      return;
+    }
+    d.dataset.dirty = "off";
+    var txt = "已保存";
+    if (lastSave.at) txt = (lastSave.auto ? "已自动保存 " : "已保存 ") + hmOf(lastSave.at);
+    d.textContent = txt;
+    if (b) b.textContent = lastSave.at ? txt : "保存";
+  }
+  function scheduleAutoSave() {
+    if (autoTimer) clearTimeout(autoTimer);
+    autoTimer = setTimeout(function () { autoTimer = null; saveNow(false); }, 2500);
+  }
+
+  async function saveNow(manual) {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }   /* 手动保存取消挂起的防抖 */
+    if (state.saving) { if (!manual) scheduleAutoSave(); return; }  /* 上一轮还没落盘，自动档稍后再试 */
+    if (state.view === "md") flushMd();
+    clearTimeout(state.mdTimer);
+    var rows = state.tree.filter(function (r) { return (r.text || "").trim(); });
+    if (!rows.length) {
+      if (manual) toast("先写点内容吧", "alert-triangle");
+      return;   /* 空笔记不自动保存，静默跳过 */
+    }
+    var existing = state.notes.find(function (n) { return n.id === state.curId; });
+    var note = {
+      id: existing ? existing.id : null,
+      docId: existing ? existing.docId : curDocId(),
+      kind: existing ? existing.kind : "note",
+      color: existing ? existing.color : "blue",
+      ntype: state.view,
+      title: qs("#titleInput").value.trim(),
+      text: rows[0].text,
+      anchor: existing ? existing.anchor : "sec-1",
+      page: existing ? existing.page : 1,
+      body: serialize(state.tree),
+      outline: state.tree.map(function (r) {
+        return { id: r.id, lv: r.lv, text: r.text, done: !!r.done, folded: !!r.folded, pri: r.pri | 0, tag: r.tag || "", md: r.md || "" };
+      }),
+      mind: state.mind ? JSON.parse(JSON.stringify(state.mind)) : null
+    };
+    state.saving = true;
+    var seqAtSave = state.editSeq | 0;   /* 落盘前记下改动序号，期间有新输入就不算保存完成 */
+    var b = qs("#btnSave"); b.disabled = true;
+    try {
+      var r = await API.saveNote(note);
+      if (existing) Object.assign(existing, r.data);
+      else { state.notes.unshift(r.data); state.curId = r.data.id; }
+      lastSave = { at: new Date(), auto: !manual };
+      renderList();
+      if (manual) {
+        openNote(state.curId);   /* 原逻辑：回读刷新三视图 */
+        InkFX.flash();           /* 墨屏一闪只给手动保存，自动保存静默不打断书写 */
+        toast("笔记已保存 · 三视图同源 · 双端已同步", "circle-check");
+      } else if ((state.editSeq | 0) === seqAtSave) {
+        setDirty(false);         /* 自动档不重开笔记，避免打断输入中的光标 */
+      } else {
+        scheduleAutoSave();      /* 保存期间又有输入：重新排程，保住最新内容 */
+      }
+    } finally {
+      state.saving = false;
+      b.disabled = false;
+      renderSaveStatus();
+    }
+  }
+  qs("#btnSave").addEventListener("click", function () { saveNow(true); });
+
+  qs("#btnDel").addEventListener("click", async function () {
+    if (!state.curId) return;
+    await API.deleteNote(state.curId);
+    state.notes = state.notes.filter(function (n) { return n.id !== state.curId; });
+    state.curId = null;
+    qs("#titleInput").value = "";
+    qs("#srcChip").style.display = "none"; qs("#gotoSrc").style.display = "none";
+    qs("#btnDel").disabled = true;
+    state.tree = []; state.mind = null;
+    setView(state.view);
+    renderList();
+    setDirty(false);
+    toast("笔记已删除", "trash-2");
+  });
+
+  qs("#btnExport").addEventListener("click", function () {
+    var list = filtered();
+    var md = "# 墨读笔记导出\n\n> 导出时间：" + new Date().toLocaleString("zh-CN") + " · 共 " + list.length + " 条\n\n";
+    list.forEach(function (n) {
+      md += "# " + (noteTitle(n) || "无标题") + "\n\n";
+      md += "> " + KIND_LABEL[n.kind] + " · " + docTitle(n.docId) + " · P" + (n.page || 1) + "\n\n";
+      var body = (n.outline && n.outline.length) ? serialize(n.outline) : (n.body || "");
+      if (body) md += body + "\n\n";
+      md += "---\n\n";
+    });
+    var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "inkread-notes.md";
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
+    toast("已导出 " + list.length + " 条笔记", "download");
+  });
+
+  /* ============================================================
+     沉浸写作（v12）：三视图共用一套状态，切视图只藏 chrome、不新建页面
+     文字模式窄列 + 打字机滚动（光标恒在视区中线）；脑图画布铺满；
+     当前段落清晰、其余淡化；浮条 3.2s 无操作收起，Esc / 浮条退出。
+     ============================================================ */
+  var imm = { on: false, timer: null };
+
+  function setDirty(v) {
+    /* 任何改动（输入 / 切视图 / 勾选大纲…）都重排 2.5s 防抖自动保存；置干净则撤销排程 */
+    if (v) { state.editSeq = (state.editSeq | 0) + 1; scheduleAutoSave(); }
+    else if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    if (!!state.dirty === !!v) return;
+    state.dirty = !!v;
+    renderSaveStatus();
+  }
+  function immMeta() {
+    var el = qs("#nwMeta");
+    if (!el) return;
+    var n = state.tree.filter(function (r) { return (r.text || "").trim(); }).length;
+    var c = state.tree.reduce(function (a, r) { return a + String(r.text || "").length; }, 0);
+    el.textContent = VSHORT[state.view] + " · " + n + " 条 · " + c + " 字";
+  }
+  function immTabs() {
+    qsa("#nwTabs .nw-tab").forEach(function (t) {
+      var on = t.dataset.view === state.view;
+      t.classList.toggle("active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+
+  /* 打字机滚动：把焦点行/光标所在行推到容器垂直中线 */
+  function centerRow(ta) {
+    if (!imm.on || !ta) return;
+    var wrap = ta.closest(".ol-wrap");
+    if (!wrap) return;
+    var r = ta.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+    var dy = (r.top + r.height / 2) - (w.top + w.height / 2);
+    if (Math.abs(dy) > 4) wrap.scrollTop += dy;
+  }
+  function centerCaret() {
+    var ta = qs("#mdEditor");
+    if (!imm.on || !ta || document.activeElement !== ta) return;
+    var st = getComputedStyle(ta);
+    var lh = parseFloat(st.lineHeight) || 26;
+    var pt = parseFloat(st.paddingTop) || 0;
+    var lines = ta.value.slice(0, ta.selectionStart).split("\n").length - 1;
+    ta.scrollTop = Math.max(0, pt + lines * lh - ta.clientHeight / 2 + lh / 2);
+  }
+
+  function immEnter() {
+    if (imm.on) return;
+    if (state.view !== "mindmap" && !state.tree.length) { state.tree = [newNode(0, "")]; setView(state.view); }
+    imm.on = true;
+    document.body.classList.add("nw");
+    immTabs(); immMeta(); setDirty(state.dirty); wake();
+    if (state.view === "mindmap") { fitMind(); renderMind(); }
+    else if (state.view === "md") { setTimeout(centerCaret, 40); }
+    else { setTimeout(function () { focusRow(state.olFocus, true); centerRow(qs('.ol-input[data-i="' + state.olFocus + '"]')); }, 40); }
+  }
+  function immExit() {
+    if (!imm.on) return;
+    imm.on = false;
+    document.body.classList.remove("nw");
+    var bar = qs("#nwBar");
+    bar.classList.add("hide"); bar.setAttribute("aria-hidden", "true");
+    clearTimeout(imm.timer); imm.timer = null;
+  }
+  function wake() {
+    if (!imm.on) return;
+    var bar = qs("#nwBar");
+    if (bar.classList.contains("hide")) { bar.classList.remove("hide"); bar.setAttribute("aria-hidden", "false"); }
+    clearTimeout(imm.timer);
+    imm.timer = setTimeout(function () {
+      if (!imm.on || bar.contains(document.activeElement)) return;
+      bar.classList.add("hide"); bar.setAttribute("aria-hidden", "true");
+    }, 3200);
+  }
+
+  qs("#btnImm").addEventListener("click", immEnter);
+  qs("#nwExit").addEventListener("click", immExit);
+  qs("#nwSave").addEventListener("click", function () { saveNow(true); });
+  qsa("#nwTabs .nw-tab").forEach(function (t) {
+    t.addEventListener("click", function () {
+      if (t.dataset.view === state.view) return;
+      setView(t.dataset.view);
+      wake();
+      if (state.view === "md") setTimeout(centerCaret, 30);
+      if (state.view === "mindmap") { fitMind(); renderMind(); }
+    });
+  });
+  document.addEventListener("pointermove", wake, { passive: true });
+  document.addEventListener("pointerdown", wake, { passive: true });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && imm.on) { e.preventDefault(); immExit(); return; }
+    if ((e.key === "s" || e.key === "S") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNow(true); return; }  /* Ctrl+S 全页可用 */
+    if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      var t = e.target, tag = (t.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || t.isContentEditable) return;
+      e.preventDefault();
+      if (imm.on) immExit(); else immEnter();
+    }
+  });
+
+  /* 任何落笔都算改动：输入框走 input，结构操作走一次委托点击 */
+  qs("#appContent").addEventListener("input", function () { setDirty(true); immMeta(); });
+  qs("#appContent").addEventListener("click", function (e) {
+    if (e.target.closest(".ol-pri, .ol-caret, .ol-foldn, .ol-check, .ol-tag, #olIndent, #olOutdent, #olUp, #olDown, #olAdd, #mmAdd, #mmDel, #mmOrder, [data-md]")) {
+      setDirty(true); immMeta();
+    }
+  });
+  qs("#olList").addEventListener("focusin", function (e) {
+    var ta = e.target.closest(".ol-input");
+    if (ta && imm.on) setTimeout(function () { centerRow(ta); }, 0);
+  });
+  qs("#olList").addEventListener("keyup", function (e) {
+    var ta = e.target.closest(".ol-input");
+    if (ta && imm.on) centerRow(ta);
+  });
+  qs("#mdEditor").addEventListener("input", function () { if (imm.on) centerCaret(); });
+  qs("#mdEditor").addEventListener("keyup", function () { if (imm.on) centerCaret(); });
+  qs("#mdEditor").addEventListener("click", function () { if (imm.on) centerCaret(); });
+
+  /* ============================================================
+     启动
+     ============================================================ */
+  (async function boot() {
+    var r = await API.fetchNotes();
+    state.notes = r.data.slice();
+
+    /* 嵌入模式：doc= 把文档过滤器选到该书（等价于用户自己在 #docFilter 选中它）。
+       新笔记的归属不用另改 —— 既有的 curDocId() 在无打开笔记时就是 state.doc 优先。
+       该书若不在页面选项里（用户导入、DB.shelf 之外的文档），嵌入态补一条选项。 */
+    if (EMBED && embedBook) {
+      var sel = qs("#docFilter");
+      var hasOpt = Array.prototype.some.call(sel.options, function (o) { return o.value === embedDocId; });
+      if (!hasOpt) {
+        var op = document.createElement("option");
+        op.value = embedDocId;
+        op.textContent = embedBook.title;
+        sel.appendChild(op);
+      }
+      state.doc = embedDocId;
+      sel.value = embedDocId;
+    }
+
+    renderList();
+
+    var deep = params.get("note");
+    if (deep && state.notes.some(function (n) { return n.id === deep; })) {
+      openNote(deep);
+      setTimeout(function () {
+        var row = qs('#notesList .note-row[data-note="' + deep + '"]');
+        if (row) row.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, 120);
+    } else {
+      /* 嵌入态优先开该书自己的第一条；普通态维持原逻辑（最新一条） */
+      var first = (EMBED && embedBook)
+        ? (state.notes.find(function (n) { return n.docId === embedDocId; }) || null)
+        : null;
+      if (!first) first = state.notes[0] || null;
+      if (first) openNote(first.id);
+      else {
+        state.tree = [newNode(0, "")];
+        setView("outline");
+        renderList();
+      }
+    }
+
+    window.addEventListener("resize", function () {
+      if (state.view === "mindmap") { fitMind(); renderMind(); }
+    });
+  })();
+})();
+</script>
+</body>
+</html>
