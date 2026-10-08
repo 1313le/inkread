@@ -346,13 +346,22 @@
      （v2.16 删掉了第三层 .sc-art-rim：反相 + 冷调重染的边缘光是霓虹语汇，
        纸不会那样反光 —— 详见 styles.css 的「纸绢反光」段）
      --sc-art / --sc-art-pos 由内联 style 下发；取景框随画卷不同而微调。 */
+  /* lift = 这一幅的「展厅射灯」：渲染带实测均值低于 §四 地板（亮 150）时按实测补到 156 上下。
+     为什么按幅而不是全局加亮 —— 富春 192 与 清明 135 同屏，全局一提要么富春过曝
+     要么清明仍暗；博物馆本来也是逐幅调灯的。数值来自 verify-v219-art.js 的 A3 实测。 */
   var ART = {
     fuchun:         { src: "assets/scene-fuchun.jpg",         pos: "50% 56%" },
-    qingming:       { src: "assets/scene-qingming.jpg",       pos: "50% 50%" },
-    shuangsong:     { src: "assets/scene-shuangsong.jpg",     pos: "50% 50%" },
+    qingming:       { src: "assets/scene-qingming.jpg",       pos: "50% 50%", lift: 1.21 },
+    shuangsong:     { src: "assets/scene-shuangsong.jpg",     pos: "50% 50%", lift: 1.03 },
     wanlijiangshan: { src: "assets/scene-wanlijiangshan.jpg", pos: "50% 50%" },
-    qiuse:          { src: "assets/scene-qiuse.jpg",          pos: "50% 50%" },
-    sihuayu:        { src: "assets/scene-sihuayu.jpg",        pos: "50% 50%" }
+    qiuse:          { src: "assets/scene-qiuse.jpg",          pos: "50% 50%", lift: 1.06 },
+    sihuayu:        { src: "assets/scene-sihuayu.jpg",        pos: "50% 50%", lift: 1.22 },
+    /* v2.19 油画三幅：大都会 Open Access（CC0）原图裁 6:1 局部切面，
+       可见带（切面中央 16:1）实测均值 167–173、暗像素 0–4.2% —— 过 §四 亮度闸门。
+       来源与授权逐项记在 assets/art-credits.json，展签文案从那里读，不再硬编码。 */
+    andes:          { src: "assets/scene-oil-andes.jpg",      pos: "50% 50%" },
+    estaque:        { src: "assets/scene-oil-estaque.jpg",    pos: "50% 50%" },
+    cedars:         { src: "assets/scene-oil-cedars.jpg",     pos: "50% 50%" }
   };
 
   /* assets 取不到时的兜底构图人格：真迹名 → 四组程序化变体之一。
@@ -363,7 +372,10 @@
     shuangsong: "hanjiang",      /* 双松：边角构图、大面空 */
     wanlijiangshan: "qianli",    /* 万里江山：峰高重叠、设色 */
     qiuse: "qianli",             /* 溪山秋色：层峦为主 */
-    sihuayu: "xiaoxiang"         /* 四花雨禅：疏朗 */
+    sihuayu: "xiaoxiang",        /* 四花雨禅：疏朗 */
+    andes: "qianli",             /* 安第斯山之心：峰高重叠、设色 */
+    estaque: "qianli",           /* 马赛湾：山脊为主 */
+    cedars: "hanjiang"           /* 雪松暮色：近景剪影、大面空 */
   };
   function fbVariant(k) {
     var v = ART_FB[k];
@@ -376,15 +388,28 @@
      那四组构图人格（qianli / xiaoxiang / hanjiang / wanhe）只留在 VARIANTS 里，
      作为 assets 取不到时的 SVG 兜底（见 probeArt / svgScroll）。
      sceneArt=auto（默认）时每次进入随机展卷一幅，同一次会话内保持不变。
-     「活起来」：雾带横移、飞鸟掠空、整卷缓推 —— 全部 CSS 动画，尊重减少动效。
-     「装裱」：画卷按手卷制式包一层裱边（上下隔水 + 描金线 + 轴头），见 build()。 */
+     v2.19：**每幅画按自己的制式装裱**（mount），不再六幅共用一条手卷壳子。
+       juan 手卷 = 横向长卷，案上边拉边看；zhou 立轴 = 竖幅堂悬，上细天杆下粗地杆；
+       jing 镜心·册页 = 四边只缘一圈绫边，无杆无轴；oil 油画 = 金边波浪框 + 铜牌展签。
+     展签字段（作者 / 年代 / 材质）只在**已核实来源**的条目上出现：油画三幅出自
+     大都会博物馆 Open Access 记录，国画六幅的馆藏归属尚无凭据 —— 宁可只题画名，
+     也不在展签上编造作者与年代（详见 assets/art-credits.json 的 verified 字段）。 */
   var GALLERY = [
-    { k: "fuchun",         name: "富春山居图" },
-    { k: "qingming",       name: "清明上河图" },
-    { k: "shuangsong",     name: "双松平远图" },
-    { k: "wanlijiangshan", name: "万里江山图" },
-    { k: "qiuse",          name: "溪山秋色图" },
-    { k: "sihuayu",        name: "四花雨禅图" }
+    { k: "fuchun",         name: "富春山居图",           mount: "juan" },
+    { k: "qingming",       name: "清明上河图",           mount: "juan" },
+    { k: "shuangsong",     name: "双松平远图",           mount: "zhou" },
+    { k: "qiuse",          name: "溪山秋色图",           mount: "zhou" },
+    /* 万里江山图 v2.19 退役：绢本底色实测整幅 127.8，横向可裁窗口最亮也只有 126.9
+       （它不是一段暗，是通幅暗），渲染带均值 80 —— 补到地板 150 要 1.875× 亮度，
+       那不叫调灯叫重画。按「选画要够亮堂」这条新标准让位给油画三幅，
+       图与 ART 条目都留着（assets/ 里仍在，见 art-credits.json._retired），随时可召回。 */
+    { k: "sihuayu",        name: "四花雨禅图",           mount: "jing" },
+    { k: "andes",          name: "安第斯山之心",         mount: "oil",
+      artist: "弗雷德里克·埃德温·丘奇", year: "1859", medium: "布面油画" },
+    { k: "estaque",        name: "从拉德斯托卡眺望马赛湾", mount: "oil",
+      artist: "保罗·塞尚", year: "约 1885", medium: "布面油画" },
+    { k: "cedars",         name: "达里恩的雪松暮色",     mount: "oil",
+      artist: "约翰·弗雷德里克·肯塞特", year: "1872", medium: "布面油画" }
   ];
 
   function galleryKey() {
@@ -403,10 +428,11 @@
     }
     return pick;
   }
-  function galleryName(k) {
-    for (var i = 0; i < GALLERY.length; i++) if (GALLERY[i].k === k) return GALLERY[i].name;
-    return "";
+  function galleryMeta(k) {
+    for (var i = 0; i < GALLERY.length; i++) if (GALLERY[i].k === k) return GALLERY[i];
+    return { k: k, name: "", mount: "juan" };
   }
+  function galleryName(k) { return galleryMeta(k).name; }
   function artKey() {
     var k = galleryKey();
     return ART[k] ? k : "fuchun";
@@ -417,7 +443,8 @@
   function artScroll(key) {
     if (!isBitmapArt(key)) return null;
     var a = ART[key] || ART.fuchun;
-    return '<div class="sc-inkart" style="--sc-art:url(' + a.src + ');--sc-art-pos:' + a.pos + '">' +
+    return '<div class="sc-inkart" style="--sc-art:url(' + a.src + ');--sc-art-pos:' + a.pos +
+      ';--sc-lift:' + (a.lift || 1) + '">' +
       '<div class="sc-art-bleed"></div>' +
       '<div class="sc-art"></div>' +
       '<div class="sc-sheen"></div>' +
@@ -562,16 +589,59 @@
     }
   };
 
-  /* 手卷装裱：画心外包一层裱边 —— 上下隔水绫边、描金细线、左右轴头、引首题名。
-     结构对照真手卷的「天头—隔水—画心—隔水—拖尾」，天幕条取其意而不照搬尺寸。 */
-  function mountWrap(inner, title) {
-    return '<div class="sc-mount">' +
-      '<i class="sc-mount-gold" aria-hidden="true"></i>' +
-      '<div class="sc-mount-heart">' + inner + "</div>" +
-      (title ? '<span class="sc-mount-title">' + title + "</span>" : "") +
-      '<i class="sc-mount-knob sc-knob-l" aria-hidden="true"></i>' +
-      '<i class="sc-mount-knob sc-knob-r" aria-hidden="true"></i>' +
-      "</div>";
+  /* ---------- 装裱四分制（v2.19）----------
+     一个入口、一套 sc- 前缀，按制式换 DOM —— 样式不散开，降级路径也共用。
+     题名走「两件套」：**印**只落两字斋馆名（墨读），是天幕上唯一的饱和红，
+     承担装饰；**签**才是画名的正统载体，必须有自己的不透明底板（旧版那行
+     10.5px / opacity .72 / 无底衬的小字直接压在真迹笔痕上，就是「看不清」的全部原因）。
+     油画制按西画惯例**不放印**：签名在画布上，画名在框下的铜牌上。 */
+  function mountSeal(meta) {
+    return meta.mount === "oil" ? "" : '<i class="sc-m-seal" aria-hidden="true">墨读</i>';
+  }
+  function mountLabel(meta) {
+    var sub = meta.artist
+      ? '<i>' + meta.artist + " · " + meta.year + " · " + meta.medium + "</i>" : "";
+    return '<span class="' + (meta.mount === "oil" ? "sc-plate" : "sc-label") + '">' +
+      "<b>" + (meta.name || "") + "</b>" + sub + "</span>";
+  }
+  function mountWrap(inner, meta) {
+    meta = meta || {};
+    var m = meta.mount || "juan";
+    var gold = '<i class="sc-mount-gold" aria-hidden="true"></i>';
+    var heart = '<div class="sc-mount-heart">' + inner + "</div>";
+    var body;
+    if (m === "zhou") {
+      /* 立轴：上细天杆、下粗地杆（横贯条宽），天杆下两条惊燕带 */
+      body = gold +
+        '<i class="sc-pole sc-pole-top" aria-hidden="true"></i>' +
+        '<i class="sc-ribbon sc-ribbon-l" aria-hidden="true"></i>' +
+        '<i class="sc-ribbon sc-ribbon-r" aria-hidden="true"></i>' +
+        heart +
+        '<i class="sc-pole sc-pole-bottom" aria-hidden="true"></i>';
+    } else if (m === "jing") {
+      /* 镜心·册页：四边等宽绫边 + 四合如意斜角裁口，无杆无轴 —— 最素的一式 */
+      body = gold + heart +
+        '<i class="sc-corner sc-corner-tl" aria-hidden="true"></i>' +
+        '<i class="sc-corner sc-corner-tr" aria-hidden="true"></i>' +
+        '<i class="sc-corner sc-corner-bl" aria-hidden="true"></i>' +
+        '<i class="sc-corner sc-corner-br" aria-hidden="true"></i>';
+    } else if (m === "oil") {
+      /* 油画：gadroon 波浪金框（上下 rails 走重复半圆浮雕带）+ floater 阴影缝 + 铜牌 */
+      body = heart +
+        '<i class="sc-frame sc-frame-t" aria-hidden="true"></i>' +
+        '<i class="sc-frame sc-frame-b" aria-hidden="true"></i>' +
+        '<i class="sc-frame sc-frame-l" aria-hidden="true"></i>' +
+        '<i class="sc-frame sc-frame-r" aria-hidden="true"></i>' +
+        '<i class="sc-frame-badge" aria-hidden="true"></i>' +
+        '<i class="sc-rake" aria-hidden="true"></i>';
+    } else {
+      /* 手卷：画心四周描金 + 左右轴头（天杆地杆的两端） */
+      body = gold + heart +
+        '<i class="sc-mount-knob sc-knob-l" aria-hidden="true"></i>' +
+        '<i class="sc-mount-knob sc-knob-r" aria-hidden="true"></i>';
+    }
+    return '<div class="sc-mount sc-m-' + m + '" data-mount="' + m + '">' +
+      body + mountSeal(meta) + mountLabel(meta) + "</div>";
   }
 
   function build(key, art) {
@@ -579,24 +649,27 @@
     var inner;
     if (key === "aurora") inner = aurora();
     else if (key === "seasons") {
-      /* 画库六幅全是真迹 → 一律走位图管线，再统一进手卷装裱。
+      /* 画库九幅全是真迹 → 一律走位图管线，再各按自己的制式装裱。
          真迹自带天色，所以**不再悬那枚日轮** —— 一幅元代纸本上顶一颗实心红点，
          读起来是 UI 圆点而不是太阳（v2.16；旧版只把 opacity 压到 .58，没解决问题）。
          取不到 jpg 时的 SVG 兜底由 probeArt() 接手，那条管线才用 VARIANTS。 */
-      var k = art || artKey();
-      inner = '<div class="sc-sky"></div>' + artScroll(k) + '<div class="sc-vig"></div>';
-      inner = mountWrap(inner, galleryName(k));
+      var meta = galleryMeta(art || artKey());
+      inner = '<div class="sc-sky"></div>' + artScroll(meta.k) + '<div class="sc-vig"></div>';
+      inner = mountWrap(inner, meta);
     } else inner = svgScroll();
 
-    return '<div class="scene" data-scene="' + key + '" data-phase="' + p + '" aria-hidden="true">' + inner + "</div>";
+    return '<div class="scene" data-scene="' + key + '" data-phase="' + p + '"' +
+      (key === "seasons" ? ' data-mount="' + galleryMeta(art).mount + '"' : "") +
+      ' aria-hidden="true">' + inner + "</div>";
   }
 
   /* 画卷可用性：只探一次。取不到就把所有 seasons 天幕换成 SVG 版 —— 宁可差一点，不留空条。
-     兜底仍走 mountWrap（裱边不能因为降级就消失），并按 ART_FB 选该幅画对应的人格。 */
+     兜底仍走 mountWrap（装裱不能因为降级就消失），并按 ART_FB 选该幅画对应的人格。 */
   var _artOK = null;
   function probeArt(host, art) {
     if (_artOK === true) return;
-    var fb = mountWrap(svgScroll(fbVariant(art)), galleryName(art));
+    var meta = galleryMeta(art);
+    var fb = mountWrap(svgScroll(fbVariant(art)), meta);
     if (_artOK === false) { host.innerHTML = fb; return; }
     var im = new Image();
     im.onload = function () { _artOK = true; };
@@ -619,12 +692,15 @@
     var on = root.dataset.sceneOn !== "off" && !!key;
     var p = phase();
     var art = artKey();
+    /* 制式挂在 host 上，天幕条高度才按装裱分档（油画框要留出上下边框条）。
+       一次会话内 inkread.sceneArt 已锁 → data-mount 不变 → 条高不重排。 */
+    var mount = key === "seasons" ? galleryMeta(art).mount : "";
     for (var i = 0; i < hosts.length; i++) {
       var host = hosts[i];
       if (!on) {
         if (host.dataset.scene) {
           host.innerHTML = "";
-          host.dataset.scene = ""; host.dataset.phase = ""; host.dataset.art = "";
+          host.dataset.scene = ""; host.dataset.phase = ""; host.dataset.art = ""; host.dataset.mount = "";
         }
         continue;
       }
@@ -632,6 +708,7 @@
       host.dataset.scene = key;
       host.dataset.phase = p;
       host.dataset.art = art;
+      if (mount) host.dataset.mount = mount; else delete host.dataset.mount;
       host.innerHTML = build(key, art);
       if (key === "seasons" && isBitmapArt(art)) probeArt(host, art);
     }
@@ -657,7 +734,8 @@
   }
 
   window.InkScene = {
-    build: build, sync: sync, pulse: pulse, reduced: reduced, phase: phase
+    build: build, sync: sync, pulse: pulse, reduced: reduced, phase: phase,
+    gallery: GALLERY, meta: galleryMeta
   };
 
   /* 时段跨越（日出 / 日落）时换色：离散一次，不做流动 */

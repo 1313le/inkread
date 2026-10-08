@@ -37,7 +37,27 @@ const INFRA = [
   "scripts/serve.js", "electron/main.js", "electron/preload.js",
   "package.json", "android/capacitor.config.json", "android/package.json"
 ];
-const SKIP_CODE = ["ink-reader/assets/scene-fuchun.jpg", "ink-reader/assets/scene-qingming.jpg"]; // 图片不内联，索引中标注
+/* 引画素材改成扫盘现取。原先这里写死两幅（富春 / 清明），而 v2.19 之后盘上有九幅，
+   且清明上河图重切过一轮 —— 索引里那行 1390.4KB 对应的是早就不存在的文件。
+   清单一旦手抄就必然过期，让它跟着 assets 走。 */
+const SCENE_IMGS = fs.existsSync(path.join(ROOT, "ink-reader/assets"))
+  ? fs.readdirSync(path.join(ROOT, "ink-reader/assets"))
+      .filter(f => /^scene-.*\.jpg$/.test(f))
+      .map(f => "ink-reader/assets/" + f)
+  : [];
+const SKIP_CODE = SCENE_IMGS; // 图片不内联，索引中标注
+
+/* 文件名 → 画名：读 art-credits.json，读不到就退回文件名，不写死第二份表。
+   file 字段本身就是 ink-reader 相对路径（assets/scene-xxx.jpg），直接对 rel。 */
+function artLabel(rel) {
+  const f = rel.split("/").pop();
+  try {
+    const c = JSON.parse(read(path.join(ROOT, "ink-reader/assets/art-credits.json")));
+    const hit = Object.keys(c.art || {}).find(k => c.art[k].file === rel.replace(/^ink-reader\//, ""));
+    if (hit) return c.art[hit].name + (c.art[hit].retired ? "（已退役，文件仍随包）" : "");
+  } catch (e) { /* 退回文件名 */ }
+  return f.replace(/^scene-/, "").replace(/\.jpg$/, "");
+}
 
 /* ---------- 位置索引的用途说明 ---------- */
 const PURPOSE = {
@@ -152,8 +172,10 @@ CODE.forEach(rel => {
   const p = path.join(ROOT, rel);
   out.push("| `" + rel + "` | " + lines(read(p)) + " | " + kb(p) + " | " + (PURPOSE[rel] || "") + " |");
 });
-out.push("| `ink-reader/assets/scene-fuchun.jpg` | — | 473.2 | 引画素材：富春山居图（图片不内联） |");
-out.push("| `ink-reader/assets/scene-qingming.jpg` | — | 1390.4 | 引画素材：清明上河图（图片不内联） |");
+SCENE_IMGS.forEach(rel => {
+  const p = path.join(ROOT, rel);
+  out.push("| `" + rel + "` | — | " + kb(p) + " | 引画素材：" + artLabel(rel) + "（图片不内联） |");
+});
 out.push("");
 out.push("### 0.4 运行时基础设施（第三部分全文收录）");
 out.push("");

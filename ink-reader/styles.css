@@ -3166,6 +3166,13 @@ html[data-reduce="on"] .aa { transition: none; }
   border-bottom: 1px solid var(--rule);
   transition: height .26s cubic-bezier(.22, .7, .3, 1), opacity .26s ease;
 }
+/* v2.19：装裱四分制 —— 油画框要留出上下边框条与框下的铜牌，比国画的条厚一档。
+   选择器多带一个 [data-scene] 是为了和上面那条 (0,3,0) 打平后按源码序取胜；
+   data-mount 在一次会话内不变（inkread.sceneArt 已锁），所以不构成运行期跳动。 */
+.scene-band[data-scene][data-mount="oil"] {
+  height: clamp(56px, 10vw, 96px);
+  min-height: 6.2vw;
+}
 /* 沉浸时收起天幕：选择器必须带上 [data-scene]:not(...) 才压得过上面那条声明，
    否则特异性 (0,2,1) < (0,3,0)，天幕会赖着不收。 */
 body.immersive .scene-band,
@@ -3282,9 +3289,12 @@ body.doc-edit .doc .editable { caret-color: var(--accent-ink); }
   --sc-orb-halo: color-mix(in oklab, var(--accent) 24%, transparent);
   --sc-star:  var(--accent-2);
   --sc-star-o: 0;
-  /* v2.16：--sc-glow 已删（山脊不再有彩色边缘光）。印章是仅存的强调色用法。 */
-  --sc-seal:  var(--accent);
-  --sc-seal-ink: color-mix(in oklab, var(--paper) 88%, var(--accent) 12%);
+  /* v2.16：--sc-glow 已删（山脊不再有彩色边缘光）。印章是仅存的强调色用法。
+   v2.19：印泥改吃 --mark 而不是 --accent —— 逐主题校准过的朱批对（mark/on-mark）
+   才保证印文 ≥4.5:1；accent 在 cream 这类主题上是橄榄金，既不像印泥也压不住字。
+   这也让「天幕唯一饱和红是印章」这条铁律由 token 本身兜住，而不靠约定。 */
+  --sc-seal:  var(--mark);
+  --sc-seal-ink: color-mix(in oklab, var(--paper) 88%, var(--mark) 12%);
   transition: transform .26s cubic-bezier(.22, .7, .3, 1), filter .26s ease, opacity .26s ease;
 }
 /* 深色主题里纸最暗、墨最亮：天幕亮锚改取「纸压向墨」的中间调，
@@ -3408,14 +3418,16 @@ html[data-tone="dark"] .scene {
 }
 /* 主墨：乘法让白纸消失，只剩墨留在主题的纸色上。
    提一档对比 —— 真迹的墨本来就淡，乘完更淡，缩到 46px 的手机条上就快看不见了；
-   contrast 的支点在 0.5，纸（≈0.96）被推到 1.0 仍留白，墨却实了一档。 */
-.sc-art { mix-blend-mode: multiply; filter: contrast(1.18) saturate(.9); }
+   contrast 的支点在 0.5，纸（≈0.96）被推到 1.0 仍留白，墨却实了一档。
+   v2.19：1.18 → 1.06。contrast 每加一档，中间调整体往下拽一截 ——
+   实测六幅源图均值 128–234，本来都是亮堂的纸本，「太暗」是这道滤镜压出来的。 */
+.sc-art { mix-blend-mode: multiply; filter: contrast(1.06) saturate(.9) brightness(var(--sc-lift, 1)); }
 /* 墨晕：同一幅画糊一层再压一次乘法 —— 笔痕四周洇开的淡墨（真·晕染） */
 .sc-art-bleed { mix-blend-mode: multiply; filter: blur(6px) contrast(1.1) saturate(.5); opacity: .55; }
 /* B7 纸绢缎光：本次唯一保留的「光」。一层中性缓坡，左上微亮 → 中段归零 → 右下微沉，
    soft-light 下只改明度不改色相 —— 对应青绫/米色绫的丝织反光（调研 §2.1）。
-   它自己不做动画、也不进 run-flip 视差名单：丝光随纸走（跟着 .sc-inkart 的
-   54s 缓推一起移），灯不动。单独给它一档横移会变成「画面在滑动」。 */
+   它自己不做动画、也不进 run-flip 视差名单：丝光随纸走，灯不动。
+   （v2.19 起画心只演一次开卷仪式，之后完全静止 —— 见「三、开卷仪式」。） */
 .sc-sheen {
   position: absolute; inset: 0; pointer-events: none;
   mix-blend-mode: soft-light;
@@ -3431,9 +3443,16 @@ html[data-tone="dark"] .scene {
 html[data-tone="dark"] .sc-art,
 html[data-tone="dark"] .sc-art-bleed {
   mix-blend-mode: normal;
-  filter: brightness(.46) saturate(.82) sepia(.08);
+  /* v2.19：.46 → .74，并删掉 sepia(.08)。
+     .46 是把一张纸压进夜色里（万里江山 127.8 × .46 ≈ 59）；暗室里灯下看卷，
+     纸还是纸，只沉一档。sepia 把灰调往黄里推，是让画面「旧而脏」的那 8%。 */
+  filter: brightness(calc(.74 * var(--sc-lift, 1))) saturate(.92);
 }
 html[data-tone="dark"] .sc-art-bleed { filter: blur(7px) brightness(.5) saturate(.6); opacity: .34; }
+/* 油画制：颜料是实色，不是「白纸上墨」。multiply 会把金框乘成纸浆色、
+   饱和颜料全部发闷 → 亮主题走 normal 且不增广对比；墨晕层（糊一层再乘法）一并撤掉。 */
+.sc-m-oil .sc-art { mix-blend-mode: normal; filter: brightness(var(--sc-lift, 1)); }
+.sc-m-oil .sc-art-bleed { display: none; }
 /* 描金线在夜里要反过来提亮：--sc-earth 在暗主题等于纸（近黑），
    沿用亮主题的公式会画出一条看不见的黑线。改由中调的 --sc-air 出，保住金。 */
 html[data-tone="dark"] .sc-mount-gold {
@@ -4737,9 +4756,12 @@ html[data-reduce="on"] .note-row:hover, html[data-reduce="on"] .task-card:hover 
    设计文章准则：手感来自结构而非滤镜，动效克制、可关。
    ============================================================ */
 
-/* ---------- 一、手卷装裱（画心外的裱边体系） ----------
-   天幕条取其意：上下隔水绫边 + 描金细线 + 左右轴头 + 引首题名。
-   色值走主题插值（--sc-air / --sc-earth），裱边永远跟着纸色同调。 */
+/* ---------- 一、装裱四分制（画心外的裱边体系）----------
+   v2.19：拆掉「六幅画共用一条手卷壳子」的做法 —— 制式本身就是国画的第一条规则，
+   横向长卷才叫手卷，竖幅是立轴，四边只缘一圈绫边的是镜心·册页，西画另有金框。
+   色值仍走主题插值（--sc-air / --sc-earth / --sc-seal / --amber），零新增色值。
+   读法约定：--sc-air 永远是本主题的「亮面」，--sc-earth 永远是「暗面」，
+   所以同一套公式在亮/暗两 tone 下都成立（暗主题的 earth 是近黑的纸，air 是浅墨）。 */
 .sc-mount { position: absolute; inset: 0; }
 .sc-mount-heart {
   position: absolute; left: 0; right: 0; top: 3px; bottom: 3px;
@@ -4754,15 +4776,7 @@ html[data-reduce="on"] .note-row:hover, html[data-reduce="on"] .task-card:hover 
   border-bottom: 1px solid color-mix(in oklab, var(--sc-earth) 74%, var(--amber) 26%);
   opacity: .34; pointer-events: none; z-index: 3;
 }
-.sc-mount-title {                   /* 引首题名：小楷落款，落在左边隅 */
-  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-  z-index: 4; writing-mode: vertical-rl; letter-spacing: .34em;
-  font-family: var(--font-kai); font-size: 10.5px; line-height: 1;
-  color: color-mix(in oklab, var(--sc-earth) 72%, var(--sc-air));
-  opacity: .72; text-shadow: 0 0 2px var(--sc-air);
-  pointer-events: none;
-}
-.sc-mount-knob {                    /* 左右轴头：画卷两端的天杆暗示 */
+.sc-mount-knob {                    /* 手卷左右轴头：天杆地杆的两端 */
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 5px; height: clamp(30px, 7vw, 66px);
   border-radius: 3px; z-index: 4; pointer-events: none;
@@ -4771,9 +4785,159 @@ html[data-reduce="on"] .note-row:hover, html[data-reduce="on"] .task-card:hover 
 }
 .sc-knob-l { left: 1px; }
 .sc-knob-r { right: 1px; }
-/* v2.16：撤掉暗主题下题名/轴头的「提亮」反转 —— 那两式是为**反相版**画卷写的
-   （画卷当时是黑底白线，字必须跟着变白）。现在暗主题的画卷仍是灯下的一张纸，
-   字压在纸上，就得继续用墨色。沿用默认式即可，反转反而糊成一片。 */
+
+/* 立轴：上细天杆、下粗地杆（横贯条宽），天杆下两条惊燕带 */
+.sc-m-zhou .sc-mount-heart { left: 4px; right: 4px; top: 5px; bottom: 8px; }
+.sc-pole {
+  position: absolute; left: 0; right: 0; z-index: 4; pointer-events: none;
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--sc-air) 34%, var(--sc-earth)), var(--sc-earth));
+  opacity: .58;
+}
+.sc-pole-top    { top: 1px;    height: 3px; border-radius: 2px; }
+.sc-pole-bottom { bottom: 1px; height: 6px; border-radius: 3px; }
+.sc-ribbon {
+  position: absolute; top: 5px; z-index: 4; pointer-events: none;
+  width: 3px; height: clamp(9px, 1.9vw, 16px);
+  background: color-mix(in oklab, var(--sc-earth) 52%, var(--amber) 48%);
+  opacity: .5;
+}
+.sc-ribbon-l { left: 24%; }
+.sc-ribbon-r { right: 24%; }
+
+/* 镜心·册页：四边等宽绫边 + 四合如意斜角，无杆无轴 —— 最素的一式 */
+.sc-m-jing .sc-mount-heart { left: 6px; right: 6px; top: 6px; bottom: 6px; }
+.sc-m-jing .sc-mount-gold  { left: 6px; right: 6px; top: 6px; bottom: 6px; opacity: .26; }
+.sc-corner {
+  position: absolute; z-index: 4; pointer-events: none;
+  width: 7px; height: 7px;
+  border: 1px solid color-mix(in oklab, var(--sc-earth) 58%, var(--amber) 42%);
+  opacity: .55;
+}
+.sc-corner-tl { left: 2px;  top: 2px;    border-right: none; border-bottom: none; }
+.sc-corner-tr { right: 2px; top: 2px;    border-left:  none; border-bottom: none; }
+.sc-corner-bl { left: 2px;  bottom: 2px; border-right: none; border-top:    none; }
+.sc-corner-br { right: 2px; bottom: 2px; border-left:  none; border-top:    none; }
+
+/* 油画：gadroon 波浪金框 + floater 阴影缝 + 框下铜牌展签。
+   调研结论（Met 框架馆藏 / V&A 纹样库）：连续起伏的半圆装饰带叫 gadrooning，
+   巴洛克—洛可可框的标准语言；现代美术馆对厚涂油画另留一道 floater 阴影缝，
+   让颜料厚度被看见 —— 这里取古典波浪的形，保留那道缝。
+   金素一律从 --amber 出，**绝不取 --accent**：天幕上唯一的饱和红是印章。 */
+.sc-m-oil {
+  --g-hi: color-mix(in oklab, var(--amber) 74%, var(--sc-air));
+  --g-md: color-mix(in oklab, var(--amber) 80%, var(--sc-earth));
+  --g-lo: color-mix(in oklab, var(--amber) 42%, var(--sc-earth));
+  /* 铜牌：字色固定吃 --ink（亮档=深墨、暗档=亮墨，本来就是这个主题自己的两极），
+     底板则跟着翻面 —— 亮档浅金面配深字，暗档深铜面配亮字。
+     原先底板是 --g-hi→--g-md 一条大跨度渐变（一端偏纸、一端偏墨），
+     字压在两端必然有一端糊掉：abyss/clay/sage 这类主题实测最低只剩 1.8:1。 */
+  --plate-bg: color-mix(in oklab, var(--amber) 58%, var(--sc-air));
+  --plate-bg-lo: color-mix(in oklab, var(--amber) 44%, var(--sc-air));
+  --plate-ink: var(--ink);
+  --plate-ink-soft: color-mix(in oklab, var(--ink) 92%, var(--amber));
+}
+html[data-tone="dark"] .sc-m-oil {
+  --plate-bg: color-mix(in oklab, var(--amber) 36%, var(--sc-earth));
+  --plate-bg-lo: color-mix(in oklab, var(--amber) 24%, var(--sc-earth));
+}
+.sc-m-oil .sc-mount-heart {
+  left: 9px; right: 9px; top: 8px; bottom: 12px;
+  /* floater 缝：画布不贴着框，内侧留一圈沉下去的影 */
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--sc-earth) 62%, transparent),
+              0 0 5px color-mix(in oklab, var(--sc-earth) 46%, transparent);
+}
+.sc-frame { position: absolute; z-index: 4; pointer-events: none; }
+.sc-frame-t, .sc-frame-b {
+  left: 0; right: 0;
+  /* 第一层是一排半圆瓣（凸起的高光），第二层是金底的明暗过渡 */
+  background-repeat: repeat-x;
+}
+.sc-frame-t {
+  top: 0; height: 8px;
+  background-image:
+    radial-gradient(circle at 5.5px 8px, var(--g-lo) 0 3.2px, transparent 3.5px),
+    radial-gradient(circle at 5.5px 6.4px, var(--g-hi) 0 2.6px, transparent 2.9px),
+    linear-gradient(180deg, var(--g-md), var(--g-lo));
+  background-size: 11px 100%, 11px 100%, 100% 100%;
+}
+.sc-frame-b {
+  bottom: 0; height: 12px;
+  background-image:
+    radial-gradient(circle at 5.5px 0, var(--g-lo) 0 3.2px, transparent 3.5px),
+    radial-gradient(circle at 5.5px 1.6px, var(--g-hi) 0 2.6px, transparent 2.9px),
+    linear-gradient(0deg, var(--g-md), var(--g-lo));
+  background-size: 11px 100%, 11px 100%, 100% 100%;
+}
+.sc-frame-l, .sc-frame-r {
+  top: 0; bottom: 0; width: 9px;
+  background: linear-gradient(90deg, var(--g-lo), var(--g-hi) 46%, var(--g-lo));
+}
+.sc-frame-badge {                   /* 上轨中央的 cartouche 牌心 */
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: clamp(20px, 4vw, 34px); height: 8px; z-index: 5; pointer-events: none;
+  border-radius: 50% / 62%;
+  background: var(--g-hi);
+  border: 1px solid var(--g-lo);
+  opacity: .85;
+}
+/* 斜掠光（raking light）：Google Arts & Culture 呈现厚涂笔触的办法 ——
+   动的不是画，是灯。一道 soft-light 的斜光带扫过一次即停。 */
+.sc-rake {
+  position: absolute; z-index: 4; left: 9px; right: 9px; top: 8px; bottom: 12px;
+  pointer-events: none; opacity: 0; mix-blend-mode: soft-light;
+  background: linear-gradient(100deg, transparent 32%,
+    color-mix(in oklab, var(--sc-air) 78%, transparent) 47%, transparent 62%);
+}
+
+/* ---------- 二、题名两件套：印 + 签 ----------
+   印：两字斋馆名「墨读」，白文（红底白字）—— 调研结论：白文在小尺寸下比朱文活得久。
+       它只承担装饰与「款」的位置感，不承载画名。
+   签：画名的正统载体。**必须有自己的不透明底板**（取裱绫色，不取画面像素）——
+       旧版 .sc-mount-title 是 10.5px / opacity .72 / 无底衬的竖排小字，
+       直接压在真迹的笔痕上，对比度连算都算不出来，这就是「看不清画名」的全部原因。 */
+.sc-m-seal {
+  position: absolute; z-index: 5; pointer-events: none;
+  display: grid; place-items: center;
+  width: clamp(13px, 2.5vw, 20px); height: clamp(13px, 2.5vw, 20px);
+  border-radius: 1.5px;
+  background: var(--sc-seal);
+  color: var(--on-mark);
+  font-family: var(--font-kai); font-weight: 600;
+  font-size: clamp(6px, 1.15vw, 9.5px); line-height: 1;
+  writing-mode: vertical-rl; letter-spacing: .5px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--on-mark) 62%, transparent);
+  opacity: .93;
+}
+.sc-m-juan .sc-m-seal { right: 12px; bottom: 6px; }
+.sc-m-zhou .sc-m-seal { right: 10px; bottom: 10px; }
+.sc-m-jing .sc-m-seal { right: 9px;  bottom: 9px; }
+.sc-label, .sc-plate {
+  position: absolute; z-index: 5; pointer-events: none;
+  display: flex; align-items: baseline; gap: 7px; white-space: nowrap;
+  padding: 2px 7px 2.5px; border-radius: 1px;
+  /* 展签是贴在画上的**牌子**，不是画的一部分 —— 所以它不吃 --sc-air/--sc-earth。
+     暗主题的这两个锚被压成中间调（免得整条天幕变白条），牌子跟着一起褪，
+     实测字/底只剩 2.4:1，正是「看不清画名」的来处。改取主题自己的纸墨对：
+     亮档=深底浅字，暗档=浅底深字，两档都等于正文那一对已验证合格的对比度。 */
+  background: color-mix(in oklab, var(--ink) 90%, var(--paper));
+  border: 1px solid color-mix(in oklab, var(--ink) 62%, var(--amber) 38%);
+  color: var(--paper);
+  font-family: var(--font-kai); opacity: 1;
+}
+.sc-label b, .sc-plate b { font-size: clamp(11px, 1.25vw, 13.5px); font-weight: 600; letter-spacing: .06em; }
+.sc-label i, .sc-plate i { font-style: normal; font-size: clamp(9px, .95vw, 10.5px); letter-spacing: .04em; color: color-mix(in oklab, var(--paper) 80%, var(--ink)); }
+.sc-label { left: 10px; bottom: 6px; }
+.sc-m-zhou .sc-label { bottom: 10px; }
+.sc-m-jing .sc-label { left: 12px; bottom: 9px; }
+.sc-plate {                        /* 铜牌：西画的展签在框下，不在画面上 */
+  left: 50%; bottom: 0; transform: translateX(-50%);
+  background: linear-gradient(180deg, var(--plate-bg), var(--plate-bg-lo));
+  border-color: var(--g-lo);
+  color: var(--plate-ink);
+  padding: 1px 9px 2px; border-radius: 1px 1px 2px 2px;
+}
+.sc-plate i { color: var(--plate-ink-soft); }
 
 /* ---------- 二、名画变体设色（程序化四幅） ----------
    千里江山是青绿设色 —— 山体接过 accent-2（主题的副强调色），
@@ -4790,33 +4954,62 @@ html[data-reduce="on"] .note-row:hover, html[data-reduce="on"] .task-card:hover 
 .sc-ink.scv-hanjiang .sc-near { opacity: .94; }          /* 寒江：山石更实 */
 .sc-ink.scv-wanhe .sc-mid path, .sc-ink.scv-wanhe .sc-far path { opacity: .96; }
 
-/* ---------- 三、活起来（名画微动，全部尊重减少动效） ----------
-   三支动效：雾带横移（90s）、雁阵掠过（46s 一轮）、整卷缓推（52s 往返）。
-   幅度都压得很小 —— 是「画在呼吸」，不是动画片。 */
-@keyframes scDrift   { from { transform: translateX(-34px); } to { transform: translateX(34px); } }
-@keyframes scDriftIn { from { transform: translateX(-26px); } 0%,100% { opacity: .9; } to { transform: translateX(26px); } }
+/* ---------- 三、开卷仪式（一次性 · 灯动画不动）----------
+   v2.19 撤掉那三支 infinite（雾 92s / 雁 46s / 整卷 54s 永远不停）：
+   对一张真迹照片做 54 秒缓慢缩放平移，读起来是屏保，不是画在呼吸 ——
+   而且它违反了本文件开头「场景默认完全静止：没有循环 @keyframes，动效只由交互触发一次」的契约。
+   改成按制式各演一次「开卷」，演完彻底静止；只用 transform/opacity，幅度 ≤8% 位移。
+   另外把 .sc-mount-heart 与 .sc-inkart 的双层同速动画并成一层 ——
+   两层各推一遍会让画心与裱边产生 1px 级相对位移，那就是画面「发虚」的来源。 */
 @keyframes scFlock {
   0%   { transform: translate(-120px, 6px); opacity: 0; }
   12%  { opacity: .85; }
   76%  { opacity: .85; }
   100% { transform: translate(300px, -10px); opacity: 0; }
 }
-@keyframes scGlide { 0%, 100% { transform: scale(1) translateX(0); } 50% { transform: scale(1.035) translateX(-9px); } }
+@keyframes scUnroll { from { transform: translateX(4%); opacity: .3; } to { transform: none; opacity: 1; } }
+@keyframes scKnob   { from { transform: translateY(-50%) rotate(-90deg); } to { transform: translateY(-50%) rotate(0); } }
+@keyframes scDrop   { from { transform: translateY(-5%); opacity: .35; } to { transform: none; opacity: 1; } }
+@keyframes scSwing  { 0% { transform: rotate(-7deg); } 62% { transform: rotate(4deg); } 100% { transform: rotate(0); } }
+@keyframes scTurn   { from { transform: scale(1.008); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes scRake   { 0% { opacity: 0; transform: translateX(-62%); } 24% { opacity: .22; }
+                      76% { opacity: .22; } 100% { opacity: 0; transform: translateX(62%); } }
+@keyframes scFade   { from { opacity: 0; } to { opacity: 1; } }
 
-.scene .sc-cloud { animation: scDrift 92s ease-in-out infinite alternate; will-change: transform; }
-.scene .sc-birds { animation: scFlock 46s linear infinite; }
-.scene .sc-mount-heart { animation: scGlide 54s ease-in-out infinite; }
-/* 真迹位图整组同步缓推（与 SVG 版同一节奏）：墨晕 / 主墨 / 缎光三层一起走，
-   缎光跟着纸移而不单独错速 —— 见 .sc-sheen 处「光随纸走，灯不动」。 */
-.scene .sc-inkart { animation: scGlide 54s ease-in-out infinite; }
-/* 减少动效 / 系统偏好：全部退回静止（「画库 + 装裱」保留，只停「活起来」） */
-html[data-reduce="on"] .scene .sc-cloud,
-html[data-reduce="on"] .scene .sc-birds,
-html[data-reduce="on"] .scene .sc-mount-heart,
-html[data-reduce="on"] .scene .sc-inkart { animation: none !important; }
+/* 雁阵：展卷完成后掠过一次即隐 —— 飞鸟是国画里最「活」的东西，值得留，但不该是循环马戏 */
+.sc-mount .sc-birds { animation: scFlock 6.5s ease-out 1.6s 1 both; }
+/* 手卷 · 展卷：画心自右归位，右轴头转过 1/4 圈 */
+.sc-m-juan .sc-mount-heart { animation: scUnroll 1.5s cubic-bezier(.22, .7, .3, 1) both; }
+.sc-m-juan .sc-knob-r { animation: scKnob 1.5s cubic-bezier(.22, .7, .3, 1) both; }
+/* 立轴 · 落轴：画心自上坠定，惊燕带随后轻摆一次 */
+.sc-m-zhou .sc-mount-heart { animation: scDrop 1.2s cubic-bezier(.22, .7, .3, 1) both; }
+.sc-m-zhou .sc-ribbon { transform-origin: top center; animation: scSwing 1.1s ease-out .55s 1 both; }
+/* 镜心·册页 · 翻页 / 油画 · 上光：都是 opacity + 极小 scale */
+.sc-m-jing .sc-mount-heart { animation: scTurn .7s ease-out both; }
+.sc-m-oil .sc-mount-heart { animation: scTurn .7s ease-out both; }
+.sc-m-oil .sc-rake { animation: scRake 1.15s ease-out .25s 1 both; }
+/* 减少动效 / 系统偏好（两道闸门各自成立）：仪式塌缩成一次 200ms 纯淡入，
+   掠过与斜掠光直接不演 —— 它们的全部信息都在「动」上，去掉动就没有残留可读性。 */
+html[data-reduce="on"] .sc-mount .sc-birds,
+html[data-reduce="on"] .sc-m-oil .sc-rake { animation: none !important; }
+html[data-reduce="on"] .sc-mount-heart,
+html[data-reduce="on"] .sc-m-juan .sc-knob-r,
+html[data-reduce="on"] .sc-m-zhou .sc-ribbon { animation: scFade .2s ease both !important; }
 @media (prefers-reduced-motion: reduce) {
-  .scene .sc-cloud, .scene .sc-birds, .scene .sc-mount-heart, .scene .sc-inkart { animation: none !important; }
+  .sc-mount .sc-birds, .sc-m-oil .sc-rake { animation: none !important; }
+  .sc-mount-heart, .sc-m-juan .sc-knob-r, .sc-m-zhou .sc-ribbon { animation: scFade .2s ease both !important; }
 }
+
+/* 天幕画卷选择器有九幅 + 「每次随机」= 10 枚签：.ap-seg 默认是 overflow:hidden 的
+   单行硬边条，十枚必然被裁掉后几枚（和 #kindSeg 同一类病）。改成折行的独立 chips。 */
+.ap-seg[data-seg="sceneArt"] {
+  flex-wrap: wrap; gap: 4px; border: none; background: transparent; overflow: visible;
+}
+.ap-seg[data-seg="sceneArt"] .ap-seg-b {
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper-2);
+}
+.ap-seg[data-seg="sceneArt"] .ap-seg-b + .ap-seg-b { border-left: 1px solid var(--line); }
+.ap-seg[data-seg="sceneArt"] .ap-seg-b.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 
 /* ---------- 四、视觉强度联动：印章人格 ----------
    标准 = 朱砂方章（默认）；大胆 = 直角方章 + 右上错位小方块（构成感，与图标呼应）；

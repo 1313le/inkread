@@ -1,0 +1,77 @@
+{
+  "_comment": "天幕画库的准入闸门与展签文案事实源。闸门（对每张源图实测）：灰度均值 ≥150、暗像素(<60)占比 ≤15%、短边 ≥240px。油画三幅另记「可见切面」= 6:1 导出条中央被 cover 裁出的 16:1 带，那才是屏幕上真正的像素。lift = 该幅在 scene.js 里的展厅射灯倍率，把渲染带实测均值补到 150 地板之上；没有这一项即 1.0。",
+  "_gate": { "mean": 150, "darkPct": 15, "shortSide": 240 },
+  "_retired": {
+    "wanlijiangshan": "v2.19 退役。绢本底色通幅 127.8，横向可裁窗口最亮也只有 126.9（它不是一段暗，是通幅暗），渲染带均值 80 —— 补到地板 150 要 1.875× 亮度，那不叫调灯叫重画。按「选画一定要足够清晰且亮堂」这条新标准让位给油画三幅。图与 scene.js 的 ART 条目、ART_FB 人格映射都保留着，随时可召回；theme.js 白名单已摘除该键，存量用户会被回落到 auto 随机展卷，不是报错。"
+  },
+  "art": {
+    "fuchun": {
+      "file": "assets/scene-fuchun.jpg", "name": "富春山居图", "mount": "juan",
+      "verified": false, "mean": 234.0, "darkPct": 0.0, "w": 8000, "h": 500,
+      "note": "国画六幅的馆藏归属与授权无凭据可查，展签只题画名，不编造作者与年代。"
+    },
+    "qingming": {
+      "file": "assets/scene-qingming.jpg", "name": "清明上河图", "mount": "juan",
+      "verified": false, "mean": 183.4, "darkPct": 0.4, "w": 4000, "h": 250,
+      "lift": 1.21
+    },
+    "shuangsong": {
+      "file": "assets/scene-shuangsong.jpg", "name": "双松平远图", "mount": "zhou",
+      "verified": false, "mean": 200.6, "darkPct": 0.0, "w": 3400, "h": 212,
+      "lift": 1.03
+    },
+    "qiuse": {
+      "file": "assets/scene-qiuse.jpg", "name": "溪山秋色图", "mount": "zhou",
+      "verified": false, "mean": 197.6, "darkPct": 0.0, "w": 1831, "h": 114,
+      "lift": 1.06
+    },
+    "wanlijiangshan": {
+      "file": "assets/scene-wanlijiangshan.jpg", "name": "万里江山图", "mount": "jing",
+      "verified": false, "mean": 127.8, "darkPct": 0.0, "w": 3910, "h": 244,
+      "retired": "v2.19",
+      "note": "全库最暗的一幅（127.8）。v2.19 前它在暗主题被 brightness(.46) 压到约 59 —— 那是「太暗」的来处；改 .74 后回到约 95，仍不过 §四 亮度闸门，遂退役（见 _retired）。"
+    },
+    "sihuayu": {
+      "file": "assets/scene-sihuayu.jpg", "name": "四花雨禅图", "mount": "jing",
+      "verified": false, "mean": 182.9, "darkPct": 0.0, "w": 2640, "h": 165,
+      "lift": 1.22
+    },
+    "andes": {
+      "file": "assets/scene-oil-andes.jpg", "name": "安第斯山之心", "mount": "oil",
+      "verified": true, "artist": "弗雷德里克·埃德温·丘奇", "artistEn": "Frederic Edwin Church",
+      "titleEn": "Heart of the Andes", "year": "1859", "medium": "布面油画",
+      "source": "The Metropolitan Museum of Art · Open Access", "objectId": 10481,
+      "rights": "CC0 / Public Domain",
+      "mean": 159.9, "darkPct": 3.4, "w": 3124, "h": 521,
+      "visible": { "mean": 173.2, "darkPct": 1.7, "std": 37.1, "h": 195 }
+    },
+    "estaque": {
+      "file": "assets/scene-oil-estaque.jpg", "name": "从拉德斯托卡眺望马赛湾", "mount": "oil",
+      "verified": true, "artist": "保罗·塞尚", "artistEn": "Paul Cézanne",
+      "titleEn": "The Gulf of Marseille Seen from L'Estaque", "year": "约 1885", "medium": "布面油画",
+      "source": "The Metropolitan Museum of Art · Open Access", "objectId": 435872,
+      "rights": "CC0 / Public Domain",
+      "mean": 163.0, "darkPct": 0.0, "w": 1861, "h": 310,
+      "visible": { "mean": 167.3, "darkPct": 0.0, "std": 28.1, "h": 116 },
+      "note": "大都会给这一件的 original 只有 1905px 宽，可见带 116px 对 88–96px 的条高仍是下采样，不放大；亮度与暗像素两项余量最大。"
+    },
+    "cedars": {
+      "file": "assets/scene-oil-cedars.jpg", "name": "达里恩的雪松暮色", "mount": "oil",
+      "verified": true, "artist": "约翰·弗雷德里克·肯塞特", "artistEn": "John Frederick Kensett",
+      "titleEn": "Twilight in the Cedars at Darien, Georgia", "year": "1872", "medium": "布面油画",
+      "source": "The Metropolitan Museum of Art · Open Access", "objectId": 11328,
+      "rights": "CC0 / Public Domain",
+      "mean": 155.8, "darkPct": 10.9, "w": 2527, "h": 421,
+      "visible": { "mean": 164.8, "darkPct": 4.2, "std": 61.3, "h": 158 }
+    }
+  },
+  "_rejected": [
+    { "cand": "Claude Monet · Water Lilies", "why": "大都会的莫奈藏品 isPublicDomain=false 且无 primaryImage —— 拿不到合法直链，换人" },
+    { "cand": "Vincent van Gogh · Sunflowers / Oleanders / La Berceuse", "why": "可见切面均值 104–146，不过 150 闸门" },
+    { "cand": "Auguste Renoir · Versailles", "why": "均值 152 过闸，但最亮的横切落在空天与画布纹理上，std 被织纹骗高 —— 切面读起来是一张空白底，撤下" },
+    { "cand": "Auguste Renoir · A Young Girl with Daisies / Young Girl Bathing", "why": "竖幅人物，16:1 切面必然腰斩，均值也只有 104" },
+    { "cand": "Albert Bierstadt · Merced River, Yosemite Valley", "why": "均值 188 但高 std 来自云层，切面无物可看" },
+    { "cand": "Alfred Sisley · Marly-le-Roi / The Seine at Bougival / Sahurs Meadows", "why": "可见切面均值 116–148，差在闸门线上" },
+    { "cand": "Henri Rousseau · The Repast of the Lion / Banks of the Bièvre", "why": "均值 124 / 150，暗像素 10.6% / 8.1% —— 前者不过亮，后者贴线" }
+  ]
+}

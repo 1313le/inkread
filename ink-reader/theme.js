@@ -284,7 +284,12 @@
     if (["off", "auto", "on"].indexOf(out.night) < 0) out.night = DEFAULTS.night;
     /* 旧设置的 nightSense（环境光/按时间）已随传感器移除，静默丢弃 */
     delete out.nightSense;
-    if (["auto", "fuchun", "qingming", "shuangsong", "wanlijiangshan", "qiuse", "sihuayu"].indexOf(out.sceneArt) < 0) out.sceneArt = DEFAULTS.sceneArt;
+    /* 校验表与 scene.js 的 GALLERY 同序；油画三幅（andes/estaque/cedars）随 v2.19 入列，
+       万里江山图同版退役（绢本通幅 127.8，过不了 §四 亮度闸门）—— 已存该键的人会被
+       回落到 auto 随机展卷，不是报错。这里不改成现取：normalize() 可能在 scene.js
+       之前被调用，现取会把已存的油画键洗掉。 */
+    if (["auto", "fuchun", "qingming", "shuangsong", "qiuse", "sihuayu",
+         "andes", "estaque", "cedars"].indexOf(out.sceneArt) < 0) out.sceneArt = DEFAULTS.sceneArt;
     return out;
   }
 
@@ -644,7 +649,9 @@
   var SEGS = {
     themeMode: [["manual", "手动"], ["system", "跟随系统"], ["schedule", "按时间"]],
     intensity: [["quiet", "静谧"], ["standard", "标准"], ["bold", "张扬"]],
-    sceneArt: [["auto", "每次随机"], ["fuchun", "富春山居图"], ["qingming", "清明上河图"], ["shuangsong", "双松平远图"], ["wanlijiangshan", "万里江山图"], ["qiuse", "溪山秋色图"], ["sihuayu", "四花雨禅图"]],
+    /* 兜底表：正常情况下 seg() 会从 scene.js 的 GALLERY 现取（见下）；
+       只有 InkScene 没加载成功时才用这一份。 */
+    sceneArt: [["auto", "每次随机"], ["fuchun", "富春山居图"], ["qingming", "清明上河图"], ["shuangsong", "双松平远图"], ["qiuse", "溪山秋色图"], ["sihuayu", "四花雨禅图"], ["andes", "安第斯山之心"], ["estaque", "从拉德斯托卡眺望马赛湾"], ["cedars", "达里恩的雪松暮色"]],
     schedMode: [["sun", "日出日落"], ["fixed", "按钟点"]],
     align: [["left", "左对齐"], ["justify", "两端对齐"]],
     indent: [[0, "顶格"], [2, "缩进 2 字"]],
@@ -685,8 +692,14 @@
   };
 
   function seg(key, cur) {
+    /* 天幕画卷的清单事实源在 scene.js 的 GALLERY（本文件先于它加载，故 SEGS 里那份只是兜底）：
+       渲染时 InkScene 已就位，按它现取，新增一幅画不必再来改这里。 */
+    var opts = SEGS[key];
+    if (key === "sceneArt" && window.InkScene && window.InkScene.gallery && window.InkScene.gallery.length) {
+      opts = [["auto", "每次随机"]].concat(window.InkScene.gallery.map(function (g) { return [g.k, g.name]; }));
+    }
     return '<span class="ap-seg" data-seg="' + key + '">' +
-      SEGS[key].map(function (o) {
+      opts.map(function (o) {
         return '<button class="ap-seg-b' + (String(cur) === String(o[0]) ? " on" : "") +
           '" data-val="' + o[0] + '">' + o[1] + "</button>";
       }).join("") + "</span>";

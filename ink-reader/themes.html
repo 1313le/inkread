@@ -476,7 +476,13 @@
      开关与画卷与阅读页外观抽屉同源（inkread.read.v1 的 scene / sceneArt），零新键。
      「风格保留·交互才动」：页内天幕条只静态呈现，不调 pulse()。 */
   var SCENE_FAMS = ["seasons", "aurora", "pixel"];
-  var SCENE_ART_OPTS = [["auto", "每次随机"], ["fuchun", "富春山居图"], ["qingming", "清明上河图"], ["shuangsong", "双松平远图"], ["wanlijiangshan", "万里江山图"], ["qiuse", "溪山秋色图"], ["sihuayu", "四花雨禅图"]];
+  /* 画卷清单的事实源是 scene.js 的 GALLERY，这里只是兜底：曾经这份表被单独手抄过，
+     v2.19 退役万里江山图 + 入列三幅油画时漏改它，于是「天幕」分区还在列一幅已下架的画、
+     却选不到新油画（阅读页 Aa 抽屉那边是对的 —— 同一件事两份表就是这种下场）。 */
+  var SCENE_ART_FALLBACK = [["auto", "每次随机"], ["fuchun", "富春山居图"], ["qingming", "清明上河图"], ["shuangsong", "双松平远图"], ["qiuse", "溪山秋色图"], ["sihuayu", "四花雨禅图"]];
+  var SCENE_ART_OPTS = (window.InkScene && window.InkScene.gallery && window.InkScene.gallery.length)
+    ? [["auto", "每次随机"]].concat(window.InkScene.gallery.map(function (g) { return [g.k, g.name]; }))
+    : SCENE_ART_FALLBACK;
   var SCENE_ART_NAME = {};
   SCENE_ART_OPTS.forEach(function (o) { SCENE_ART_NAME[o[0]] = o[1]; });
 
