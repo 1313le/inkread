@@ -1168,6 +1168,14 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   function biAttr(html, i) {
     return String(html).replace(/^(\s*<\w+)/, '$1 data-bi="' + i + '"');
   }
+  /* 占位块（mdx，存量表格救活留下的）不产 DOM，所以 #doc 的子元素数 **小于** 块数。
+     块号 ↔ 元素一律走 data-bi：用子元素下标会让表格之后的块整体错位 ——
+     分页错位即整页空白，改字错位即点 A 段存进 B 段。fb 是调用方给的回退值。 */
+  function biOf(el, fb) {
+    var v = el && el.getAttribute ? el.getAttribute("data-bi") : null;
+    return v == null ? fb : Number(v);
+  }
+  function biEl(bi) { return qs('#doc [data-bi="' + bi + '"]'); }
   var BLOCK_HTML = blocks.map(function (b, i) { return biAttr(renderBlock(b), i); });
   var DOC_CLASS = "doc" + (doc.theme === "academic" ? " academic" : "");
 
@@ -1274,15 +1282,17 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   /* 单栏分页：按纸页可用高度逐块累积，块不跨页 */
   function packSingle(md, padTop, avail) {
     var kids = Array.prototype.slice.call(md.children);
-    var pages = [], curPage = [], startTop = 0;
+    var pages = [], curPage = [], startTop = 0, prevBi = -1;
     for (var i = 0; i < kids.length; i++) {
       var k = kids[i];
+      var bi = biOf(k, prevBi + 1);        /* 块号取自 data-bi，不是子元素序号 */
+      prevBi = bi;
       var top = k.offsetTop - padTop;
       var bottom = top + k.offsetHeight;
       if (curPage.length && (bottom - startTop > avail)) {
         pages.push(curPage); curPage = []; startTop = top;
       }
-      curPage.push(i);
+      curPage.push(bi);
     }
     if (curPage.length) pages.push(curPage);
     if (!pages.length) pages.push([]);
@@ -1305,11 +1315,13 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       return bad;
     }
     while (i < BLOCK_HTML.length && guard++ < 6000) {
+      if (!BLOCK_HTML[i]) { i++; continue; }   /* 占位块不渲染：放进页里就是一页空白 */
       cur.push(i);
       if (over(cur)) {
         cur.pop();
-        if (!cur.length) cur.push(i);   /* 单块自身即超高，独占一页 */
-        pages.push(cur); cur = [];
+        /* 放不下 ≠ 不要了：封当前页，让溢出那块从下一页重新试放（此前 i++ 直接跳过 = 正文丢块） */
+        if (!cur.length) { pages.push([i]); i++; cur = []; continue; }
+        pages.push(cur); cur = []; continue;
       }
       i++;
     }
@@ -1620,7 +1632,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       var rect = sheet.getBoundingClientRect();
       /* DOM 顺序即阅读顺序：取第一个尚未滚出视口顶部的块 */
       for (var i = 0; i < kids.length; i++) {
-        if (kids[i].getBoundingClientRect().bottom > rect.top + 4) return BLOCK_OFF[i] || 0;
+        if (kids[i].getBoundingClientRect().bottom > rect.top + 4) return BLOCK_OFF[biOf(kids[i], i)] || 0;
       }
       return BLOCK_OFF[BLOCK_OFF.length - 1] || 0;
     }
@@ -1638,7 +1650,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 
   /* 竖向浏览：把偏移锚回该块顶部（不回到章首） */
   function restoreScroll(off) {
-    var el = qs("#doc").children[blockAt(off)];
+    var el = biEl(blockAt(off));
     if (!el) return;
     var sheet = qs("#sheet");
     var d = el.getBoundingClientRect().top - sheet.getBoundingClientRect().top;
@@ -3205,7 +3217,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   var TTS = { eng: null, bound: false, liveEl: null, popBi: null, timerLabel: "不定时", speed: 1 };
   try { TTS.speed = Math.max(0.5, Math.min(3, parseFloat(localStorage.getItem("inkread.tts.speed.v1")) || 1)); } catch (e) {}
 
-  function unitEl(bi) { return qs('#doc [data-bi="' + bi + '"]'); }
+  function unitEl(bi) { return biEl(bi); }
   function unitIdxOf(bi) {
     for (var k = 0; k < SPEAK_UNITS.length; k++) if (SPEAK_UNITS[k].bi >= bi) return k;
     return Math.max(0, SPEAK_UNITS.length - 1);
@@ -3946,7 +3958,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 
   function setEditable(on) {
     editableIdx().forEach(function (i) {
-      var el = qs("#doc").children[i];
+      var el = biEl(i);
       if (!el) return;
       if (on) {
         el.classList.add("editable");
@@ -3998,7 +4010,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   function flushEdit() {
     var a = document.activeElement;
     if (!a || !a.classList || !a.classList.contains("editable")) return;
-    var i = Array.prototype.indexOf.call(qs("#doc").children, a);
+    var i = biOf(a, -1);
     if (i >= 0) commitBlock(a, i);
     if (a.blur) a.blur();
   }
@@ -4069,7 +4081,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     if (!EDIT.on) return;
     var el = e.target;
     if (!el.classList || !el.classList.contains("editable")) return;
-    var i = Array.prototype.indexOf.call(qs("#doc").children, el);
+    var i = biOf(el, -1);
     if (i >= 0) commitBlock(el, i);
   });
   /* 粘贴兜底：不支持 plaintext-only 的浏览器里，也保证只进纯文字 */
