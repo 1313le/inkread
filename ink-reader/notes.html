@@ -350,6 +350,14 @@ body.embed .work-layout > .card:first-child { display: none; }
 .work-layout > .card:first-child .notes-list {
   flex: 1 1 auto; min-height: 0; max-height: none;
 }
+/* v2.19.2 · 卡内超高时筛选条整条消失（用户实测：「类型/形态」看不到字）
+   —— flex 列的每个子项默认可收缩；而 .seg / .field 带 overflow:hidden，
+      按规范其「自动最小尺寸」退化为 0，于是收缩按各子项基准高等比例分摊，
+      筛选条被压到十几像素，12.5px 的文字被自身 overflow:hidden 整行裁光 —— 只剩色块与描边。
+   —— 收缩只该落在列表上（它自己会滚），其余固定控件一律钉住。 */
+.work-layout > .card:first-child > :not(.notes-list) { flex-shrink: 0; }
+/* 窗口极矮时（工作台上界小于固定控件之和）让整卡滚动，而不是把搜索框顶出卡框 */
+.work-layout > .card:first-child { overflow: auto; }
 /* 右卡在拉伸后编辑区自然增高（.work-card 已是 flex 列、min-height 560 保留） */
 
 /* ============ v2.9.4 · 输入区与周边区分（用户实测反馈：都白成一片） ============

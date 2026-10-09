@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.19.1";
+window.InkVersion = "2.19.2";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
