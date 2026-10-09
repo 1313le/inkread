@@ -93,7 +93,12 @@
   --accent-2-wash: color-mix(in oklab, var(--accent-2) 14%, transparent);
   --accent-2-deep: color-mix(in oklab, var(--accent-2) 86%, var(--lift));
   --accent-2-rule: color-mix(in srgb, var(--accent-2) 52%, transparent);
-  /* v2.14 朱批语义：批注/进度/当前态/书签统一引 --mark，不直接引 --accent/--cinnabar */
+  /* v2.14 朱批语义：批注/划线/进度/书签引 --mark（不直接引 --cinnabar）。
+     v2.19.3 收窄：**「当前态」从 --mark 迁回 --accent 家族** —— 朱砂是「红笔」的语义，
+     让它兼任导航当前态，代价是 29 套主题下当前态图标全是同一个红，用户读作
+     「图标不跟随主题」（问题四）。于是分工定死：
+       红笔（--mark）＝ 用户加在书上的痕迹：划线、批注、笔记标、进度、书签
+       强调（--accent/--accent-ink/--accent-wash）＝ 界面自己在说话：当前页、展开的按钮、选中的档 */
   --mark: var(--cinnabar);
   --mark-ink: color-mix(in oklab, var(--mark) 84%, var(--lift));
   --mark-wash: color-mix(in srgb, var(--mark) 12%, transparent);
@@ -358,10 +363,10 @@ html[data-tone="dark"] .eink-flash { background: var(--paper); }
 .nav-link .ic { color: var(--ink-3); transition: color .18s; }
 .nav-link:hover { background: var(--paper-3); color: var(--ink); }
 .nav-link.active { background: transparent; color: var(--ink); font-weight: 600; border-color: transparent; }
-.nav-link.active .ic { color: var(--mark-ink); }
+.nav-link.active .ic { color: var(--accent-ink); }
 .nav-link.active::before {
   content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 5px; height: 24px; background: var(--mark);
+  width: 5px; height: 24px; background: var(--accent-ink);
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 68%, 0 100%);
 }
 .nav-more { display: none; }
@@ -857,7 +862,7 @@ body[data-page="reader"] .app-content { overflow: clip; }   /* 同 .screen：cli
 .dock-btn svg { display: block; }
 .dock-btn:hover { background: var(--paper-3); color: var(--ink); }
 .dock-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.dock-btn[aria-expanded="true"] { color: var(--mark-ink); background: var(--mark-wash); }
+.dock-btn[aria-expanded="true"] { color: var(--accent-ink); background: var(--accent-wash); }
 .dock-btn b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .dock-prog { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 4px; }
 .dock-pct { flex: none; min-width: 34px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
@@ -1086,6 +1091,18 @@ body[data-page="reader"] .app-content { overflow: clip; }   /* 同 .screen：cli
 .doc blockquote { margin: 1.15em 0; padding: .95em 1.35em; background: var(--paper-2); border-left: 3px solid var(--accent); font-family: var(--font-kai); color: var(--ink-2); font-size: .97em; }
 .doc b, .doc strong { letter-spacing: .02em; }
 .doc a { color: var(--accent-ink); }
+
+/* 跨页片段（v2.19.3 分页拆分）：长段/长表/长列表不再整块搬家，而是按行、按节续排。
+   续段不留段前距也不缩进（它不是新起一段），续表收紧上边距并挂「续表」小字题注。
+   拆分只改摆放不改内容 —— 笔记与书签按文字锚定，位置不受影响。 */
+.doc p.p-cont { margin-top: 0; text-indent: 0; }
+html[data-auto="on"] .doc[data-doc-theme="novel"] p.p-cont { margin-top: 0; text-indent: 0; }
+.doc .md-list.md-lcont { margin-top: 0; }
+.doc .md-tablebox.md-tcont { margin-top: 0; }
+.doc .md-tcap { caption-side: top; text-align: left; font-size: .76em; letter-spacing: .16em; color: var(--ink-3); padding: 0 0 .34em; }
+/* 页尾末块去段后距（分页由 JS 打 .frag-last 标记）：留白留在页底，不变成页内滚动条 */
+.doc > .frag-last { margin-bottom: 0; }
+html[data-auto="on"] .doc[data-doc-theme="novel"] > .frag-last { margin-bottom: 0; }
 
 /* 按内容自适应：仅在开启时生效，关闭后完全以用户设置优先 */
 html[data-auto="on"] .doc[data-doc-theme="novel"] { --doc-lh: 2.15; --doc-ls: .045em; }
@@ -1333,15 +1350,36 @@ sup, sub { font-size: .7em; }
 /* ============ 任务页 ============ */
 /* 面层：页面底 --paper → 任务卡 --paper-2（抬升）→ 时刻牌 / 引文井 --paper-3（下凹）。
    三层同源于主题原色，任一主题下都能读出层次，朱砂只落在「时刻牌左线 + 进度环 + 打卡印」。 */
-.day-timeline { position: relative; padding-left: 26px; }
-.day-timeline::before { content: ""; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 1px; background: var(--line); }
-.tl-item { position: relative; margin-bottom: 12px; }
+/* v2.19.3 §五 时间轴节点重排。旧实现实测三处偏差（探针 probe-tl.js 改前取证）：
+   ① 节点固定 top:20px，比卡片中线高 49.33px —— 条目是 138px 的多行卡，锚顶部就读成「点飘在上面」；
+   ② 轨道画在容器上、从 top:6 拉到 bottom:6，两头各超出首末节点约半张卡，线和点像两套东西；
+   ③ 描边用 --line，对沟槽底色只有 1.16~1.36:1（非文本要 3:1），等于看不见。
+   描边先试 --ink-3 仍压线（herb 2.99 差 0.01 就挂），定在 --ink-2：29 套最低 5.18。
+   横向其实本来就共轴（量出 0.00px），方案里记的「偏 1px」是误诊 —— 教训写进台账。
+   新写法：轨道中点 --tl-x 是唯一真源，节点与尾线都由它算出来，谁也不许再猜 left。 */
+.day-timeline { --tl-x: 8px; --tl-w: 2px; --tl-dot: 12px; --tl-gap: 12px; --tl-pad: 26px;
+  position: relative; padding-left: var(--tl-pad); }
+.tl-item { position: relative; margin-bottom: var(--tl-gap); }
+/* 尾线按条目分段：本条顶边 → 下一条顶边；首条改从自己的节点起，末条到自己的节点止
+   （Ant Design 末条藏尾、Primer 靠容器铺满，都要再收一次口，这里用:first/:last 直接算出来） */
+.tl-item::after {
+  content: ""; position: absolute; z-index: 0; width: var(--tl-w); border-radius: 1px;
+  left: calc(var(--tl-x) - var(--tl-pad) - var(--tl-w) / 2); top: 0; bottom: calc(-1 * var(--tl-gap));
+  background: var(--line);
+}
+.tl-item:first-child::after { top: 50%; }
+.tl-item:last-child::after { bottom: 50%; }
+/* 节点：translate(-50%,-50%) 让圆心恒等于 (left, top) 这个点，与 --tl-x 的轨道中线天然重合；
+   纵向 top:50% 取的是条目盒（= 卡片盒，margin 不在盒内）的中线 */
 .tl-item::before {
-  content: ""; position: absolute; left: -24px; top: 20px; width: 9px; height: 9px;
-  border-radius: 50%; background: var(--paper-2); border: 1.5px solid var(--line);
+  content: ""; position: absolute; z-index: 1; box-sizing: border-box;
+  left: calc(var(--tl-x) - var(--tl-pad)); top: 50%; transform: translate(-50%, -50%);
+  width: var(--tl-dot); height: var(--tl-dot); border-radius: 50%;
+  background: var(--paper-2); border: 2px solid var(--ink-2);
 }
 .tl-item.done::before { background: var(--accent); border-color: var(--accent-ink); }
-.tl-item.now::before { border-color: var(--accent-ink); box-shadow: 0 0 0 4px var(--accent-wash); }
+/* 「实心」只留给已打卡；今日用描边+光晕，两者叠加时读作「今天要做的已完成项」 */
+.tl-item.now::before { border-color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-wash); }
 
 .task-card { display: flex; gap: 15px; align-items: flex-start; padding: 15px 17px; background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--sh-sm); transition: border-color .2s, opacity .3s; }
 .task-card:hover { border-color: var(--ink-3); }
@@ -1847,7 +1885,10 @@ body:not(.immersive) .immerse-bar { display: none; }
 .wb-head .field { flex: 1; min-width: 180px; border-color: transparent; background: transparent; font-size: 15.5px; font-weight: 700; padding: 5px 2px; letter-spacing: .02em; }
 .wb-head .field:focus { border-color: var(--line); box-shadow: none; background: var(--paper); padding: 5px 10px; }
 .wb-src { display: inline-flex; align-items: center; gap: 7px; padding: 3px 9px; border: 1px solid var(--rule); border-radius: var(--r-sm);
-  background: var(--paper-2); font-size: 11.5px; color: var(--ink-2); letter-spacing: .04em; }
+  background: var(--paper-2); font-size: 11.5px; color: var(--ink-2); letter-spacing: .04em;
+  flex: 0 1 auto; min-width: 0; }
+.wb-src > .ic { flex: none; }
+.wb-src-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-src a { color: var(--accent-ink); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .wb-src a:hover { text-decoration: underline; }
 .wb-foot { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--line-2); }
@@ -2102,39 +2143,75 @@ html.boot-skip .device { animation-delay: 0s; animation-duration: .3s; }
 .device { animation: appIn .5s cubic-bezier(.2, .8, .3, 1) .46s backwards; }
 @keyframes appIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 
-/* ---------- v2.17 · 换页转场「落墨」----------
-   换页 = 换一张纸：朱砂小印落定（离场 140ms）→ 新页首帧接住同一张纸与印，随即揭起（入场 220ms）。
-   用 body 的两个伪元素而不是注入节点：伪元素随 <html> 上的类在「首帧之前」就位，
-   不必等 DOMContentLoaded，新页不存在"脚本还没跑就露白"的空窗。
-   只动 transform/opacity，单段 ≤220ms（NN/g：标准转场 200–300ms）；减少动效下整条不生效。 */
+/* ---------- v2.19.3 §六 换页转场「过纸」----------
+   方案原本写「纸页按导航方向横向滑入滑出」，调研把这条否了：
+   · Material《The motion system》—— 顶层导航用 fade through，明写理由
+     "the fade through pattern does not mislead users to think they can swipe horizontally between destinations"；
+   · Material 3《Transitions》给 navigation rail / drawer / bar 单列 top level transition：
+     "Since the content of top level destinations isn't necessarily related, the motion intentionally
+     does not use grouping or persistent elements to create a strong relationship between screens."
+   侧栏六项（书架/阅读/笔记/闪卡/任务/主脑）是六个并列任务，不是一叠有前后次序的纸，
+   横向方向感等于许诺一个并不存在的手势。改成纵向：纸自顶而下扫过屏幕 —— 盖住旧页时自上而下，
+   露出新页时也自上而下。单方向不回头，而露出的顺序正好是读序。
+
+   「过渡动画太简单」的病根也不是缺方向，是这三条（改前实测，探针 probe-nav-sheet.js 13 PASS / 15 FAIL）：
+   ① 纸只有不透明度、零位移 —— nav-out/nav-in 峰值 translateY 都是 0.0px，读起来是「屏幕闪了一下」
+      而不是「换了一张纸」；② 印章盖两次 —— nav-out 期间 ::after 不透明度峰值 1.00，nav-in 又落一次；
+   ③ 新页入场被压在纸底下 —— appIn 的 104~144ms 全在覆盖率 >0.5 时跑完，纸让开之后还剩 4 帧没淡到位。
+   对症：给纸真的位移加一道纸边投影；印章只在新页落定后落一次；新页不再做入场淡入 ——
+   「被纸扫过」本身就是入场。顺带把 .device 的 transform 从转场里摘干净（v2.18 那颗
+   「.device 残留 transform 变成 fixed 后代包含块」的雷，少一枚）。 */
 html.nav-out body::before, html.nav-in body::before {
   content: ""; position: fixed; inset: 0; z-index: 940; pointer-events: none;
   background-color: var(--paper); background-image: var(--grain);
+  box-shadow: 0 18px 30px -16px rgba(0, 0, 0, .30);
 }
-html.nav-out body::after, html.nav-in body::after {
+html.nav-out body::before { animation: navSheetIn .15s cubic-bezier(.2, .8, .3, 1) both; }
+html.nav-in  body::before { animation: navSheetOut .22s cubic-bezier(.4, 0, .7, .35) .04s both; }
+@keyframes navSheetIn  { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+@keyframes navSheetOut { from { transform: translateY(0); } to { transform: translateY(100%); } }
+
+/* 旧页在纸盖过来之前先暗下去，否则纸像是在盖一张静止的截图。
+   只动 .app-content 的 opacity，不动 .device：侧栏是「我一直在这一页」的空间锚，
+   跟着每次换页抖 8px 就把它变成被切换的内容了。也不加 transform —— .device 那条
+   「残留 transform 会使其成为 fixed 后代包含块」的老雷，能不踩就不踩。 */
+html.nav-out .app-content { animation: navLeave .15s ease-in both; }
+@keyframes navLeave { from { opacity: 1; } to { opacity: .3; } }
+
+/* 印章只在揭纸将尽时落一次，读作新页的落款。写在 nav-in 一条上而不是两条共用 ——
+   共用是旧版「盖两次」的根因：::after 只要 content 生成了又没有动画接管，
+   就会以 opacity:1 常驻在纸上。
+   fill 必须是 both 不能是 backwards —— 实测过：backwards 在动画跑完（600ms）后把
+   opacity 还给基础样式，而基础样式没写 opacity，于是默认 1，印章在 600→680ms（app.js 摘类）
+   之间整枚复现闪一下。探针 B7/B9/B10 就是抓到这一条的。 */
+html.nav-in body::after {
   content: "墨"; position: fixed; left: 50%; top: 50%; z-index: 941; pointer-events: none;
   display: grid; place-items: center; width: 46px; height: 46px; margin: -23px 0 0 -23px;
   background: var(--accent); color: var(--on-accent); border-radius: 8px;
   font-family: var(--font-kai); font-size: 26px; line-height: 1;
+  animation: navSeal .42s cubic-bezier(.2, .8, .3, 1) .18s both;
 }
-html.nav-out body::before { animation: navVeilIn .14s ease-out both; }
-html.nav-out body::after  { animation: navStamp .16s cubic-bezier(.2, .8, .3, 1) both; }
-html.nav-in  body::before { animation: navVeilOut .22s ease-in .06s both; }
-html.nav-in  body::after  { animation: navLift .22s ease-in .06s both; }
-html.nav-in  .device      { animation: appIn .34s cubic-bezier(.2, .8, .3, 1) .1s backwards; }
-@keyframes navVeilIn  { from { opacity: 0; } to { opacity: 1; } }
-@keyframes navStamp   { from { opacity: 0; transform: scale(1.4); } to { opacity: 1; transform: none; } }
-@keyframes navVeilOut { from { opacity: 1; } to { opacity: 0; } }
-@keyframes navLift    { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-10px) scale(.94); } }
-/* 减少动效：不铺纸、不落印（app.js 侧同步跳过拦截，直接走原生跳转）。
+/* 起手偏 7°、落地压回 .94 再回正 —— 手盖的印不会摆正；墨迹随后收干 */
+@keyframes navSeal {
+  0%   { opacity: 0; transform: scale(1.55) rotate(-7deg); }
+  38%  { opacity: 1; transform: scale(.94) rotate(-1.5deg); }
+  60%  { opacity: 1; transform: scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: scale(1) rotate(0deg); }
+}
+/* 新页不做入场淡入：它的「到达」由纸的扫过负责。写在 html.boot-skip .device 之后 ——
+   两条特异性相同，靠源序取胜。 */
+html.nav-in .device { animation: none; }
+
+/* 减少动效：不铺纸、不落印、不暗旧页（app.js 侧同步跳过拦截，直接走原生跳转）。
    用 display:none 而不是 animation:none —— 伪元素的 content 只在带 nav-* 类时存在，
-   停了动画它反而会以 opacity:1 常驻盖住整屏，脚本一慢就是一片下不去的黑。 */
+   停了动画它反而会以满不透明度常驻盖住整屏，脚本一慢就是一片下不去的纸。 */
 html[data-reduce="on"].nav-out body::before, html[data-reduce="on"].nav-in body::before,
-html[data-reduce="on"].nav-out body::after,  html[data-reduce="on"].nav-in body::after { display: none; }
+html[data-reduce="on"].nav-in body::after { display: none; }
+html[data-reduce="on"].nav-out .app-content,
 html[data-reduce="on"].nav-in .device { animation: none; }
 @media (prefers-reduced-motion: reduce) {
-  html.nav-out body::before, html.nav-in body::before,
-  html.nav-out body::after,  html.nav-in body::after { display: none; }
+  html.nav-out body::before, html.nav-in body::before, html.nav-in body::after { display: none; }
+  html.nav-out .app-content { animation: none; }
 }
 
 /* ---------- 二、书架编辑：卡上编辑键 / 管理模式勾选 / 批量操作条 ---------- */
@@ -2295,12 +2372,12 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
 }
 .ms-item .ic { color: var(--ink-3); transition: color .18s; }
 .ms-item:hover { background: var(--paper-3); color: var(--ink); }
-.ms-item:hover .ic { color: var(--mark-ink); }
+.ms-item:hover .ic { color: var(--accent-ink); }
 .ms-item.cur { color: var(--ink); font-weight: 600; border-color: transparent; }
-.ms-item.cur .ic { color: var(--mark-ink); }
+.ms-item.cur .ic { color: var(--accent-ink); }
 .ms-item.cur::before {
   content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 18px; height: 4px; background: var(--mark);
+  width: 18px; height: 4px; background: var(--accent-ink);
   clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%);
 }
 .ms-close {
@@ -2362,7 +2439,7 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
   .nav-more span { font-size: 10.5px; }
   .nav-more .ic { width: 20px; height: 20px; color: var(--ink-3); transition: color .18s; }
   .nav-more.active { color: var(--ink); font-weight: 600; }
-  .nav-more.active .ic { color: var(--mark-ink); }
+  .nav-more.active .ic { color: var(--accent-ink); }
 
   /* 内容区让出标签栏高度（标签栏自身已含底部安全区，此处同步叠加） */
   .app-content { padding-bottom: calc(74px + env(safe-area-inset-bottom)); }
@@ -2567,7 +2644,7 @@ html[data-int="bold"] .nav-link.active {
 html[data-int="bold"] .nav-link.active .ic { color: var(--on-accent); }
 html[data-int="bold"] .nav-link.active::before { display: none; }
 html[data-int="bold"] .nav-link.active:hover { background: var(--accent-deep); }
-html[data-int="bold"] .nav-more:hover .ic { color: var(--mark-ink); }
+html[data-int="bold"] .nav-more:hover .ic { color: var(--accent-ink); }
 
 /* ---------- 六、分段 / 芯片 / 输入：撞色选中态 ---------- */
 html[data-int="bold"] .seg,
@@ -2907,8 +2984,8 @@ html[data-int="bold"] .tbadge { border-radius: 0; }
 .aa-tblock i { display: block; width: 100%; height: 30px; border-radius: 6px; border: 1px solid var(--line); transition: border-color .18s, box-shadow .18s; }
 .aa-tblock span { font-size: 11px; letter-spacing: .04em; color: var(--ink-3); transition: color .18s; }
 .aa-tblock:hover i { border-color: var(--ink-3); }
-.aa-tblock.on i { border-color: var(--mark); box-shadow: 0 0 0 1.5px var(--mark); }
-.aa-tblock.on span { color: var(--mark-ink); font-weight: 700; }
+.aa-tblock.on i { border-color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent); }
+.aa-tblock.on span { color: var(--accent-ink); font-weight: 700; }
 .aa-tblock:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
 .aa-tall {
   flex: none; width: 100%; display: flex; align-items: center; justify-content: center; gap: 5px;
@@ -2916,7 +2993,7 @@ html[data-int="bold"] .tbadge { border-radius: 0; }
   font-size: 12px; letter-spacing: .08em; color: var(--ink-2); text-decoration: none;
   transition: border-color .18s, color .18s;
 }
-.aa-tall:hover { border-color: var(--mark); color: var(--mark-ink); }
+.aa-tall:hover { border-color: var(--accent); color: var(--accent-ink); }
 .aa-tall em { font-style: normal; }
 
 /* ---------- 三、主题商城 ---------- */
@@ -3260,9 +3337,11 @@ body.doc-edit .doc .editable { caret-color: var(--accent-ink); }
    两条锚：--sc-air 天幕亮锚（=纸，即「留白」）、--sc-earth 地景暗锚（=墨）。
    五级墨阶全由这两点 color-mix 插值 —— 于是「纸 → 墨」的浓淡在明暗两种主题下
    都成立，且不引入任何新色值。
-   ⚠ v2.16 铁律（此前只写在注释里、并未执行）：**天幕上唯一的饱和红是印章**。
+   ⚠ v2.16 铁律（此前只写在注释里、并未执行）：**天幕不许拿饱和红发光**。
      旧版有四处在拿 --accent 发光（日轮、山脊描边、上沿内发光、描金线），
      语汇是「霓虹」，与一幅纸本/绢本古物天然相反 —— 已全部收掉。
+     v2.19.3 又撤了画上那枚「墨读」朱印，于是这条从「唯一允许的红是印章」收紧成
+     「UI 层一处红都不加」；画面里剩下的红只属于真迹自己的款印。详见「二、题名」。
    ⚠ 全程零 linearGradient / radialGradient：墨的浓淡靠**平涂 + 高斯模糊**（真·晕染），
      不是渐变 —— 守住设计契约「禁用装饰性渐变」。
      唯一例外是 .sc-sheen：丝织裱边反的是有方向的宽缓坡，物理上就是渐变，
@@ -3292,7 +3371,9 @@ body.doc-edit .doc .editable { caret-color: var(--accent-ink); }
   /* v2.16：--sc-glow 已删（山脊不再有彩色边缘光）。印章是仅存的强调色用法。
    v2.19：印泥改吃 --mark 而不是 --accent —— 逐主题校准过的朱批对（mark/on-mark）
    才保证印文 ≥4.5:1；accent 在 cream 这类主题上是橄榄金，既不像印泥也压不住字。
-   这也让「天幕唯一饱和红是印章」这条铁律由 token 本身兜住，而不靠约定。 */
+   这也让「天幕 UI 层不拿饱和红发光」这条铁律由 token 本身兜住，而不靠约定。
+   （--sc-seal 只服务 SVG 兜底与 pixel 主题管线 —— 那是画内的落款，不是叠在真迹上的界面印；
+     真迹位图制式 v2.19.3 已撤掉界面印，见「二、题名」。） */
   --sc-seal:  var(--mark);
   --sc-seal-ink: color-mix(in oklab, var(--paper) 88%, var(--mark) 12%);
   transition: transform .26s cubic-bezier(.22, .7, .3, 1), filter .26s ease, opacity .26s ease;
@@ -3752,7 +3833,7 @@ body.immersive .mode-pop {
   transition: border-color .18s, background .18s;
 }
 .ms-chip:hover { border-color: var(--ink-3); }
-.ms-chip .ic { color: var(--mark-ink); }
+.ms-chip .ic { color: var(--accent-ink); }
 .ms-chip b { font-weight: 700; letter-spacing: .04em; }
 .ms-chip .ms-auto,
 .ms-chip .ms-manual {
@@ -3761,8 +3842,8 @@ body.immersive .mode-pop {
   border: 1px solid var(--line); color: var(--ink-3);
 }
 .ms-chip .ms-auto {
-  color: var(--mark-ink);
-  border-color: var(--mark); background: var(--mark-wash);
+  color: var(--accent-ink);
+  border-color: var(--accent); background: var(--accent-wash);
 }
 
 .ms-sep { width: 1px; height: 16px; background: var(--line); }
@@ -3779,10 +3860,10 @@ body.immersive .mode-pop {
 .ms-tool .ic { color: var(--ink-3); transition: color .18s; }
 .ms-tool:hover { border-color: var(--ink-3); color: var(--ink); }
 .ms-tool.on {
-  border-color: var(--mark); color: var(--mark-ink);
-  background: var(--mark-wash);
+  border-color: var(--accent); color: var(--accent-ink);
+  background: var(--accent-wash);
 }
-.ms-tool.on .ic { color: var(--mark-ink); }
+.ms-tool.on .ic { color: var(--accent-ink); }
 .ms-hint {
   font-size: 11.5px; color: var(--ink-3); letter-spacing: .04em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42%;
@@ -4770,7 +4851,7 @@ html[data-reduce="on"] .note-row:hover, html[data-reduce="on"] .task-card:hover 
 .sc-mount-gold {                    /* 画心四周的描金细线（装池） */
   position: absolute; left: 0; right: 0; top: 3px; bottom: 3px;
   /* B4 旧金：装池的描金是暗赭金，不是朱砂。原式 --accent 66% 把裱边画成了红框，
-     违反「天幕上唯一的饱和红是印章」；顺带清掉 --earth-2 —— 那个变量全库未定义，
+     违反「天幕 UI 层不拿饱和红发光」；顺带清掉 --earth-2 —— 那个变量全库未定义，
      一直靠 color-mix 的兜底解析在跑。 */
   border-top: 1px solid color-mix(in oklab, var(--sc-earth) 62%, var(--amber) 38%);
   border-bottom: 1px solid color-mix(in oklab, var(--sc-earth) 74%, var(--amber) 26%);
@@ -4786,7 +4867,7 @@ html[data-reduce="on"] .note-row:hover, html[data-reduce="on"] .task-card:hover 
 .sc-knob-l { left: 1px; }
 .sc-knob-r { right: 1px; }
 
-/* 立轴：上细天杆、下粗地杆（横贯条宽），天杆下两条惊燕带 */
+/* 立轴：上细天杆、下粗地杆（横贯条宽）。惊燕带 v2.19.3 撤除（见 scene.js mountWrap）。 */
 .sc-m-zhou .sc-mount-heart { left: 4px; right: 4px; top: 5px; bottom: 8px; }
 .sc-pole {
   position: absolute; left: 0; right: 0; z-index: 4; pointer-events: none;
@@ -4796,14 +4877,6 @@ html[data-reduce="on"] .note-row:hover, html[data-reduce="on"] .task-card:hover 
 }
 .sc-pole-top    { top: 1px;    height: 3px; border-radius: 2px; }
 .sc-pole-bottom { bottom: 1px; height: 6px; border-radius: 3px; }
-.sc-ribbon {
-  position: absolute; top: 5px; z-index: 4; pointer-events: none;
-  width: 3px; height: clamp(9px, 1.9vw, 16px);
-  background: color-mix(in oklab, var(--sc-earth) 52%, var(--amber) 48%);
-  opacity: .5;
-}
-.sc-ribbon-l { left: 24%; }
-.sc-ribbon-r { right: 24%; }
 
 /* 镜心·册页：四边等宽绫边 + 四合如意斜角，无杆无轴 —— 最素的一式 */
 .sc-m-jing .sc-mount-heart { left: 6px; right: 6px; top: 6px; bottom: 6px; }
@@ -4823,7 +4896,7 @@ html[data-reduce="on"] .note-row:hover, html[data-reduce="on"] .task-card:hover 
    调研结论（Met 框架馆藏 / V&A 纹样库）：连续起伏的半圆装饰带叫 gadrooning，
    巴洛克—洛可可框的标准语言；现代美术馆对厚涂油画另留一道 floater 阴影缝，
    让颜料厚度被看见 —— 这里取古典波浪的形，保留那道缝。
-   金素一律从 --amber 出，**绝不取 --accent**：天幕上唯一的饱和红是印章。 */
+   金素一律从 --amber 出，**绝不取 --accent**：装裱不许拿饱和红发光（见「一、画布」铁律）。 */
 .sc-m-oil {
   --g-hi: color-mix(in oklab, var(--amber) 74%, var(--sc-air));
   --g-md: color-mix(in oklab, var(--amber) 80%, var(--sc-earth));
@@ -4873,6 +4946,10 @@ html[data-tone="dark"] .sc-m-oil {
   top: 0; bottom: 0; width: 9px;
   background: linear-gradient(90deg, var(--g-lo), var(--g-hi) 46%, var(--g-lo));
 }
+/* v2.19.3：左右两条原本都没写水平锚点 —— position:absolute 下 left:auto 会退回
+   「静态位置」，两条因此一起叠在画框左边，右缘金边整个不见了（用户：画框最右侧没了）。 */
+.sc-frame-l { left: 0; }
+.sc-frame-r { right: 0; }
 .sc-frame-badge {                   /* 上轨中央的 cartouche 牌心 */
   position: absolute; top: 0; left: 50%; transform: translateX(-50%);
   width: clamp(20px, 4vw, 34px); height: 8px; z-index: 5; pointer-events: none;
@@ -4890,28 +4967,14 @@ html[data-tone="dark"] .sc-m-oil {
     color-mix(in oklab, var(--sc-air) 78%, transparent) 47%, transparent 62%);
 }
 
-/* ---------- 二、题名两件套：印 + 签 ----------
-   印：两字斋馆名「墨读」，白文（红底白字）—— 调研结论：白文在小尺寸下比朱文活得久。
-       它只承担装饰与「款」的位置感，不承载画名。
+/* ---------- 二、题名：只留「签」（v2.19.3 起）----------
    签：画名的正统载体。**必须有自己的不透明底板**（取裱绫色，不取画面像素）——
        旧版 .sc-mount-title 是 10.5px / opacity .72 / 无底衬的竖排小字，
-       直接压在真迹的笔痕上，对比度连算都算不出来，这就是「看不清画名」的全部原因。 */
-.sc-m-seal {
-  position: absolute; z-index: 5; pointer-events: none;
-  display: grid; place-items: center;
-  width: clamp(13px, 2.5vw, 20px); height: clamp(13px, 2.5vw, 20px);
-  border-radius: 1.5px;
-  background: var(--sc-seal);
-  color: var(--on-mark);
-  font-family: var(--font-kai); font-weight: 600;
-  font-size: clamp(6px, 1.15vw, 9.5px); line-height: 1;
-  writing-mode: vertical-rl; letter-spacing: .5px;
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--on-mark) 62%, transparent);
-  opacity: .93;
-}
-.sc-m-juan .sc-m-seal { right: 12px; bottom: 6px; }
-.sc-m-zhou .sc-m-seal { right: 10px; bottom: 10px; }
-.sc-m-jing .sc-m-seal { right: 9px;  bottom: 9px; }
+       直接压在真迹的笔痕上，对比度连算都算不出来，这就是「看不清画名」的全部原因。
+   印：v2.19 曾在画上压一枚两字朱印「墨读」，v2.19.3 撤除 —— 用户反馈那是个多余的
+       红色贴纸，真迹自带款印，不需要现代斋馆印再署一次。铁律随之改写：**天幕的 UI 层不叠加
+       任何饱和红**（画框/裱绫/签条一律走 --amber 与墨色）；画面里的红只许来自真迹自身的款印，
+       以及 SVG 兜底管线画内的落款（scene.js seal()，pixel 主题下它是画的一部分，不是界面贴纸）。 */
 .sc-label, .sc-plate {
   position: absolute; z-index: 5; pointer-events: none;
   display: flex; align-items: baseline; gap: 7px; white-space: nowrap;
@@ -4954,50 +5017,73 @@ html[data-tone="dark"] .sc-m-oil {
 .sc-ink.scv-hanjiang .sc-near { opacity: .94; }          /* 寒江：山石更实 */
 .sc-ink.scv-wanhe .sc-mid path, .sc-ink.scv-wanhe .sc-far path { opacity: .96; }
 
-/* ---------- 三、开卷仪式（一次性 · 灯动画不动）----------
-   v2.19 撤掉那三支 infinite（雾 92s / 雁 46s / 整卷 54s 永远不停）：
-   对一张真迹照片做 54 秒缓慢缩放平移，读起来是屏保，不是画在呼吸 ——
-   而且它违反了本文件开头「场景默认完全静止：没有循环 @keyframes，动效只由交互触发一次」的契约。
-   改成按制式各演一次「开卷」，演完彻底静止；只用 transform/opacity，幅度 ≤8% 位移。
-   另外把 .sc-mount-heart 与 .sc-inkart 的双层同速动画并成一层 ——
-   两层各推一遍会让画心与裱边产生 1px 级相对位移，那就是画面「发虚」的来源。 */
+/* ---------- 三、开卷仪式（每会话一次 · 按制式单向揭开）----------
+   v2.19 撤掉三支 infinite（雾 92s / 雁 46s / 整卷 54s 永远不停）；
+   v2.19.3 再撤掉「通用淡入缩放」：scUnroll/scDrop/scTurn 都是 translate+opacity+scale，
+   跟制式没关系 —— 调研结论（Space Continuum 的《清明上河图》手卷网站、故宫《韩熙载夜宴图》
+   App、HAL《Tour Into Painting》）是：数字手卷的看家动作**沿展开方向逐段揭示**，
+   不是整幅淡入。于是四制式各按自己的开法：
+     手卷 juan  自右向左揭（右手舒轴、左手卷纸，读卷的真实方向）
+     立轴 zhou  自上而下揭（垂轴落定）
+     镜心 jing  自中缝向两侧摊开（册页摊桌）
+     油画 oil   不揭（画布是一整块），只让斜掠光扫过一次
+   三条硬约束：① 只用 transform/opacity；② 只写 from，终点交给元素自然态 —— 于是既不用
+   fill:both（旧版那口 backwards 填充把画心在开场前压成半透明，正是「画面发灰」的来源），
+   也天然满足 reduced-motion：animation:none 一盖，覆绢就停在「已滑出」的自然态；
+   ③ 每会话一次，.sc-cer 由 scene.js ceremony() 挂上，切页 / 切主题重建 DOM 不再重演。
+   ⚠ v2.19.3 实测：揭开**不能**画在画心自己的 clip-path 上。clip-path 会把 .sc-mount-heart
+   逼成隔离组（与 isolation:isolate 同效），画心那层 mix-blend-mode:multiply 当场换了底色 ——
+   整条天幕平均亮度 241.8 → 202.9（均值差 39.0），仪式收尾那一格「啪」地亮回去。
+   改成覆绢：画心里压一片与天幕条同色的纸，滑出去即揭开。覆绢是画心的子节点，
+   祖先链上一个属性都不动，混合组原样；被它盖住的部分读起来就是「还没展开的空白纸」。 */
 @keyframes scFlock {
   0%   { transform: translate(-120px, 6px); opacity: 0; }
   12%  { opacity: .85; }
   76%  { opacity: .85; }
   100% { transform: translate(300px, -10px); opacity: 0; }
 }
-@keyframes scUnroll { from { transform: translateX(4%); opacity: .3; } to { transform: none; opacity: 1; } }
-@keyframes scKnob   { from { transform: translateY(-50%) rotate(-90deg); } to { transform: translateY(-50%) rotate(0); } }
-@keyframes scDrop   { from { transform: translateY(-5%); opacity: .35; } to { transform: none; opacity: 1; } }
-@keyframes scSwing  { 0% { transform: rotate(-7deg); } 62% { transform: rotate(4deg); } 100% { transform: rotate(0); } }
-@keyframes scTurn   { from { transform: scale(1.008); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes scRake   { 0% { opacity: 0; transform: translateX(-62%); } 24% { opacity: .22; }
-                      76% { opacity: .22; } 100% { opacity: 0; transform: translateX(62%); } }
-@keyframes scFade   { from { opacity: 0; } to { opacity: 1; } }
+@keyframes scKnob { from { transform: translateY(-50%) rotate(-90deg); } to { transform: translateY(-50%) rotate(0); } }
+@keyframes scRake { 0% { opacity: 0; transform: translateX(-62%); } 24% { opacity: .3; }
+                    76% { opacity: .3; } 100% { opacity: 0; transform: translateX(62%); } }
+/* 覆绢的开场帧：整片压在画心上。终点不写 —— 各制式的自然态就是「已滑出」。 */
+@keyframes scCoverOff { from { transform: none; } }
 
-/* 雁阵：展卷完成后掠过一次即隐 —— 飞鸟是国画里最「活」的东西，值得留，但不该是循环马戏 */
-.sc-mount .sc-birds { animation: scFlock 6.5s ease-out 1.6s 1 both; }
-/* 手卷 · 展卷：画心自右归位，右轴头转过 1/4 圈 */
-.sc-m-juan .sc-mount-heart { animation: scUnroll 1.5s cubic-bezier(.22, .7, .3, 1) both; }
-.sc-m-juan .sc-knob-r { animation: scKnob 1.5s cubic-bezier(.22, .7, .3, 1) both; }
-/* 立轴 · 落轴：画心自上坠定，惊燕带随后轻摆一次 */
-.sc-m-zhou .sc-mount-heart { animation: scDrop 1.2s cubic-bezier(.22, .7, .3, 1) both; }
-.sc-m-zhou .sc-ribbon { transform-origin: top center; animation: scSwing 1.1s ease-out .55s 1 both; }
-/* 镜心·册页 · 翻页 / 油画 · 上光：都是 opacity + 极小 scale */
-.sc-m-jing .sc-mount-heart { animation: scTurn .7s ease-out both; }
-.sc-m-oil .sc-mount-heart { animation: scTurn .7s ease-out both; }
-.sc-m-oil .sc-rake { animation: scRake 1.15s ease-out .25s 1 both; }
-/* 减少动效 / 系统偏好（两道闸门各自成立）：仪式塌缩成一次 200ms 纯淡入，
-   掠过与斜掠光直接不演 —— 它们的全部信息都在「动」上，去掉动就没有残留可读性。 */
-html[data-reduce="on"] .sc-mount .sc-birds,
-html[data-reduce="on"] .sc-m-oil .sc-rake { animation: none !important; }
-html[data-reduce="on"] .sc-mount-heart,
-html[data-reduce="on"] .sc-m-juan .sc-knob-r,
-html[data-reduce="on"] .sc-m-zhou .sc-ribbon { animation: scFade .2s ease both !important; }
+/* 雁阵：展卷完成后掠过一次即隐 —— 飞鸟是国画里最「活」的东西，值得留，但不该是循环马戏。
+   （鸟只在 SVG 兜底管线里有；真迹位图没有鸟。） */
+.sc-cer .sc-mount .sc-birds { animation: scFlock 6.5s ease-out 1.6s 1 both; }
+/* 手卷 · 展卷：右轴头转过 1/4 圈，覆绢自右向左滑出 */
+.sc-cer .sc-m-juan .sc-knob-r { animation: scKnob 1.35s cubic-bezier(.3, .65, .25, 1); }
+/* 四制式共用的那片纸：z-index 5 压住画心与暗角，被画心的 overflow 裁着 */
+.sc-cer .sc-m-juan .sc-mount-heart::after,
+.sc-cer .sc-m-zhou .sc-mount-heart::after,
+.sc-cer .sc-m-jing .sc-mount-heart::before,
+.sc-cer .sc-m-jing .sc-mount-heart::after {
+  content: ""; position: absolute; z-index: 5; pointer-events: none;
+  background: var(--paper-3);
+  animation: scCoverOff 1.2s cubic-bezier(.3, .65, .25, 1);
+}
+.sc-cer .sc-m-juan .sc-mount-heart::after { inset: 0; transform: translateX(-101%); animation-duration: 1.35s; }
+/* 立轴 · 垂轴：覆绢向下滑出，画面自上而下落定 */
+.sc-cer .sc-m-zhou .sc-mount-heart::after { inset: 0; transform: translateY(101%); animation-duration: 1.05s; }
+/* 镜心·册页 · 摊开：两半各朝外滑，自中缝向两侧 */
+.sc-cer .sc-m-jing .sc-mount-heart::before { top: 0; bottom: 0; left: 0; width: 50%; transform: translateX(-101%); }
+.sc-cer .sc-m-jing .sc-mount-heart::after  { top: 0; bottom: 0; right: 0; width: 50%; transform: translateX(101%); }
+/* 油画 · 上光：画布是一整块，不揭；灯扫过一次（soft-light 下 .22 几乎看不见，提到 .3） */
+.sc-cer .sc-m-oil .sc-rake { animation: scRake 1.25s ease-out .2s 1 both; }
+/* 减少动效 / 系统偏好（两道闸门各自成立）：一律不演 —— 覆绢停在自然态（已滑出），
+   画心直接全显；揭开动作的全部信息都在「动」上，塌缩成淡入只是把 1.3 秒的空白
+   换成 0.2 秒的空白，没有收益。 */
+html[data-reduce="on"] .sc-cer .sc-mount .sc-birds,
+html[data-reduce="on"] .sc-cer .sc-mount-heart::before,
+html[data-reduce="on"] .sc-cer .sc-mount-heart::after,
+html[data-reduce="on"] .sc-cer .sc-m-juan .sc-knob-r,
+html[data-reduce="on"] .sc-cer .sc-m-oil .sc-rake { animation: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .sc-mount .sc-birds, .sc-m-oil .sc-rake { animation: none !important; }
-  .sc-mount-heart, .sc-m-juan .sc-knob-r, .sc-m-zhou .sc-ribbon { animation: scFade .2s ease both !important; }
+  .sc-cer .sc-mount .sc-birds,
+  .sc-cer .sc-mount-heart::before,
+  .sc-cer .sc-mount-heart::after,
+  .sc-cer .sc-m-juan .sc-knob-r,
+  .sc-cer .sc-m-oil .sc-rake { animation: none !important; }
 }
 
 /* 天幕画卷选择器有九幅 + 「每次随机」= 10 枚签：.ap-seg 默认是 overflow:hidden 的
@@ -5010,6 +5096,21 @@ html[data-reduce="on"] .sc-m-zhou .sc-ribbon { animation: scFade .2s ease both !
 }
 .ap-seg[data-seg="sceneArt"] .ap-seg-b + .ap-seg-b { border-left: 1px solid var(--line); }
 .ap-seg[data-seg="sceneArt"] .ap-seg-b.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* 疏密五档同一条硬边条在 390px 上会被裁掉最后一枚，按 sceneArt 同款改成可折行的 chips；
+   min-width 44px 让两字标签拿到够得着的触控热区（触屏最小 44×44 共识） */
+.ap-seg[data-seg="den"] { flex-wrap: wrap; gap: 4px; border: none; background: transparent; overflow: visible; }
+.ap-seg[data-seg="den"] .ap-seg-b {
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper-2);
+  min-width: 44px; padding: 9px 12px; text-align: center;
+}
+.ap-seg[data-seg="den"] .ap-seg-b.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* 五枚档签平摊整行：疏密是「一排里挑一个」，等宽比按文字长短挤在一起更好扫读 */
+.aa-den-row { margin-bottom: 8px; }
+.aa-den-row .ap-seg { display: flex; width: 100%; }
+.aa-den-row .ap-seg .ap-seg-b { flex: 1 1 0; }
+.aa-den-ai { margin-top: 10px; }
 
 /* ---------- 四、视觉强度联动：印章人格 ----------
    标准 = 朱砂方章（默认）；大胆 = 直角方章 + 右上错位小方块（构成感，与图标呼应）；

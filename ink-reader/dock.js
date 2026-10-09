@@ -236,7 +236,7 @@
     /* ---------- 拖动：浮动 ⇄ 停靠 ---------- */
     var drag = null, dragEndAt = 0;
     function noDragTarget(t) {
-      return !!(t && t.closest && t.closest("button, a, input, textarea, select, [data-no-drag], .nw-grip, .dock-edge"));
+      return !!(t && t.closest && t.closest("button, a, input, textarea, select, [data-no-drag], .nw-grip, .dock-edge, .dock-rz"));
     }
     function onDown(e) {
       if (e.button != null && e.button !== 0) return;
@@ -257,7 +257,11 @@
       var gg = geom();
       drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY,
                ox: e.clientX - hr.left - gg.x, oy: e.clientY - hr.top - gg.y,
-               moved: false, wasDocked: wasDocked };
+               moved: false, wasDocked: wasDocked, cap: e.currentTarget || handle };
+      /* 捕获必须在 pointerdown 起手就做：停靠态一脱开，面板会按抓取点重排，
+         指针往往正好落在新增的 .dock-rz 顶条上；等攒够 6px 位移再捕获时，
+         handle 已经收不到 pointermove 了（表现为脱开后面板不再跟手）。 */
+      try { drag.cap.setPointerCapture(e.pointerId); } catch (err) {}
       var s = window.getSelection();
       if (s && s.removeAllRanges) s.removeAllRanges();   /* 拖窗不是划词 */
     }
@@ -266,7 +270,6 @@
       if (!drag.moved) {
         if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) < DRAG_MIN) return;
         drag.moved = true;
-        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
         document.body.classList.add("dock-drag");
       }
       var hr = host.getBoundingClientRect();
@@ -285,7 +288,7 @@
     function onUp(e) {
       if (!drag || (e && e.pointerId !== drag.id)) return;
       var moved = drag.moved, ctrl = e && (e.ctrlKey || e.metaKey);
-      try { handle.releasePointerCapture(drag.id); } catch (err) {}
+      try { drag.cap.releasePointerCapture(drag.id); } catch (err) {}
       document.body.classList.remove("dock-drag");
       var guided = guide.classList.contains("on");
       hideGuide();
@@ -360,6 +363,52 @@
       grip.addEventListener("pointerup", zEnd);
       grip.addEventListener("pointercancel", zEnd);
     }
+
+    /* ---------- 浮动态八方位缩放手柄 ----------
+       用户实测反馈「只有右下角一个把手可调大小」：单一 SE 抓角要试错才知道能拉，
+       而 VS / Figma 的窗口是四边八角通用。这里在面板内缘生成八条细手柄
+       （边 6px、角 12px，压在内容之上但不挡点击以外的区域）；
+       宿主若已提供右下可视抓角（grip），SE 那条就让给它，不叠第二块。
+       停靠态宽度由 .dock-edge 负责、最大化态无缩放语义，故只在 float 态显示。 */
+    ["n", "s", "e", "w", "ne", "nw", "se", "sw"].forEach(function (dir) {
+      if (dir === "se" && grip) return;
+      var bar = document.createElement("div");
+      bar.className = "dock-rz";
+      bar.dataset.dir = dir;
+      bar.setAttribute("aria-hidden", "true");
+      var z = null;
+      bar.addEventListener("pointerdown", function (e) {
+        if (e.button || st.state !== "float" || narrow()) return;
+        var g = geom();
+        z = { id: e.pointerId, px: e.clientX, py: e.clientY, x: g.x, y: g.y, w: g.w, h: g.h };
+        try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+        e.preventDefault(); e.stopPropagation();
+        document.body.classList.add("dock-drag");
+      });
+      bar.addEventListener("pointermove", function (e) {
+        if (!z || e.pointerId !== z.id) return;
+        var b = box(), dx = e.clientX - z.px, dy = e.clientY - z.py;
+        var x = z.x, y = z.y, w = z.w, h = z.h;
+        if (dir.indexOf("e") > -1) w = clamp(z.w + dx, minW, b.W - z.x - GAP);
+        if (dir.indexOf("s") > -1) h = clamp(z.h + dy, minH, b.H - z.y - GAP);
+        if (dir.indexOf("w") > -1) { w = clamp(z.w - dx, minW, z.x + z.w - GAP); x = z.x + z.w - w; }
+        if (dir.indexOf("n") > -1) { h = clamp(z.h - dy, minH, z.y + z.h - GAP); y = z.y + z.h - h; }
+        st.f.x = Math.round(x); st.f.y = Math.round(y);
+        st.f.w = Math.round(w); st.f.h = Math.round(h);
+        paint(false);
+      });
+      function zEnd(e) {
+        if (!z || (e && e.pointerId !== z.id)) return;
+        dragEndAt = Date.now();
+        save();
+        document.body.classList.remove("dock-drag");
+        try { bar.releasePointerCapture(z.id); } catch (err) {}
+        z = null;
+      }
+      bar.addEventListener("pointerup", zEnd);
+      bar.addEventListener("pointercancel", zEnd);
+      el.appendChild(bar);
+    });
 
     /* ---------- 停靠态：内侧竖边可调宽 ---------- */
     var edge = null, edgeDrag = null;

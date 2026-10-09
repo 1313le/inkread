@@ -151,7 +151,7 @@
             : '<button class="btn btn-sm btn-accent" data-check="' + t.id + '">' + icon("stamp", 14) + "打卡</button>") +
         "</div>" +
       "</div>";
-    return inTimeline ? '<div class="tl-item' + (on ? " done" : "") + '">' + card + "</div>" : card;
+    return inTimeline ? '<div class="tl-item' + (on ? " done" : "") + (t.today ? " now" : "") + '">' + card + "</div>" : card;
   }
 
   function focusEmpty() {

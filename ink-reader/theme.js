@@ -192,6 +192,50 @@
 
   var NUMERIC = { fs: 1, lh: 1, wt: 1, ls: 1, para: 1, indent: 1, fw: 1, dayAt: 1, nightAt: 1, lat: 1, lon: 1, nightWarm: 1, nightDim: 1 };
 
+  /* ------------------------------------------------------------
+     v2.19.3 B：页面疏密五档
+     字号 × 行高 × 段间距打包成一个「意图」，读者一次改一档就能把整本页容量
+     从「一页 18 行」调到「一页 30 行」，不必分别拖三条滑块。
+     端点守住可读性下限：中文正文 16px（网页中文排版共识的地板）、行距 1.6
+     （低于此值汉字上下行笔画开始互咬）；最疏一档封顶 2.3，再疏就成了画册。
+     mid 与旧默认值逐字相同，所以「适中」即出厂状态，不是新的一档。
+     ------------------------------------------------------------ */
+  var DEN = {
+    loose2: { fs: 18, lh: 2.30, para: 0.95 },
+    loose1: { fs: 17, lh: 2.15, para: 0.85 },
+    mid:    { fs: 17, lh: 2.00, para: 0.72 },
+    dense1: { fs: 16, lh: 1.80, para: 0.60 },
+    dense2: { fs: 16, lh: 1.60, para: 0.50 }
+  };
+  var DEN_ORDER = ["loose2", "loose1", "mid", "dense1", "dense2"];
+  var DEN_NAME = { loose2: "极疏", loose1: "稍疏", mid: "适中", dense1: "稍密", dense2: "极密" };
+
+  /* 当前三个数值落在哪一档才算命中：全等才亮，拖过滑块就退回「未选中」——高亮不能骗人 */
+  function denKey(s) {
+    for (var i = 0; i < DEN_ORDER.length; i++) {
+      var k = DEN_ORDER[i], d = DEN[k];
+      if (Math.round(+s.fs) === d.fs && Math.abs(+s.lh - d.lh) < 0.011 && Math.abs(+s.para - d.para) < 0.011) return k;
+    }
+    return "";
+  }
+
+  /* 档位行下的说明：自适应开着时先把话讲明白（选一档会接管排版），否则给当前档读数 */
+  function denHint(s) {
+    if (s.auto) {
+      return "五档各是一组「字号 · 行高 · 段距」配比。当前「按内容自适应」开着，行高由文体决定；" +
+        "点一档即转为手动排版，随时可在下方分栏区重开自适应。";
+    }
+    var k = denKey(s);
+    return k ? "当前「" + DEN_NAME[k] + "」：正文 " + DEN[k].fs + "px · 行高 " + DEN[k].lh +
+      " 倍 · 段距 " + DEN[k].para + "em。"
+      : "当前数值与五档都不完全一致（自定义）；点一档即可归位。";
+  }
+
+  /* 一键推荐的实测报告由阅读页写进来（reader.html 的 inkDenAI），改过排版即作废 */
+  var denReport = "";
+  var DEN_TOUCH = { fs: 1, lh: 1, para: 1, ls: 1, indent: 1, fw: 1, auto: 1, twoCol: 1 };
+  function setDenReport(txt) { denReport = txt || ""; aaSync(); }
+
   /* 常用城市：手动填经纬度对读者不友好，给一组预设；不在表内即「自定义」 */
   var CITIES = [
     { n: "北京", lat: 39.9042, lon: 116.4074 },
@@ -592,6 +636,16 @@
 
   /* 统一写入出口：写库 → 解析主题 → 落地变量 → 通知各页 */
   function commit(patch, silent) {
+    /* 疏密档位是「一组三个字段」的快捷键：落库前展开成实际排版字段。
+       显式选档即代表读者要自己掌控版面，连带关闭文体自适应（同 AUTO_OFF_KEYS 的原则），
+       否则 data-auto=on 时 .doc[data-doc-theme] 会在元素上重写 --doc-lh，把用户选的档高压掉。 */
+    if (patch && patch.den && DEN[patch.den]) {
+      var d = DEN[patch.den];
+      patch = Object.assign({}, patch, { fs: d.fs, lh: d.lh, para: d.para, auto: false });
+      delete patch.den;
+    } else if (patch && Object.keys(patch).some(function (k) { return DEN_TOUCH[k]; })) {
+      denReport = "";   /* 手动改过排版字段，上一次实测报告即作废 */
+    }
     var s = write(patch);
     apply(resolve(s));
     paint(s);
@@ -654,6 +708,7 @@
     sceneArt: [["auto", "每次随机"], ["fuchun", "富春山居图"], ["qingming", "清明上河图"], ["shuangsong", "双松平远图"], ["qiuse", "溪山秋色图"], ["sihuayu", "四花雨禅图"], ["andes", "安第斯山之心"], ["estaque", "从拉德斯托卡眺望马赛湾"], ["cedars", "达里恩的雪松暮色"]],
     schedMode: [["sun", "日出日落"], ["fixed", "按钟点"]],
     align: [["left", "左对齐"], ["justify", "两端对齐"]],
+    den: [["loose2", "极疏"], ["loose1", "稍疏"], ["mid", "适中"], ["dense1", "稍密"], ["dense2", "极密"]],
     indent: [[0, "顶格"], [2, "缩进 2 字"]],
     fw: [[28, "窄"], [32, "中"], [36, "宽"], [42, "极宽"]],
     prog: [["page", "页码"], ["percent", "百分比"], ["remain", "剩余时间"]],
@@ -1216,6 +1271,14 @@
       '<button class="aa-x" data-aa="close" aria-label="收起排版面板">' + icon("x", 17) + "</button></header>" +
     '<div class="aa-body">' +
       '<div class="aa-pv"><p>阅读的舒适度取决于版心宽度、行高与字距三者的配合。此段随下方设置即时重排，便于当场判断。</p></div>' +
+      '<section class="ap-sec"><h4>页面疏密<span class="ap-sec-note">字号 · 行高 · 段距一组配比</span></h4>' +
+        '<div class="aa-den-row">' + seg("den", denKey(s)) + "</div>" +
+        '<div class="ap-hint" id="aaDenNote">' + denHint(s) + "</div>" +
+        /* 「一键推荐」挨着档位行放：它改的就是这一行，报告也写在同一处；
+           只有阅读页有正文可试排，别的页面挂这个按钮就是空头承诺。 */
+        (window.inkDenAI ? '<div class="aa-den-ai"><button class="btn btn-ghost btn-sm" data-aa="denAI">' +
+          icon("sparkles", 14) + "一键推荐疏密</button></div>" : "") +
+      "</section>" +
       '<section class="ap-sec"><h4>字体<span class="ap-sec-note">每套主题自带配对</span></h4>' +
         '<div class="ap-row ap-row-col"><span class="ap-k">正文 · 中文</span>' + fontRow("font", s.font) + "</div>" +
         '<div class="ap-row ap-row-col"><span class="ap-k">标题 · 展示</span>' + fontRow("display", s.display) + "</div>" +
@@ -1282,6 +1345,7 @@
       if (!a) return;
       var act = a.dataset.aa;
       if (act === "close") aaClose();
+      else if (act === "denAI") { if (window.inkDenAI) window.inkDenAI(); }
       else if (act === "fsUp") commit({ fs: Math.min(RANGE.fs[1], read().fs + 1) });
       else if (act === "fsDown") commit({ fs: Math.max(RANGE.fs[0], read().fs - 1) });
       else if (act === "reset") {
@@ -1318,7 +1382,9 @@
     var s = read();
     aaPanel.querySelectorAll("[data-seg]").forEach(function (g) {
       var k = g.dataset.seg;
-      g.querySelectorAll(".ap-seg-b").forEach(function (b) { b.classList.toggle("on", String(s[k]) === b.dataset.val); });
+      /* 疏密档没存进库（它的效果就是那三个字段），高亮按当前数值反查得出 */
+      var cur = k === "den" ? denKey(s) : s[k];
+      g.querySelectorAll(".ap-seg-b").forEach(function (b) { b.classList.toggle("on", String(cur) === b.dataset.val); });
     });
     aaPanel.querySelectorAll("[data-sw]").forEach(function (b) {
       var on = !!s[b.dataset.sw];
@@ -1337,6 +1403,8 @@
     if (mn) mn.textContent = MODE_NOTE[s.mode] || "";
     var sh = aaPanel.querySelector("#aaSceneHint");
     if (sh) sh.textContent = sceneHint();
+    var dn = aaPanel.querySelector("#aaDenNote");
+    if (dn) dn.textContent = denReport || denHint(s);
     /* v2.14：快捷主题块高亮当前主题（含主题商城跳回后的回显） */
     var cur = resolve(read());
     aaPanel.querySelectorAll("[data-theme-pick]").forEach(function (b) {
@@ -1442,6 +1510,8 @@
     toHex: toHex, previewCustom: previewCustom, endPreview: endPreview,
     /* 阅读内排版面板 */
     aaOpen: aaOpen, aaClose: aaClose, aaToggle: aaToggle, aaSync: aaSync,
+    /* 疏密五档（v2.19.3 B/C）：配比表 + 反查 + 实测报告写回 */
+    DEN: DEN, DEN_ORDER: DEN_ORDER, DEN_NAME: DEN_NAME, denKey: denKey, setDenReport: setDenReport,
     /* 时间与日照：供各页做「跟随本机时间」的展示或扩展 */
     sunTimes: sunTimes, sunToday: sunToday, dayWindow: dayWindow,
     isDay: isDay, nowHours: nowHours, hhmm: hhmm, tzLabel: tzLabel,

@@ -244,7 +244,7 @@ body.embed .work-card { height: 100%; }
 /* 2. 标题行压到一行：沉浸钮在浮窗里与浮窗自身的「最大化」重复，撤下 */
 body.embed .wb-head { padding: 7px 10px; gap: 8px; flex-wrap: nowrap; }
 body.embed .wb-head .wb-imm { display: none; }
-body.embed .wb-head .field { font-size: 14px; min-width: 0; }
+body.embed .wb-head .field { font-size: 14px; min-width: 120px; }
 
 /* 3. 三视图页签单行不折（去图标、收内距）；「导图视图」按钮与同步标语一并撤下 */
 body.embed .view-bar { padding: 0 10px; gap: 8px; flex-wrap: nowrap; }
@@ -986,7 +986,7 @@ body[data-page="notes"] .mm-stage {
     state.curId = id;
     qs("#titleInput").value = n.title || "";
     qs("#srcChip").style.display = "inline-flex";
-    qs("#srcChip").innerHTML = icon("book-marked", 12) + esc(docTitle(n.docId)) + " · P" + (n.page || 1);
+    qs("#srcChip").innerHTML = icon("book-marked", 12) + '<span class="wb-src-t">' + esc(docTitle(n.docId)) + " · P" + (n.page || 1) + "</span>";
     qs("#gotoSrc").style.display = "inline-flex";
     qs("#gotoSrc").href = srcLink(n.docId, n.id);
     qs("#gotoSrc").innerHTML = icon("arrow-up-right", 12) + "回到原文";

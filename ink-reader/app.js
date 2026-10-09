@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.19.2";
+window.InkVersion = "2.19.3";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -537,15 +537,17 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  /* v2.17 · 换页转场「落墨」：新页首帧已带着纸与印（<head> 内联脚本挂的 html.nav-in），
-     动画跑完就把类摘掉，别让两个 fixed 伪元素长期占着合成层。 */
+  /* v2.17 · 换页转场：新页首帧已带着纸（<head> 内联脚本挂的 html.nav-in），动画跑完就把类摘掉，
+     别让两个 fixed 伪元素长期占着合成层。
+     v2.19.3 §六 · 时长从 420 抬到 680 —— 印章改成「纸让开之后只落一次」，
+     navSeal 的窗口是 .18s + .42s = 600ms，早摘会让印在半空中被抹掉。 */
   if (document.documentElement.classList.contains("nav-in")) {
-    setTimeout(function () { document.documentElement.classList.remove("nav-in"); }, 420);
+    setTimeout(function () { document.documentElement.classList.remove("nav-in"); }, 680);
   }
 
-  /* v2.17 · 落墨转场的「保底揭开」：遮幕动画是 fill:both，跑完会永久停在满遮上 ——
+  /* v2.17 · 换页转场的「保底揭开」：铺纸动画是 fill:both，跑完会永久停在满盖上 ——
      正常导航时新页紧接着提交、旧页被替换，看不见；异常时（导航没发生、目标页迟迟不提交、
-     从 bfcache 按后退回来脚本不再跑）就是一屏下不去的黑。两处退路都只挂一次，
+     从 bfcache 按后退回来脚本不再跑）就是一张下不去的纸。两处退路都只挂一次，
      不随点击累积监听。 */
   var liftTimer = 0;
   function liftVeil() {
@@ -558,10 +560,10 @@ document.addEventListener("DOMContentLoaded", function () {
   }
   window.addEventListener("pageshow", function (ev) { if (ev.persisted) liftVeil(); });
 
-  /* v2.17 · 侧栏导航接管（详见 styles.css「落墨」段）：
+  /* v2.17 · 侧栏导航接管（详见 styles.css「过纸」段）：
      ① 点的就是当前页 → 不跳转，只滚回顶部。这既符合 iOS/Mac 标签栏的既定约定，
         也从根上消灭了「同一个按钮反复点、动画反复播」——不导航，自然没有动画可播。
-     ② 换页 → 先落印（140ms）再导航，并给新页留一次性标记让它首帧接住。
+     ② 换页 → 先铺纸（150ms）再导航，并给新页留一次性标记让它首帧接住同一张纸。
      ③ 减少动效 / 修饰键（新开、拖拽）→ 一律放行给浏览器原生行为。 */
   document.addEventListener("click", function (e) {
     if (e.defaultPrevented || e.button !== 0) return;
@@ -585,9 +587,9 @@ document.addEventListener("DOMContentLoaded", function () {
     e.preventDefault();
     try { sessionStorage.setItem("inkread.nav.v1", "1"); } catch (err) {}
     document.documentElement.classList.add("nav-out");
-    /* navVeilIn 用了 both —— 动画跑完 veil 会一直停在 opacity:1，这是对的
-       （新页没提交前就该被纸盖住），但它同时也是「长时间黑屏」的唯一来源：
-       新页解析慢、或导航根本没发生（被别的监听吃掉），这一屏就下不去。
+    /* navSheetIn 用了 both —— 动画跑完纸会一直停在满盖位（translateY(0)），这是对的
+       （新页没提交前就该被纸盖住），但它同时也是「长时间下不去」的唯一来源：
+       新页解析慢、或导航根本没发生（被别的监听吃掉），这张纸就赖在屏幕上了。
        兜底见文件末尾的 liftVeil()：超时 + pageshow(persisted) 两条退路。 */
     scheduleLift();
     /* 动画 140ms，导航比它稍晚起步，免得半遮面就切走 */

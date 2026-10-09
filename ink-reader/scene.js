@@ -591,13 +591,11 @@
 
   /* ---------- 装裱四分制（v2.19）----------
      一个入口、一套 sc- 前缀，按制式换 DOM —— 样式不散开，降级路径也共用。
-     题名走「两件套」：**印**只落两字斋馆名（墨读），是天幕上唯一的饱和红，
-     承担装饰；**签**才是画名的正统载体，必须有自己的不透明底板（旧版那行
+     题名只用「签」：画名的正统载体，必须有自己的不透明底板（旧版那行
      10.5px / opacity .72 / 无底衬的小字直接压在真迹笔痕上，就是「看不清」的全部原因）。
-     油画制按西画惯例**不放印**：签名在画布上，画名在框下的铜牌上。 */
-  function mountSeal(meta) {
-    return meta.mount === "oil" ? "" : '<i class="sc-m-seal" aria-hidden="true">墨读</i>';
-  }
+     v2.19.3 去掉「墨读」朱印：用户反馈天幕上那枚红章是多余的 UI 记号，
+     真迹自带款印，再压一枚现代斋馆印只会被读成红色贴纸（铁律随之改写：天幕零饱和红）。
+     油画制按西画惯例本来就不放印：签名在画布上，画名在框下的铜牌上。 */
   function mountLabel(meta) {
     var sub = meta.artist
       ? '<i>' + meta.artist + " · " + meta.year + " · " + meta.medium + "</i>" : "";
@@ -611,11 +609,10 @@
     var heart = '<div class="sc-mount-heart">' + inner + "</div>";
     var body;
     if (m === "zhou") {
-      /* 立轴：上细天杆、下粗地杆（横贯条宽），天杆下两条惊燕带 */
+      /* 立轴：上细天杆、下粗地杆（横贯条宽）。惊燕带 v2.19.3 撤除：
+         3px 宽、十几 px 长、opacity .5 的两条短竖痕，在真迹上读起来是「画坏了」。 */
       body = gold +
         '<i class="sc-pole sc-pole-top" aria-hidden="true"></i>' +
-        '<i class="sc-ribbon sc-ribbon-l" aria-hidden="true"></i>' +
-        '<i class="sc-ribbon sc-ribbon-r" aria-hidden="true"></i>' +
         heart +
         '<i class="sc-pole sc-pole-bottom" aria-hidden="true"></i>';
     } else if (m === "jing") {
@@ -641,11 +638,32 @@
         '<i class="sc-mount-knob sc-knob-r" aria-hidden="true"></i>';
     }
     return '<div class="sc-mount sc-m-' + m + '" data-mount="' + m + '">' +
-      body + mountSeal(meta) + mountLabel(meta) + "</div>";
+      body + mountLabel(meta) + "</div>";
+  }
+
+  /* 开卷仪式：一次会话只演一遍。天幕在切页 / 切主题 / 切画时都会重建 DOM，
+     每建一次重演一遍，读起来就不是「开卷」而是「页面切换动画」了（用户：动效糟糕）。
+     sessionStorage 天然按标签页存活，重启应用才再来一次；取不到时退到内存标记。 */
+  var CER_KEY = "inkread.sceneCeremony.v1", _cerDone = false;
+  function ceremony() {
+    if (reduced() || _cerDone) return false;
+    _cerDone = true;
+    try {
+      if (sessionStorage.getItem(CER_KEY)) return false;
+      sessionStorage.setItem(CER_KEY, "1");
+    } catch (e) {}
+    return true;
+  }
+
+  /* .scene 外壳：--sc-* 令牌与定位都挂在这里，降级重建也必须走它（见 paintFallback） */
+  function sceneShell(inner, key, art) {
+    return '<div class="scene' + (ceremony() ? " sc-cer" : "") + '" data-scene="' + key +
+      '" data-phase="' + phase() + '"' +
+      (key === "seasons" ? ' data-mount="' + galleryMeta(art).mount + '"' : "") +
+      ' aria-hidden="true">' + inner + "</div>";
   }
 
   function build(key, art) {
-    var p = phase();
     var inner;
     if (key === "aurora") inner = aurora();
     else if (key === "seasons") {
@@ -653,31 +671,37 @@
          真迹自带天色，所以**不再悬那枚日轮** —— 一幅元代纸本上顶一颗实心红点，
          读起来是 UI 圆点而不是太阳（v2.16；旧版只把 opacity 压到 .58，没解决问题）。
          取不到 jpg 时的 SVG 兜底由 probeArt() 接手，那条管线才用 VARIANTS。 */
-      var meta = galleryMeta(art || artKey());
-      inner = '<div class="sc-sky"></div>' + artScroll(meta.k) + '<div class="sc-vig"></div>';
-      inner = mountWrap(inner, meta);
+      var a = art || artKey();
+      inner = '<div class="sc-sky"></div>' + artScroll(galleryMeta(a).k) + '<div class="sc-vig"></div>';
+      inner = mountWrap(inner, galleryMeta(a));
+      return sceneShell(inner, key, a);
     } else inner = svgScroll();
 
-    return '<div class="scene" data-scene="' + key + '" data-phase="' + p + '"' +
-      (key === "seasons" ? ' data-mount="' + galleryMeta(art).mount + '"' : "") +
-      ' aria-hidden="true">' + inner + "</div>";
+    return sceneShell(inner, key, art);
   }
 
   /* 画卷可用性：只探一次。取不到就把所有 seasons 天幕换成 SVG 版 —— 宁可差一点，不留空条。
      兜底仍走 mountWrap（装裱不能因为降级就消失），并按 ART_FB 选该幅画对应的人格。 */
   var _artOK = null;
+  function paintFallback(host, fb) {
+    /* 外壳在就只换里面的画：class 上的仪式标记与 --sc-* 令牌都随外壳留着。
+       旧写法直接 host.innerHTML = fb，把 .scene 一起冲掉了 —— 令牌全丢，装裱跟着变灰。 */
+    var sc = host.querySelector(".scene");
+    if (sc) { sc.innerHTML = fb; return; }
+    host.innerHTML = sceneShell(fb, "seasons", host.dataset.art || artKey());
+  }
   function probeArt(host, art) {
     if (_artOK === true) return;
     var meta = galleryMeta(art);
     var fb = mountWrap(svgScroll(fbVariant(art)), meta);
-    if (_artOK === false) { host.innerHTML = fb; return; }
+    if (_artOK === false) { paintFallback(host, fb); return; }
     var im = new Image();
     im.onload = function () { _artOK = true; };
     im.onerror = function () {
       _artOK = false;
       var list = document.querySelectorAll("[data-scene-host]");
       for (var i = 0; i < list.length; i++) {
-        if (list[i].dataset.scene === "seasons") list[i].innerHTML = fb;
+        if (list[i].dataset.scene === "seasons") paintFallback(list[i], fb);
       }
     };
     im.src = (ART[art] || ART.fuchun).src;

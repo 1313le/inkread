@@ -142,6 +142,39 @@ html[data-reduce="on"] .note-im { animation: none; }
 }
 #noteImQuote[hidden] { display: none !important; }
 
+/* 浮动预览卡（v2.19.3）：全屏写作时随写随渲染，可拖可缩，位置尺寸记本机。
+   原先要退出全屏回面板才看得到预览 —— 等于「写完才能核对」。 */
+.nim-pv {
+  position: absolute; z-index: 2; display: flex; flex-direction: column;
+  min-width: 260px; min-height: 160px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: 0 12px 30px -14px var(--edge), 0 2px 6px -3px var(--edge);
+}
+.nim-pv[hidden] { display: none !important; }
+.nim-pv-bar {
+  flex: none; height: 28px; display: flex; align-items: center; gap: 8px;
+  padding: 0 6px 0 10px; border-bottom: 1px solid var(--line-2);
+  border-radius: var(--r-md) var(--r-md) 0 0; background: var(--paper-2);
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.nim-pv-bar::before {
+  content: ""; flex: none; width: 8px; height: 11px; color: var(--ink-3); opacity: .6;
+  background-image: radial-gradient(currentColor 1.05px, transparent 1.15px);
+  background-size: 4px 4px;
+}
+.nim-pv-bar:hover::before, .nim-pv-bar:focus-visible::before { opacity: 1; color: var(--accent); }
+body.nim-pv-drag .nim-pv-bar { cursor: grabbing; }
+.nim-pv-name { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-2); }
+.nim-pv-body { flex: 1; min-height: 0; padding: 14px 16px; }
+.nim-pv-rz {
+  position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
+  cursor: nwse-resize; touch-action: none;
+}
+.nim-pv-rz::after {
+  content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px;
+  border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); opacity: .75;
+}
+
 @media (max-width: 720px) {
   .nim-title { display: none; }
   .nim-body { padding: 14px 12px 10px; }
@@ -211,18 +244,42 @@ html[data-reduce="on"] body[data-page="reader"] .reader-notes { transition: none
 /* 头部即拖动条：页签那一条整体可拖；文字不许选中（否则拖窗变划词） */
 .reader-notes .side-tabs { user-select: none; -webkit-user-select: none; cursor: grab; touch-action: none; }
 body.nw-drag .reader-notes .side-tabs { cursor: grabbing; }
-/* v2.10 专用拖动条（独立于页签按钮的「标题栏」）：8px 细条，居中一道短划线示意可拖 */
+/* v2.10 专用拖动条 → v2.19.3 升级为 28px 标题条。
+   8px 细线是「逻辑上能拖、视觉上不存在」：用户实测直接判为「浮窗拖不动」。
+   现在左端是抓握点阵、中间是窗名、停靠态整条下压并显出「拖出」提示。 */
 .nw-dragbar {
-  flex: none; height: 8px; position: relative; cursor: grab; touch-action: none;
+  flex: none; height: 28px; position: relative; display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; cursor: grab; touch-action: none;
   user-select: none; -webkit-user-select: none;
+  background: var(--paper-2); border-bottom: 1px solid var(--line-2);
 }
-.nw-dragbar::after {
-  content: ""; position: absolute; left: 50%; top: 3px; width: 34px; height: 2px;
-  margin-left: -17px; border-radius: 1px; background: var(--line-2); opacity: .55;
-  transition: opacity .16s, background-color .16s;
+.nw-dragbar::before {
+  content: ""; flex: none; width: 8px; height: 11px; color: var(--ink-3); opacity: .6;
+  background-image: radial-gradient(currentColor 1.05px, transparent 1.15px);
+  background-size: 4px 4px;
 }
-.nw-dragbar:hover::after, .nw-dragbar:focus-visible::after { opacity: 1; background: var(--accent); }
+.nw-dragbar:hover::before, .nw-dragbar:focus-visible::before { opacity: 1; color: var(--accent); }
+.nw-dbar-name { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-2); }
+.nw-dbar-hint { margin-left: auto; font-size: 10.5px; letter-spacing: .06em; color: var(--ink-3); opacity: 0; }
+[data-dock-state="docked"] .nw-dragbar {
+  background: var(--paper-3); box-shadow: inset 0 2px 5px -3px var(--edge); cursor: grab;
+}
+[data-dock-state="docked"] .nw-dragbar .nw-dbar-hint { opacity: .85; }
 body.dock-drag .nw-dragbar, body.nw-drag .nw-dragbar { cursor: grabbing; }
+/* 浮动态八方位缩放手柄（InkDock 生成）：贴内缘的细条，只在 float 态存在 */
+.dock-rz { position: absolute; z-index: 4; display: none; touch-action: none; }
+[data-dock-state="float"] .dock-rz { display: block; }
+.dock-rz[data-dir="n"], .dock-rz[data-dir="s"] { left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
+.dock-rz[data-dir="e"], .dock-rz[data-dir="w"] { top: 14px; bottom: 14px; width: 6px; cursor: ew-resize; }
+.dock-rz[data-dir="n"] { top: 0; } .dock-rz[data-dir="s"] { bottom: 0; }
+.dock-rz[data-dir="e"] { right: 0; } .dock-rz[data-dir="w"] { left: 0; }
+.dock-rz[data-dir="ne"], .dock-rz[data-dir="nw"], .dock-rz[data-dir="se"], .dock-rz[data-dir="sw"] {
+  width: 14px; height: 14px;
+}
+.dock-rz[data-dir="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.dock-rz[data-dir="ne"] { right: 0; top: 0; cursor: nesw-resize; }
+.dock-rz[data-dir="sw"] { left: 0; bottom: 0; cursor: nesw-resize; }
+.dock-rz[data-dir="se"] { right: 0; bottom: 0; cursor: nwse-resize; }
 body.dock-drag { user-select: none; -webkit-user-select: none; }
 body.dock-drag .sel-bar { display: none !important; }
 /* 三个页签 + 三个工具钮在停靠态（更窄）也要端得住：页签可缩、文字不换行 */
@@ -663,7 +720,10 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
           <!-- v2.10 拖动条：把「标题栏」从页签条里独立出来（页签整行是按钮，
                在按钮上起手不算拖动）。拖到左右边缘即吸附成停靠侧栏；双击切换停靠/浮动。 -->
           <div class="nw-dragbar" id="notesDragBar" role="button" tabindex="0"
-               title="拖动浮窗 · 拖到左右边缘吸附成侧栏（双击切换停靠 ⟷ 浮动，拖动时按 Ctrl 不吸附）"></div>
+               title="拖动浮窗 · 拖到左右边缘吸附成侧栏（双击切换停靠 ⟷ 浮动，拖动时按 Ctrl 不吸附）">
+            <span class="nw-dbar-name">批注与笔记</span>
+            <span class="nw-dbar-hint">按住可拖出浮动</span>
+          </div>
           <div class="side-tabs" id="notesTabs">
             <button class="side-tab active" data-ntab="list">批注</button>
             <button class="side-tab" data-ntab="new">写笔记</button>
@@ -741,7 +801,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
              内容由 modes.js 的 renderPad 画进 #padBody（工具条 / 调色板 / 画布 / 草稿本）。 -->
         <aside class="pad-win" id="padWin" data-open="off" aria-label="草稿纸" aria-hidden="true">
           <div class="nw-dragbar" id="padDragBar" role="button" tabindex="0"
-               title="拖动草稿纸 · 拖到左右边缘吸附成侧栏（双击切换停靠 ⟷ 浮动，拖动时按 Ctrl 不吸附）"></div>
+               title="拖动草稿纸 · 拖到左右边缘吸附成侧栏（双击切换停靠 ⟷ 浮动，拖动时按 Ctrl 不吸附）">
+            <span class="nw-dbar-hint">按住可拖出浮动</span>
+          </div>
           <header class="pad-head" id="padHead">
             <span class="pad-title" id="padTitle">草稿纸</span>
             <span class="spacer"></span>
@@ -933,11 +995,24 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       <button class="seg-btn on" data-nfs="17" title="中 · 17px（默认）" aria-label="正文书写字号 中 17px">中</button>
       <button class="seg-btn" data-nfs="20" title="大 · 20px" aria-label="正文书写字号 大 20px">大</button>
     </span>
+    <button class="btn btn-ghost btn-sm" id="noteImPv" aria-pressed="false" title="浮出 Markdown 预览（可拖到任意位置）">预览</button>
     <button class="btn btn-accent btn-sm" id="noteImSave">保存并退出</button>
     <button class="btn btn-ghost btn-sm" id="noteImExit">退出</button>
   </div>
   <div class="nim-body">
     <textarea class="nim-text" id="noteImText" aria-label="笔记正文" placeholder="在这里舒舒服服写长笔记…&#10;&#10;与批注面板「写笔记」实时同步：退出后回到面板即可预览、保存。&#10;Markdown 与 LaTeX 照旧可用，保存前可在面板点「预览」核对。"></textarea>
+  </div>
+  <!-- v2.19.3：全屏写笔记时的浮动预览卡。原先只能退出全屏回面板看预览，
+       等于「写完才能核对」；此卡随写随渲染，位置尺寸记 inkread.noteImPreview.v1。 -->
+  <div class="nim-pv" id="noteImPvCard" hidden>
+    <div class="nim-pv-bar" id="noteImPvBar" role="button" tabindex="0"
+         title="拖动预览窗 · 方向键微移（Shift 加速）">
+      <span class="nim-pv-name">预览</span>
+      <span class="spacer"></span>
+      <button class="tool-btn" id="noteImPvClose" aria-label="关闭预览"><span id="icNimPvClose"></span></button>
+    </div>
+    <div class="nim-pv-body editor-preview" id="noteImPvBody"></div>
+    <div class="nim-pv-rz" aria-hidden="true"></div>
   </div>
   <div class="nim-foot">
     <span class="card-note nim-count" id="noteImCount">共 0 字</span>
@@ -1279,24 +1354,269 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     el.textContent = state.scroll ? "通栏 " + Math.round(ratio * 100) + "%" : (state.cur + 1) + " / " + total;
   }
 
-  /* 单栏分页：按纸页可用高度逐块累积，块不跨页 */
+  /* ============================================================
+     2b. 分页装箱：不可分单位是「行」，不是「块」
+     ------------------------------------------------------------
+     旧装箱只认整块 —— 一块放不下就整块挪到下一页，于是标题孤零零占一页、
+     其余全是空白（实测某页 468px / 77% 空白；26 行的表 1092px 挤进 612px
+     的页，多出的 550px 被页内滚动条藏起来，读者根本看不见）。
+     现在长段按行腰斩、长表按行分节（表头随行重复 + 挂「续表」题注）、
+     长列表按顶层项分节（有序表用 start 续号）。笔记与书签按文字锚定
+     （v2.5），拆块不动它们的位置。
+     ============================================================ */
+  var CAP_H = 24;   /* 「续表」题注占位：分节表每页多出一行，装箱预算必须算进去 */
+
+  function isHeading(b) { return !!(b && (b.type === "h1" || b.type === "h2" || b.type === "h3")); }
+
+  /* 可拆性：表格按数据行、列表按顶层项、段落按行盒；图/公式/代码/引用仍整块走 */
+  function splitKindOf(b) {
+    if (!b) return "";
+    if (b.type === "table") return b.rows && b.rows.length > 1 ? "rows" : "";
+    if (b.type === "list" || b.type === "olist") return b.items && b.items.length > 1 ? "items" : "";
+    if (b.type === "p") return "lines";
+    return "";
+  }
+  function unitBottoms(el, kind) {
+    var ns = kind === "rows" ? el.querySelectorAll("tbody tr") : el.querySelectorAll(":scope > li");
+    return Array.prototype.slice.call(ns).map(function (n) { return n.getBoundingClientRect().bottom; });
+  }
+  function theadHeight(el) {
+    var t = el.querySelector("thead");
+    return t ? t.getBoundingClientRect().height : 0;
+  }
+
+  /* 表格分节：让 MD 重新出 HTML（表头天然随行重复），续节加类 + 题注 */
+  function tableChunk(b, a, z, cont) {
+    var h = MD.table(b.head || [], (b.rows || []).slice(a, z), b.align || []);
+    if (!cont) return h;
+    return h.replace('<div class="md-tablebox">', '<div class="md-tablebox md-tcont">')
+      .replace('<table class="md-table">', '<table class="md-table"><caption class="md-tcap">续表</caption>');
+  }
+  /* 列表分节：顶层项切片，有序列表用 start 接着数（序号不能从 1 重来） */
+  function listChunk(b, a, z, cont) {
+    var ol = b.type === "olist", st = "";
+    if (ol) {
+      var m = /(\d+)/.exec(olStart(b));
+      st = ' start="' + ((m ? +m[1] : 1) + a) + '"';
+    }
+    return "<" + (ol ? "ol" : "ul") + ' class="md-list' + (cont ? " md-lcont" : "") + '"' + st + ">" +
+      b.items.slice(a, z).map(function (it) { return "<li" + liCls(it) + ">" + listItem(it) + "</li>"; }).join("") +
+      "</" + (ol ? "ol" : "ul") + ">";
+  }
+
+  /* ---- 段内坐标换算：行盒 ↔ 字符偏移 ---- */
+  function textFlow(el) {
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null), n, nodes = [], acc = [], total = 0;
+    while ((n = w.nextNode())) {
+      var s = n.nodeValue || "";
+      if (!s.length) continue;
+      nodes.push(n); acc.push(total); total += s.length;
+    }
+    return { nodes: nodes, acc: acc, total: total };
+  }
+  function flowPos(flow, off) {
+    var i = 0;
+    while (i + 1 < flow.nodes.length && flow.acc[i + 1] <= off) i++;
+    var ln = flow.nodes[i].nodeValue.length;
+    return { node: flow.nodes[i], local: Math.max(0, Math.min(off - flow.acc[i], ln)) };
+  }
+  /* 行盒：一个 Range 的 client rects 每行（每种行内样式）一个，按顶边归并。
+     Range 给的是**文字**矩形，不含行距的半空（half-leading）—— 直接拿它当行盒，
+     续排的段落会比实况矮几 px，页底就顶出一条页内滚动条（实测 4px）。
+     所以先按本元素行距把每行补齐成真正的 CSS 行盒。 */
+  function halfLead(el) {
+    var cs = getComputedStyle(el);
+    var fs = parseFloat(cs.fontSize) || 16;
+    var lh = parseFloat(cs.lineHeight);
+    return lh === lh && lh > fs ? (lh - fs) / 2 : 0;
+  }
+  function lineBoxes(el) {
+    var pad = halfLead(el);
+    var rg = document.createRange();
+    rg.selectNodeContents(el);
+    var out = [];
+    Array.prototype.slice.call(rg.getClientRects())
+      .filter(function (b) { return b.height > 1; })
+      .sort(function (x, y) { return x.top - y.top; })
+      .forEach(function (b) {
+        var top = b.top - pad, bot = b.bottom + pad;
+        var last = out[out.length - 1];
+        if (last && Math.abs(last.raw - b.top) < 2) { last.raw = b.top; last.bot = Math.max(last.bot, bot); }
+        else out.push({ raw: b.top, top: top, bot: bot });
+      });
+    return out;
+  }
+  function charTop(flow, off) {
+    if (!flow.total) return NaN;
+    off = Math.max(0, Math.min(flow.total - 1, off));
+    var p = flowPos(flow, off), ln = p.node.nodeValue.length;
+    var rg = document.createRange();
+    rg.setStart(p.node, Math.min(p.local, ln)); rg.setEnd(p.node, Math.min(p.local + 1, ln));
+    var b = rg.getBoundingClientRect();
+    if (!b.height && p.local > 0) { rg.setStart(p.node, p.local - 1); b = rg.getBoundingClientRect(); }
+    return b.height ? b.top : NaN;
+  }
+  /* 起点落在 lineTop 这一行的第一个字符（行边界，绝不在字中间下刀） */
+  function cutOffset(flow, lineTop) {
+    var lo = 0, hi = flow.total - 1, res = -1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1, t = charTop(flow, mid);
+      if (t === t && t >= lineTop - 1.5) { res = mid; hi = mid - 1; } else lo = mid + 1;
+    }
+    while (res > 0) { var q = charTop(flow, res - 1); if (q === q && q >= lineTop - 1.5) res--; else break; }
+    return res;
+  }
+  /* 把段落裁成 [from,to) 的一节：克隆后按同一套文本节点顺序删掉区间外的字符 */
+  function paraFrag(el, from, to, cont) {
+    var c = el.cloneNode(true), off = 0;
+    var w = document.createTreeWalker(c, NodeFilter.SHOW_TEXT, null), n;
+    while ((n = w.nextNode())) {
+      var s = n.nodeValue || "", a = off;
+      if (!s.length) continue;
+      off += s.length;
+      if (off <= from || a >= to) n.nodeValue = "";
+      else if (a < from || off > to) n.nodeValue = s.slice(Math.max(0, from - a), Math.min(s.length, to - a));
+    }
+    pruneEmpty(c);
+    while (c.firstChild && c.firstChild.nodeType === 1 && c.firstChild.tagName === "BR") c.removeChild(c.firstChild);
+    while (c.lastChild && c.lastChild.nodeType === 1 && c.lastChild.tagName === "BR") c.removeChild(c.lastChild);
+    if (cont) c.className = (c.className ? c.className + " " : "") + "p-cont";
+    return c.outerHTML;
+  }
+  function pruneEmpty(node) {
+    Array.prototype.slice.call(node.childNodes).forEach(function (ch) {
+      if (ch.nodeType === 3) { if (!ch.nodeValue) node.removeChild(ch); return; }
+      if (ch.nodeType !== 1) { node.removeChild(ch); return; }
+      pruneEmpty(ch);
+      if (ch.tagName !== "BR" && !ch.textContent) node.removeChild(ch);
+    });
+  }
+
+  /* 返回 {pages:[[bi…]], htmls:[[片段 HTML…]]} —— 两表逐位对齐，
+     pages 里同一块号可以出现在相邻数页上（该块被拆了），现有按 bi 查找的调用方照旧可用。 */
   function packSingle(md, padTop, avail) {
     var kids = Array.prototype.slice.call(md.children);
-    var pages = [], curPage = [], startTop = 0, prevBi = -1;
+    var pages = [], htmls = [], cur = [], curH = [];
+    var fills = [], curUsed = 0;
+    var limit = 0, drift = 0, prevBi = -1;
+
+    function seal() {
+      if (!cur.length) return;
+      /* fills[pi] = 本页页底还剩多少（占可用页高的比例）：一键推荐档位的评分就靠它，
+         再拿 DOM 量一遍整本书代价太大，而分页时这些边界本来就已经算出来了。 */
+      fills.push(avail > 0 ? Math.max(0, Math.min(1, (limit - curUsed - drift) / avail)) : 1);
+      pages.push(cur); htmls.push(curH);
+      cur = []; curH = []; drift = 0;
+    }
+    /* [top,bot] 这一段（含重复表头占位 ovh）在本页放不放得下。
+       anchor 是「含段前距的起点」：一页的第一块要把自己的 margin-top 也算进页高，
+       否则实况排版比量具整体下移一截，页底就多出一小条页内滚动（实测差 15~21px）。
+       drift 是本页已重复表头累积出来的下移量。 */
+    function fits(anchor, bot, ovh) {
+      return cur.length ? bot + drift + (ovh || 0) <= limit : bot + (ovh || 0) - anchor <= avail;
+    }
+    function put(bi, html, anchor, ovh, bot) {
+      if (!cur.length) { limit = anchor + avail; drift = 0; }
+      cur.push(bi); curH.push(html); drift += ovh || 0;
+      curUsed = bot;
+    }
+    function mTop(el) { return parseFloat(getComputedStyle(el).marginTop) || 0; }
+
     for (var i = 0; i < kids.length; i++) {
       var k = kids[i];
       var bi = biOf(k, prevBi + 1);        /* 块号取自 data-bi，不是子元素序号 */
       prevBi = bi;
-      var top = k.offsetTop - padTop;
-      var bottom = top + k.offsetHeight;
-      if (curPage.length && (bottom - startTop > avail)) {
-        pages.push(curPage); curPage = []; startTop = top;
+      var b = blocks[bi] || {}, r = k.getBoundingClientRect();
+      var kind = splitKindOf(b);
+
+      var anch0 = r.top - mTop(k);
+      if (!kind) {
+        /* 标题不落单页底：后一块连最小一节都挤不进本页，标题就跟着挪过去 */
+        if (isHeading(b) && cur.length && kids[i + 1]) {
+          var nk = kids[i + 1], nb = blocks[biOf(nk, bi + 1)] || {}, nr = nk.getBoundingClientRect();
+          var nkind = splitKindOf(nb), minBot = nr.bottom;
+          if (nkind === "rows" || nkind === "items") {
+            var u0 = unitBottoms(nk, nkind);
+            if (u0.length) minBot = u0[0] + (nkind === "rows" ? theadHeight(nk) : 0);
+          } else if (nkind === "lines") {
+            var l0 = lineBoxes(nk);
+            if (l0.length > 2) minBot = l0[1].bot;      /* 至少两行才算接住了标题 */
+          }
+          if (!fits(anch0, minBot, 0)) seal();
+        }
+        if (!fits(anch0, r.bottom, 0)) seal();
+        put(bi, BLOCK_HTML[bi], anch0, 0, r.bottom);
+        continue;
       }
-      curPage.push(bi);
+
+      var ub = kind === "lines" ? null : unitBottoms(k, kind);
+      var lb = kind === "lines" ? lineBoxes(k) : null;
+      var flow = kind === "lines" ? textFlow(k) : null;
+      var thead = kind === "rows" ? theadHeight(k) : 0;
+      var total = kind === "rows" ? b.rows.length : kind === "items" ? b.items.length : flow.total;
+
+      /* 结构对不上（嵌套表体 / 脏数据 / 拆出字符数为 0）：退回整块，宁可不拆也不错位 */
+      var bad = (ub && ub.length !== total) || (kind === "lines" && (!lb.length || !total));
+      if (bad) {
+        if (!fits(anch0, r.bottom, 0)) seal();
+        put(bi, BLOCK_HTML[bi], anch0, 0, r.bottom);
+        continue;
+      }
+
+      function frag(from, to, cont) {
+        if (from === 0 && to === total && !cont) return BLOCK_HTML[bi];
+        if (kind === "rows") return biAttr(tableChunk(b, from, to, cont), bi);
+        if (kind === "items") return biAttr(listChunk(b, from, to, cont), bi);
+        return paraFrag(k, from, to, cont);
+      }
+      /* 本页尾部能吃下多少：返回头的结束边界与尾段起点；切不动返回 null */
+      function headEnd(a, anch, line0, ovh0) {
+        var lim = cur.length ? limit - drift : anch + avail;
+        if (kind === "lines") {
+          if (lb.length < 4) return null;                       /* 行太少不值得拆 */
+          var li = -1;
+          for (var q = line0; q < lb.length; q++) { if (lb[q].bot <= lim) li = q; else break; }
+          if (li - line0 < 1 || lb.length - li - 1 < 2) return null;   /* 页首页尾都不留孤行 */
+          var z = cutOffset(flow, lb[li + 1].top);
+          return z > a && z < flow.total ? { z: z, top: lb[li + 1].top, line: li + 1, bot: lb[li].bot } : null;
+        }
+        var last = -1;
+        for (var j = a; j < total - 1; j++) { if (ub[j] + ovh0 <= lim) last = j + 1; else break; }
+        if (last > a) return { z: last, top: ub[last - 1], line: 0, bot: ub[last - 1] };
+        return cur.length ? null : { z: a + 1, top: ub[a], line: 0, bot: ub[a] };  /* 空页至少推进一节 */
+      }
+
+      var a = 0, top0 = r.top, line0 = 0, ovh0 = 0, guard = 0;
+      while (a < total && guard++ < 800) {
+        /* 续节一律不带段前距（.p-cont / .md-tcont / .md-lcont 三条 CSS 已归零），
+           首节要把它自己的 margin-top 算进页高。 */
+        if (kind === "rows" && a > 0) ovh0 = thead + CAP_H;
+        var anch = a > 0 ? top0 : anch0;
+        var botAll = kind === "lines" ? r.bottom : ub[total - 1];
+        if (fits(anch, botAll, ovh0)) { put(bi, frag(a, total, a > 0), anch, ovh0, botAll); a = total; break; }
+        var cut = headEnd(a, anch, line0, ovh0);
+        if (!cut) {
+          /* 空页也切不动（整块比一页高）：整块硬放，最坏是该页内滚动 —— 仍比丢一整页空白好 */
+          if (cur.length) { seal(); continue; }
+          put(bi, frag(a, total, a > 0), anch, ovh0, botAll); a = total; break;
+        }
+        put(bi, frag(a, cut.z, a > 0), anch, ovh0, cut.bot);
+        a = cut.z; top0 = cut.top; line0 = cut.line;
+        seal();
+      }
     }
-    if (curPage.length) pages.push(curPage);
-    if (!pages.length) pages.push([]);
-    return pages;
+    seal();
+    if (!pages.length) { pages.push([]); htmls.push([]); }
+    /* splits：被拆到跨页的结构单元数（同一 bi 出现在多页 = 拆了一刀）。
+       拆得越多说明这一档越挤不住本书的整块结构，评分要计成本。 */
+    var seen = {}, uniq = 0, ent = 0;
+    for (var pi = 0; pi < pages.length; pi++) {
+      ent += pages[pi].length;
+      for (var pj = 0; pj < pages[pi].length; pj++) {
+        if (!seen[pages[pi][pj]]) { seen[pages[pi][pj]] = 1; uniq++; }
+      }
+    }
+    return { pages: pages, htmls: htmls, fills: fills, splits: ent - uniq };
   }
 
   /* 双栏分页（横向翻页 × 双栏）：每页定高、两栏自动填充。
@@ -1335,26 +1655,30 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     var W = book.clientWidth, H = book.clientHeight;
     if (!W || !H) return;
 
-    var pages;
+    var pages, htmls;
     if (read.twoCol) {
+      /* 双栏靠 CSS column-fill 自动填满整栏，块级溢出由试放回退处理，另有其法 */
       pages = packCols(book, W, H);
+      htmls = pages.map(function (idxs) { return idxs.map(function (i) { return BLOCK_HTML[i]; }); });
     } else {
       var meas = document.createElement("div");
       meas.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;width:" + W + "px";
       meas.innerHTML = '<div class="' + DOC_CLASS + '" id="measDoc">' + BLOCK_HTML.join("") + "</div>";
       book.appendChild(meas);
       var md = meas.querySelector("#measDoc");
+      /* 量具必须带上 data-doc-theme：文体自适应的行高写在 .doc[data-doc-theme] 上，
+         量具没这个属性就按用户值量、实况按文体值排，两者差一截 = 页底一条页内滚动。 */
+      md.setAttribute("data-doc-theme", doc.theme || "plan");
       var cs = getComputedStyle(md);
       var padTop = parseFloat(cs.paddingTop) || 0;
       var padBottom = parseFloat(cs.paddingBottom) || 0;
-      pages = packSingle(md, padTop, H - padTop - padBottom);
+      var pack = packSingle(md, padTop, H - padTop - padBottom);
       book.removeChild(meas);
+      pages = pack.pages; htmls = pack.htmls;
     }
 
     state.pageIdx = pages;
-    state.pages = pages.map(function (idxs) {
-      return idxs.map(function (i) { return BLOCK_HTML[i]; }).join("");
-    });
+    state.pages = htmls.map(function (hs) { return hs.join(""); });
   }
 
   /* ============================================================
@@ -1578,6 +1902,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       docEl.setAttribute("data-marks", read.marks ? "on" : "off");
       docEl.setAttribute("data-learn", read.learn ? "on" : "off");
       docEl.innerHTML = html;
+      /* 页尾不留段后距：末块的 margin-bottom 会撑出页内滚动条（实测 15px），
+         分页本该把多余的留白留在页底，而不是变成一条能拖动的缝。 */
+      if (!state.scroll && docEl.lastElementChild) docEl.lastElementChild.classList.add("frag-last");
       paintAnnotations();
       syncTaskFlags();
       /* 模式层必须在 paint 之后重画：翻页动画会把 paint 推迟到 renderPage 尾部之后，
@@ -1700,14 +2027,104 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     meas.innerHTML = '<div class="' + DOC_CLASS + '" id="measDoc2">' + BLOCK_HTML.join("") + "</div>";
     book.appendChild(meas);
     var md = meas.querySelector("#measDoc2");
+    md.setAttribute("data-doc-theme", doc.theme || "plan");   /* 与 paginate() 的量具同条件，见上 */
     var cs = getComputedStyle(md);
     var padTop = parseFloat(cs.paddingTop) || 0, padBottom = parseFloat(cs.paddingBottom) || 0;
-    _measPages = packSingle(md, padTop, H - padTop - padBottom);
+    _measPages = packSingle(md, padTop, H - padTop - padBottom).pages;
     book.removeChild(meas);
     return _measPages;
   }
 
-  function totalPages() { return (state.pageIdx.length || measuredPages().length) || 1; }
+  /* ------------------------------------------------------------
+     v2.19.3 C：一键推荐疏密 —— 把五档各试排一遍，按实测选档
+     为什么不给云端模型判：好坏只取决于这本书在本机的真实块高、表行数与视口页高，
+     而这些是可测量的；模型只能按文体猜。猜错的代价读者看得见（就是最初那半页空白），
+     测出来的代价是「第几页剩几像素」。所以走本地实测试排，报告里也照实写没调模型。
+     评分 cost = 页底空白率 + 0.5 × 跨页拆分率
+       · 页底空白率：除末页外每页剩余高度的均值（末页空白是文章结尾，不是排版缺陷）
+       · 跨页拆分率：被拆到跨页的结构单元数 / 块数（长段、长表、长列表各算一处）
+     两档成本相差不到 1% 时保持读者当前档，不做「你以为你想要疏」的擅自改动。
+     ------------------------------------------------------------ */
+  var DEN_TRIAL_CAP = 400;   /* 试排块数上限：长篇小说只取前 400 块，报告里明说是抽样 */
+
+  function denTrial() {
+    var book = qs("#book");
+    var W = book.clientWidth, H = book.clientHeight;
+    if (!W || !H || !BLOCK_HTML.length || state.scroll) return null;   /* 竖向浏览没有页底可言 */
+    var html = BLOCK_HTML, n = blocks.length, sampled = 0;
+    if (n > DEN_TRIAL_CAP) { html = BLOCK_HTML.slice(0, DEN_TRIAL_CAP); n = DEN_TRIAL_CAP; sampled = 1; }
+
+    var meas = document.createElement("div");
+    meas.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;width:" + W + "px";
+    meas.innerHTML = '<div class="' + DOC_CLASS + '" id="measDen">' + html.join("") + "</div>";
+    var md = meas.querySelector("#measDen");
+    md.setAttribute("data-doc-theme", doc.theme || "plan");   /* 与 paginate() 的量具同条件 */
+    book.appendChild(meas);
+    var cs = getComputedStyle(md);
+    var padTop = parseFloat(cs.paddingTop) || 0, padBottom = parseFloat(cs.paddingBottom) || 0;
+    var avail = H - padTop - padBottom;
+    /* 档位落地时会自动关掉「按内容自适应」（否则文体行高压过用户档），
+       试排就在同一前提下量：临时把 data-auto 关掉，量完还原；整段同步执行，不会闪。 */
+    var de = document.documentElement.dataset, autoWas = de.auto;
+    de.auto = "off";
+    var out = [];
+    try {
+      InkTheme.DEN_ORDER.forEach(function (k) {
+        var p = InkTheme.DEN[k];
+        md.style.setProperty("--doc-fs", p.fs + "px");
+        md.style.setProperty("--doc-lh", p.lh);
+        md.style.setProperty("--doc-para", p.para + "em");
+        var pack = packSingle(md, padTop, avail);
+        var nf = pack.fills.length, sum = 0;
+        for (var q = 0; q < nf - 1; q++) sum += pack.fills[q];
+        var blank = nf > 1 ? sum / (nf - 1) : (pack.fills[0] || 0);
+        var rate = pack.splits / Math.max(1, n);
+        out.push({ k: k, pages: nf, blank: blank, splitN: pack.splits, split: rate, cost: blank + rate * 0.5 });
+      });
+    } finally {
+      de.auto = autoWas;
+      book.removeChild(meas);
+    }
+    out.sampled = sampled;
+    out.n = n;
+    return out;
+  }
+
+  /* 给读者看的账：量了什么、按什么判、为什么是这一档，三句话全说清 */
+  function denReportTxt(out, pick, curK, tie) {
+    var pc = function (v) { return Math.round(v * 100) + "%"; };
+    var each = out.map(function (o) { return InkTheme.DEN_NAME[o.k] + " " + pc(o.blank); }).join(" · ");
+    return "本地实测试排（未调用云端模型）" + (out.sampled ? "，取本书前 " + out.n + " 块" : "，全书 " + out.n + " 块") +
+      "。页底空白率：" + each + "。" +
+      "已用「" + InkTheme.DEN_NAME[pick.k] + "」：" + pick.pages + " 页 · 页底空白 " + pc(pick.blank) +
+      " · 跨页拆分 " + pick.splitN + " 处" +
+      (pick.k === curK ? "（与你原档一致，未改动）" : tie ? "（与你的档并列，取接近适中的一档）" : "（成本最低）") +
+      "。档只改字号·行高·段距三值，栏宽与字体不动；同分 1% 以内不改你已有的设置。";
+  }
+
+  window.inkDenAI = function () {
+    var out = denTrial();
+    if (!out) { toast("竖向浏览没有页底可量，切到横向翻页再试", "info"); return; }
+    var curK = InkTheme.denKey(InkTheme.read());
+    var min = Infinity;
+    out.forEach(function (o) { if (o.cost < min) min = o.cost; });
+    /* 并列（成本差 < 1%）里不选最疏的，选离「适中」最近的：几个档一样好时，
+       默认档是读者最熟悉的观感，也不至于把字号悄悄推到 18px。 */
+    var midI = InkTheme.DEN_ORDER.indexOf("mid"), pick = null, pickGap = Infinity;
+    out.forEach(function (o) {
+      if (o.cost - min >= 0.01) return;
+      var gap = Math.abs(InkTheme.DEN_ORDER.indexOf(o.k) - midI);
+      if (gap < pickGap) { pickGap = gap; pick = o; }
+    });
+    /* 当前档已在并列里 → 原地不动，不因一次点击就改掉读者的版面 */
+    var keep = null;
+    out.forEach(function (o) { if (o.k === curK && o.cost - min < 0.01) keep = o; });
+    if (keep) pick = keep;
+    if (pick.k !== curK) InkTheme.commit({ den: pick.k });
+    InkTheme.setDenReport(denReportTxt(out, pick, curK, pick.cost > min + 1e-9));
+    toast("已按实测选「" + InkTheme.DEN_NAME[pick.k] + "」：" + pick.pages + " 页 · 页底空白 " +
+      Math.round(pick.blank * 100) + "% · 拆分 " + pick.splitN + " 处", "sparkles");
+  };
 
   function pageOfBlock(bi) {
     var idx = state.pageIdx.length ? state.pageIdx : measuredPages();
@@ -2968,17 +3385,128 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   });
   nimTa.addEventListener("input", nimMirror);
 
+  /* ---------- 全屏写作的浮动预览卡（v2.19.3） ----------
+     可拖、可缩、位置尺寸记本机（inkread.noteImPreview.v1）；随写随渲染（140ms 防抖）。
+     只做展示层：正文仍由 #noteImText 单向镜像进 #noteInput，卡片不写库。 */
+  var nimPvEl = qs("#noteImPvCard"), nimPvBar = qs("#noteImPvBar"), nimPvBody = qs("#noteImPvBody"),
+      nimPvBtn = qs("#noteImPv"), nimPvRz = qs("#noteImPvCard .nim-pv-rz");
+  var NIM_PV_KEY = "inkread.noteImPreview.v1", nimPvRect = null;
+  qs("#icNimPvClose").innerHTML = icon("x", 13);
+
+  function nimPvRead() {
+    try {
+      var v = JSON.parse(localStorage.getItem(NIM_PV_KEY));
+      return v && v.w && v.h ? { x: +v.x || 0, y: +v.y || 0, w: +v.w, h: +v.h } : null;
+    } catch (e) { return null; }
+  }
+  function nimPvSave() {
+    try { localStorage.setItem(NIM_PV_KEY, JSON.stringify(nimPvRect)); } catch (e) {}
+  }
+  /* 夹取：不许拖出全屏层，也不许压住顶栏（nim-bar 高约 44，留 52） */
+  function nimPvClamp(r) {
+    var W = nimEl.clientWidth || 900, H = nimEl.clientHeight || 600, M = 8, TOP = 52;
+    r.w = Math.round(Math.max(260, Math.min(r.w, W - M * 2)));
+    r.h = Math.round(Math.max(160, Math.min(r.h, H - TOP - M)));
+    r.x = Math.round(Math.max(M, Math.min(r.x, W - r.w - M)));
+    r.y = Math.round(Math.max(TOP, Math.min(r.y, H - r.h - M)));
+    return r;
+  }
+  function nimPvApply() {
+    if (!nimPvRect) nimPvRect = nimPvRead() || { x: (nimEl.clientWidth || 900) - 416, y: 60, w: 400, h: 420 };
+    nimPvRect = nimPvClamp(nimPvRect);
+    nimPvEl.style.left = nimPvRect.x + "px"; nimPvEl.style.top = nimPvRect.y + "px";
+    nimPvEl.style.width = nimPvRect.w + "px"; nimPvEl.style.height = nimPvRect.h + "px";
+  }
+  function nimPvPaint() {
+    nimPvBody.innerHTML = MD.render(nimTa.value) || '<span class="card-note">预览区（空）</span>';
+  }
+  function nimPvShow(on) {
+    nimPvEl.hidden = !on;
+    nimPvBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    if (on) { nimPvApply(); nimPvPaint(); }
+  }
+  nimPvBtn.addEventListener("click", function () { nimPvShow(nimPvEl.hidden); });
+  qs("#noteImPvClose").addEventListener("click", function () { nimPvShow(false); nimPvBtn.focus(); });
+
+  /* 拖动与缩放共用一套。
+     捕获必须在 pointerdown 起手就做（不同于 InkDock 的「过阈值才捕获」）：
+     标题条只有 28px 高、抓角只有 18px 大，等攒够 6px 位移再捕获时，
+     指针早就离开这块条了 —— 之后浏览器不再把 pointermove 发给它，纵向拖窗直接失灵。
+     这里没有可点子元素会被劫持：关闭钮在 pointerdown 里已先行排除；
+     6px 阈值只留着判「算不算拖过」，决定要不要写记忆，不影响事件流。 */
+  function nimPvGesture(bar, onMove) {
+    var g = null;
+    bar.addEventListener("pointerdown", function (e) {
+      if (e.button || (e.target.closest && e.target.closest("button"))) return;
+      if (!nimPvRect) return;
+      g = { id: e.pointerId, px: e.clientX, py: e.clientY, r: { x: nimPvRect.x, y: nimPvRect.y, w: nimPvRect.w, h: nimPvRect.h }, moved: false };
+      try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+      document.body.classList.add("nim-pv-drag");
+      e.preventDefault();
+      var s = window.getSelection(); if (s && s.removeAllRanges) s.removeAllRanges();
+    });
+    bar.addEventListener("pointermove", function (e) {
+      if (!g || e.pointerId !== g.id) return;
+      if (!g.moved) {
+        if (Math.abs(e.clientX - g.px) + Math.abs(e.clientY - g.py) < 6) return;
+        g.moved = true;
+      }
+      nimPvRect = nimPvClamp(onMove(g, e.clientX - g.px, e.clientY - g.py));
+      nimPvApply();
+    });
+    function end(e) {
+      if (!g || (e && e.pointerId !== g.id)) return;
+      try { bar.releasePointerCapture(g.id); } catch (err) {}
+      document.body.classList.remove("nim-pv-drag");
+      if (g.moved) nimPvSave();
+      g = null;
+    }
+    bar.addEventListener("pointerup", end);
+    bar.addEventListener("pointercancel", end);
+  }
+  nimPvGesture(nimPvBar, function (g, dx, dy) { return { x: g.r.x + dx, y: g.r.y + dy, w: g.r.w, h: g.r.h }; });
+  nimPvGesture(nimPvRz, function (g, dx, dy) { return { x: g.r.x, y: g.r.y, w: g.r.w + dx, h: g.r.h + dy }; });
+  /* 键盘可达：标题条拿到焦点后方向键挪窗（Shift 加速）；Esc 关预览。
+     既由下面的浮层守卫直接调用，也留在 bar 上作直挂备用。 */
+  function nimPvKey(e) {
+    if (e.__nimPvDone) return;
+    e.__nimPvDone = true;
+    var step = e.shiftKey ? 32 : 8, hit = true;
+    if (e.key === "ArrowLeft") nimPvRect.x -= step;
+    else if (e.key === "ArrowRight") nimPvRect.x += step;
+    else if (e.key === "ArrowUp") nimPvRect.y -= step;
+    else if (e.key === "ArrowDown") nimPvRect.y += step;
+    else if (e.key === "Escape") { nimPvShow(false); nimPvBtn.focus(); }
+    else hit = false;
+    if (hit) { e.preventDefault(); nimPvApply(); nimPvSave(); }
+  }
+  nimPvBar.addEventListener("keydown", nimPvKey);
+  var nimPvTimer = 0;
+  nimTa.addEventListener("input", function () {
+    if (nimPvEl.hidden) return;
+    clearTimeout(nimPvTimer);
+    nimPvTimer = setTimeout(nimPvPaint, 140);
+  });
+
   /* Esc 退出（内容保留）；浮层开着时页面快捷键一律让路。
      全局 keydown 都挂在 document 上（翻页 / 单键快捷键 / 收面板），
      在 window 捕获段截断即可整体让路，不必逐个改动原有处理器。 */
   window.addEventListener("keydown", function (e) {
     if (!nimOpen()) return;
+    /* 预览卡是浮层之上的第二层：Esc 先收卡、方向键在卡上挪卡。
+       必须排在截断之前 —— 否则捕获段一 stopPropagation，卡片自己的处理器也一起哑了。 */
+    if (!nimPvEl.hidden &&
+        (e.key === "Escape" || e.key.indexOf("Arrow") === 0 && nimPvEl.contains(document.activeElement))) {
+      e.preventDefault(); e.stopPropagation(); nimPvKey(e); return;
+    }
     e.stopPropagation();
     if (e.key === "Escape") { closeNoteIm(); return; }
     if (e.key !== "Tab") return;
-    /* 焦点不外逃：Tab / Shift+Tab 在浮层内循环 */
-    var all = qsa("#noteImmersive button, #noteImmersive textarea"), ring = [];
-    for (var i = 0; i < all.length; i++) if (!all[i].disabled) ring.push(all[i]);
+    /* 焦点不外逃：Tab / Shift+Tab 在浮层内循环（预览卡带着标题条一起进环） */
+    var all = qsa("#noteImmersive button, #noteImmersive textarea" +
+                   (nimPvEl.hidden ? "" : ", #noteImPvBar")), ring = [];
+    for (var i = 0; i < all.length; i++)
+      if (!all[i].disabled && !all[i].closest("[hidden]")) ring.push(all[i]);
     if (!ring.length) return;
     var at = ring.indexOf(document.activeElement);
     e.preventDefault();
