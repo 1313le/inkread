@@ -2143,75 +2143,127 @@ html.boot-skip .device { animation-delay: 0s; animation-duration: .3s; }
 .device { animation: appIn .5s cubic-bezier(.2, .8, .3, 1) .46s backwards; }
 @keyframes appIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 
-/* ---------- v2.19.3 §六 换页转场「过纸」----------
-   方案原本写「纸页按导航方向横向滑入滑出」，调研把这条否了：
-   · Material《The motion system》—— 顶层导航用 fade through，明写理由
-     "the fade through pattern does not mislead users to think they can swipe horizontally between destinations"；
-   · Material 3《Transitions》给 navigation rail / drawer / bar 单列 top level transition：
-     "Since the content of top level destinations isn't necessarily related, the motion intentionally
-     does not use grouping or persistent elements to create a strong relationship between screens."
-   侧栏六项（书架/阅读/笔记/闪卡/任务/主脑）是六个并列任务，不是一叠有前后次序的纸，
-   横向方向感等于许诺一个并不存在的手势。改成纵向：纸自顶而下扫过屏幕 —— 盖住旧页时自上而下，
-   露出新页时也自上而下。单方向不回头，而露出的顺序正好是读序。
+/* ---------- v2.19.4 换页转场：旧页掀走、侧栏不动 ----------
+   v2.19.3 的纵向「过纸」被反馈「不够丝滑、切换时总有卡顿的感觉」。三条实测病灶
+   （探针 probe-devicereplay.js / probe-stall.js，六个导航目标各跑一次）：
+   A 摘掉 nav-in 之后 .device 的 appIn 重新上膛 —— 已经落地的页面自己淡到 0.264、
+     往下坠 5px，再花 330ms 淡回来。不是掉帧，是转场结束后凭空多出的第二段动画。
+   B 幕布盖满之后有 73~136ms 屏幕一动不动 —— 180ms 盲等定时器 + 新文档到首次样式生效
+     + 揭纸自带 40ms 延迟拼出来的；全程约 500ms 里近三成是静止，节奏成了「动—停—动」。
+     那 180ms 盲等还让点击反馈晚于 Material/Apple 的 100ms 红线。
+   C 幕布是满视口伪元素，底纹走 feTurbulence、又带 box-shadow，全文档只有两处
+     will-change 且不含它；揭纸窗口里能撞见 52~65ms 的长帧（reader.html 280ms 起 65ms）。
 
-   「过渡动画太简单」的病根也不是缺方向，是这三条（改前实测，探针 probe-nav-sheet.js 13 PASS / 15 FAIL）：
-   ① 纸只有不透明度、零位移 —— nav-out/nav-in 峰值 translateY 都是 0.0px，读起来是「屏幕闪了一下」
-      而不是「换了一张纸」；② 印章盖两次 —— nav-out 期间 ::after 不透明度峰值 1.00，nav-in 又落一次；
-   ③ 新页入场被压在纸底下 —— appIn 的 104~144ms 全在覆盖率 >0.5 时跑完，纸让开之后还剩 4 帧没淡到位。
-   对症：给纸真的位移加一道纸边投影；印章只在新页落定后落一次；新页不再做入场淡入 ——
-   「被纸扫过」本身就是入场。顺带把 .device 的 transform 从转场里摘干净（v2.18 那颗
-   「.device 残留 transform 变成 fixed 后代包含块」的雷，少一枚）。 */
-html.nav-out body::before, html.nav-in body::before {
+   对症：退场的活儿交还给浏览器的快照层 —— 跨文档 View Transitions（Chrome/Edge 126+、
+   Safari 18.2+；本应用打包 Electron 33.4.11 = Chromium 130，页面同源走
+   http://127.0.0.1:8770，条件满足）。旧页在新页可绘制之前一直留在屏幕上，
+   静止期从模型上消失，幕布与盲等定时器一起删掉。不认这个 at-rule 的环境
+   （手机上的旧浏览器经局域网访问同一套页面）走降级路径：不做退场动画、不铺幕布，
+   只在新页揭一次纸。两条路径都是「纸向下让开」—— 方向仍是 v2.19.3 定的纵向，
+   理由不变：Material 明确顶层并列导航不用方向感（"does not mislead users to think
+   they can swipe horizontally between destinations"），而侧栏六项是并列任务不是有次序的一叠纸。 */
+
+/* 主机制：两个文档都声明就生效；浏览器不认这条 at-rule 就等于普通跳转，无需 JS 特性判断。
+   只在 prefers-reduced-motion: no-preference 下开 —— 减少动效时连快照动画都不该起。 */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition { navigation: auto; }
+}
+/* 侧栏 / 标题栏是「我一直在这一页」的应用外壳：不参与位移，瞬间就是新页的当前态。
+   实测过的反面：给外壳命名再让它盖在根层上（v2.19.4 第一版），旧页整张图（含它自己的
+   标题栏）会一路掀过新页 —— 中途截图里同时出现两条标题栏；而 image-pair 默认 plus-lighter
+   相加，旧侧栏（书架高亮）会把新侧栏（任务高亮）压住，纸掀完了当前态才「啪」地跳过去。
+   所以只给内容层命名，外壳交给瞬间切换。
+   ⚠ 一个文档里 view-transition-name 不能重名，重名浏览器会放弃整次转场
+   （Spec：duplicate view-transition-name ⇒ transition aborted）—— 七页各只有一个
+   <main class="app-content" id="appContent">，实测 grep 每页 1 处。 */
+.app-content { view-transition-name: ink-page; }
+/* 组动画停掉：-ua-view-transition-group-anim-* 默认 250ms 的「尺寸形变」在这里不形变，
+   却把整场转场的收尾拖到 254~296ms（实测）。 */
+::view-transition-group(root), ::view-transition-group(ink-page) { animation: none; }
+/* 快照层分工（三条都是冻帧截图逼出来的，不是照抄规范）：
+   · old(root) 关掉 —— 否则旧页整张图（含它自己的标题栏）会一路掀在新页上面，
+     中途截图里同时出现两条标题栏。
+   · new(root) 立刻不透明（animation:none）—— 外壳从第一帧就是新页当前态，当前页标记
+     不会晚一拍（实测侧栏 vs 转场前均差 0.45~0.48%，只剩抗锯齿噪声）。
+   · new(ink-page) 必须留着：命名元素会被**排除出根层快照**（规范里 named element 单独
+     成组），把它 display:none 掉等于把新页正文从整场转场里删掉 —— p95 截图里掀开处
+     一片空白、正文 vs 新页均差 65~71% 全程不收敛，就是这个原因（不是「快照取太早」）。
+   image-pair 的两个孩子默认 plus-lighter 相加：两张不透明的图叠在一起会过曝，
+   且旧图默认画在新图**下面**（旧图根本看不见）。所以两层都改 normal，旧图抬 z-index。 */
+::view-transition-old(root) { display: none; }
+::view-transition-new(root) { animation: none; }
+::view-transition-old(ink-page), ::view-transition-new(ink-page) { mix-blend-mode: normal; }
+::view-transition-new(ink-page) { animation: none; }
+/* 旧页内容层向下掀走，露出底下同一位置的新页正文。纯 transform 进合成层。
+   必须自带纸底：.app-content 自己没有背景（纸和底纹在父级 .screen 上，styles.css:320），
+   它的快照就是一张「只有卡片、缝隙全透明」的图 —— p45 冻帧里新旧两页的文字互相透出来
+   （正文 vs 旧页在 20% 进度就已经差 61%）就是这个原因。给快照层补上纸底，
+   幕布才是一块不透光的「纸」，而不是玻璃。 */
+::view-transition-old(ink-page) {
+  z-index: 1;
+  background-color: var(--paper); background-image: var(--grain);
+  animation: vtSheetDown .2s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+/* 缓动换成 Material standard（.4,0,.2,1）。原来那版用的是 emphasized-in（.3,0,.8,.15），
+   冻帧实测：45% 时间点只走了 11.8% 的距离（89/754px），前 90ms 屏幕几乎不动，最后 60ms
+   才甩出去 —— 「先僵后窜」正是用户说的卡顿感。standard 在 20% 时间点已走 ~14%、
+   45% 时间点 ~70%，起步即动、收尾让位。 */
+@keyframes vtSheetDown { from { transform: none; } to { transform: translateY(100%); } }
+
+/* 降级路径：幕布只在浏览器不认 at-rule 时铺（app.js 探测后给 html 挂 .vt，认了就一条都不画）。
+   相比 v2.19.3：去掉 40ms 延迟（无因可等）、220ms→200ms、进场改减速缓动
+   （M3 duration-short4 = 200ms + easing-emphasized-decelerate），并补 will-change ——
+   满视口的纸进不了合成层时每帧重绘整张噪点纹理，那 65ms 长帧就是这么来的。
+   底纹仍用原满幅 feTurbulence：改小图平铺会连带改观感，本轮不动视觉，用合成层解决成本。 */
+html.nav-in:not(.vt) body::before {
   content: ""; position: fixed; inset: 0; z-index: 940; pointer-events: none;
   background-color: var(--paper); background-image: var(--grain);
   box-shadow: 0 18px 30px -16px rgba(0, 0, 0, .30);
+  will-change: transform;
+  animation: navSheetOut .2s cubic-bezier(.05, .7, .1, 1) both;
 }
-html.nav-out body::before { animation: navSheetIn .15s cubic-bezier(.2, .8, .3, 1) both; }
-html.nav-in  body::before { animation: navSheetOut .22s cubic-bezier(.4, 0, .7, .35) .04s both; }
-@keyframes navSheetIn  { from { transform: translateY(-100%); } to { transform: translateY(0); } }
 @keyframes navSheetOut { from { transform: translateY(0); } to { transform: translateY(100%); } }
 
-/* 旧页在纸盖过来之前先暗下去，否则纸像是在盖一张静止的截图。
-   只动 .app-content 的 opacity，不动 .device：侧栏是「我一直在这一页」的空间锚，
-   跟着每次换页抖 8px 就把它变成被切换的内容了。也不加 transform —— .device 那条
-   「残留 transform 会使其成为 fixed 后代包含块」的老雷，能不踩就不踩。 */
-html.nav-out .app-content { animation: navLeave .15s ease-in both; }
-@keyframes navLeave { from { opacity: 1; } to { opacity: .3; } }
-
-/* 印章只在揭纸将尽时落一次，读作新页的落款。写在 nav-in 一条上而不是两条共用 ——
-   共用是旧版「盖两次」的根因：::after 只要 content 生成了又没有动画接管，
-   就会以 opacity:1 常驻在纸上。
-   fill 必须是 both 不能是 backwards —— 实测过：backwards 在动画跑完（600ms）后把
-   opacity 还给基础样式，而基础样式没写 opacity，于是默认 1，印章在 600→680ms（app.js 摘类）
-   之间整枚复现闪一下。探针 B7/B9/B10 就是抓到这一条的。 */
-html.nav-in body::after {
+/* 印章收进揭纸窗口内同步收干，不再晚于纸让开 —— v2.19.3 放在 +180ms/.42s，
+   于是「转场结束了画面还在动」，正是本次要消灭的那类二次动作。
+   只在 nav-in + 降级（:not(.vt)）一条上生成：两条共用是旧版「盖两次」的根因，
+   ::after 只要 content 生成了又没有动画接管，就会以 opacity:1 常驻在纸上。
+   fill 必须是 both 不能是 backwards —— 实测过：backwards 在动画跑完后把 opacity 还给
+   基础样式，而基础样式没写 opacity，于是默认 1，印章在摘类之前整枚复现闪一下。
+   ⚠ 主路径（认了 @view-transition 的浏览器）不落印：快照层挂在 top layer
+   （z-index 2147483647），新文档里任何 position:fixed 的实时装饰在转场期间都被它整个
+   盖住 —— 冻帧截图里正文区中心根本没有印章。要让它被看见只能推迟到纸让开之后
+   （delay ≥200ms），那正是刚消灭的那类二次动作。主路径因此只剩一个动作：整张旧页向下掀走。 */
+html.nav-in:not(.vt) body::after {
   content: "墨"; position: fixed; left: 50%; top: 50%; z-index: 941; pointer-events: none;
   display: grid; place-items: center; width: 46px; height: 46px; margin: -23px 0 0 -23px;
   background: var(--accent); color: var(--on-accent); border-radius: 8px;
   font-family: var(--font-kai); font-size: 26px; line-height: 1;
-  animation: navSeal .42s cubic-bezier(.2, .8, .3, 1) .18s both;
+  animation: navSeal .2s cubic-bezier(.2, 0, 0, 1) both;
 }
-/* 起手偏 7°、落地压回 .94 再回正 —— 手盖的印不会摆正；墨迹随后收干 */
+/* 起手偏 6°、落地压回 .95 再回正 —— 手盖的印不会摆正；墨迹随后收干。
+   时长与揭纸同取 200ms：印干的那一刻就是纸让完的那一刻，转场之后画面不再有动作。 */
 @keyframes navSeal {
-  0%   { opacity: 0; transform: scale(1.55) rotate(-7deg); }
-  38%  { opacity: 1; transform: scale(.94) rotate(-1.5deg); }
-  60%  { opacity: 1; transform: scale(1) rotate(0deg); }
+  0%   { opacity: 0; transform: scale(1.42) rotate(-6deg); }
+  34%  { opacity: 1; transform: scale(.95) rotate(-1.2deg); }
+  62%  { opacity: 1; transform: scale(1) rotate(0deg); }
   100% { opacity: 0; transform: scale(1) rotate(0deg); }
 }
-/* 新页不做入场淡入：它的「到达」由纸的扫过负责。写在 html.boot-skip .device 之后 ——
-   两条特异性相同，靠源序取胜。 */
-html.nav-in .device { animation: none; }
+/* 新页不做入场淡入：它的「到达」由揭纸（或快照层的掀走）负责。
+   nav-landed 是 v2.19.4 补的钉子 —— app.js 在 260ms 摘掉 nav-in，只靠 nav-in 压制的话，
+   类一走 appIn 就重新上膛，落地的页面自己再淡一遍（根因 A）。两条并存才堵得住。
+   写在 html.boot-skip .device 之后：两条特异性相同，靠源序取胜。 */
+html.nav-in .device, html.nav-landed .device { animation: none; }
 
-/* 减少动效：不铺纸、不落印、不暗旧页（app.js 侧同步跳过拦截，直接走原生跳转）。
-   用 display:none 而不是 animation:none —— 伪元素的 content 只在带 nav-* 类时存在，
-   停了动画它反而会以满不透明度常驻盖住整屏，脚本一慢就是一片下不去的纸。 */
-html[data-reduce="on"].nav-out body::before, html[data-reduce="on"].nav-in body::before,
-html[data-reduce="on"].nav-in body::after { display: none; }
-html[data-reduce="on"].nav-out .app-content,
-html[data-reduce="on"].nav-in .device { animation: none; }
+/* 减少动效：不铺纸、不落印、不开屏淡入（app.js 侧同步跳过拦截，直接走原生跳转）。
+   伪元素用 display:none 而不是 animation:none —— content 只在带 nav-in 时存在，
+   停了动画它反而会以满不透明度常驻盖住整屏，脚本一慢就是一片下不去的纸。
+   .device 那条是补 #61 的无障碍缺口：v2.19.3 只挡了幕布，开屏 appIn 漏挡。 */
+html[data-reduce="on"].nav-in body::before, html[data-reduce="on"].nav-in body::after { display: none; }
+html[data-reduce="on"] .device { animation: none; }
 @media (prefers-reduced-motion: reduce) {
-  html.nav-out body::before, html.nav-in body::before, html.nav-in body::after { display: none; }
-  html.nav-out .app-content { animation: none; }
+  html.nav-in body::before, html.nav-in body::after { display: none; }
+  .device { animation: none; }
 }
 
 /* ---------- 二、书架编辑：卡上编辑键 / 管理模式勾选 / 批量操作条 ---------- */

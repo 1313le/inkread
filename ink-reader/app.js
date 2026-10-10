@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.19.3";
+window.InkVersion = "2.19.4";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -539,31 +539,27 @@ document.addEventListener("DOMContentLoaded", function () {
 
   /* v2.17 · 换页转场：新页首帧已带着纸（<head> 内联脚本挂的 html.nav-in），动画跑完就把类摘掉，
      别让两个 fixed 伪元素长期占着合成层。
-     v2.19.3 §六 · 时长从 420 抬到 680 —— 印章改成「纸让开之后只落一次」，
-     navSeal 的窗口是 .18s + .42s = 600ms，早摘会让印在半空中被抹掉。 */
+     v2.19.4 · 680ms → 220ms：与揭纸、印章同一条 200ms 收尾，转场结束后不该再有动作。
+     摘 nav-in 的同时必须钉住 nav-landed —— 只靠 nav-in 压 .device 的 appIn 的话，
+     类一摘 appIn 就重新上膛，已经落地的页面自己淡到 0.264 再往下坠 5px
+     （探针 probe-devicereplay.js 实测到的「切换后顿一下」就是它）。 */
   if (document.documentElement.classList.contains("nav-in")) {
-    setTimeout(function () { document.documentElement.classList.remove("nav-in"); }, 680);
+    setTimeout(function () {
+      var de = document.documentElement;
+      de.classList.add("nav-landed");
+      de.classList.remove("nav-in");
+    }, 220);
   }
 
-  /* v2.17 · 换页转场的「保底揭开」：铺纸动画是 fill:both，跑完会永久停在满盖上 ——
-     正常导航时新页紧接着提交、旧页被替换，看不见；异常时（导航没发生、目标页迟迟不提交、
-     从 bfcache 按后退回来脚本不再跑）就是一张下不去的纸。两处退路都只挂一次，
-     不随点击累积监听。 */
-  var liftTimer = 0;
-  function liftVeil() {
-    clearTimeout(liftTimer);
-    document.documentElement.classList.remove("nav-out");
-  }
-  function scheduleLift() {
-    clearTimeout(liftTimer);
-    liftTimer = setTimeout(liftVeil, 1600);
-  }
-  window.addEventListener("pageshow", function (ev) { if (ev.persisted) liftVeil(); });
-
-  /* v2.17 · 侧栏导航接管（详见 styles.css「过纸」段）：
+  /* v2.19.4 · 换页退场交还给浏览器的快照层（跨文档 View Transitions，详见 styles.css 转场段）：
+     旧页在新页可绘制之前由浏览器一直保持显示，所以不再需要「铺纸盖住再等」这一套 ——
+     v2.17 的 180ms 盲等定时器、nav-out 遮罩、1600ms 保底揭纸（liftVeil/scheduleLift）一并删除：
+     静止期从模型上消失，点击也不再被定时器压到 180ms 才起作用。
+     不认 @view-transition 的环境（手机上的旧浏览器经局域网访问同一套页面）走降级路径：
+     新页自己铺一张向下的纸，选择器是 html.nav-in:not(.vt)，认了 at-rule 就一条都不画。
      ① 点的就是当前页 → 不跳转，只滚回顶部。这既符合 iOS/Mac 标签栏的既定约定，
-        也从根上消灭了「同一个按钮反复点、动画反复播」——不导航，自然没有动画可播。
-     ② 换页 → 先铺纸（150ms）再导航，并给新页留一次性标记让它首帧接住同一张纸。
+        也从根上消灭「同一个按钮反复点、动画反复播」——不导航，自然没有动画可播。
+     ② 换页 → 立刻导航，只给新页留一次性标记让它首帧接住揭纸与落款。
      ③ 减少动效 / 修饰键（新开、拖拽）→ 一律放行给浏览器原生行为。 */
   document.addEventListener("click", function (e) {
     if (e.defaultPrevented || e.button !== 0) return;
@@ -586,14 +582,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (reduced) return;
     e.preventDefault();
     try { sessionStorage.setItem("inkread.nav.v1", "1"); } catch (err) {}
-    document.documentElement.classList.add("nav-out");
-    /* navSheetIn 用了 both —— 动画跑完纸会一直停在满盖位（translateY(0)），这是对的
-       （新页没提交前就该被纸盖住），但它同时也是「长时间下不去」的唯一来源：
-       新页解析慢、或导航根本没发生（被别的监听吃掉），这张纸就赖在屏幕上了。
-       兜底见文件末尾的 liftVeil()：超时 + pageshow(persisted) 两条退路。 */
-    scheduleLift();
-    /* 动画 140ms，导航比它稍晚起步，免得半遮面就切走 */
-    setTimeout(function () { location.href = href; }, 180);
+    location.href = href;
   });
 
   /* v2.7（F）：日期全部本机时区生成，且每分钟自检跨天 —— 不再只在加载时写一次 */
