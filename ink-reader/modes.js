@@ -36,6 +36,13 @@
   var sm2Update = window.InkSRS.sm2Update;
   var RATE = window.InkSRS.RATE;
   var makeCloze = window.InkSRS.makeCloze;
+  /* v2.19.6 · 闪卡出题逻辑（详见桌面《闪卡出题逻辑完善方案》）：
+     挖空位置不再由 id 哈希决定，改为 srs.js 里的结构化候选打分（L0）；
+     本文件只消费 clozeFor / snapHole / poolOf 三个入口，规则不散落两份。 */
+  var clozeFor = window.InkSRS.clozeFor;
+  var nextCloze = window.InkSRS.nextCloze;
+  var snapHole = window.InkSRS.snapHole;
+  var poolOf = window.InkSRS.poolOf;
 
   /* ------------------------------------------------------------
      1. 注册表
@@ -352,6 +359,9 @@
     host.dataset.open = "on";
     host.setAttribute("aria-hidden", "false");
     renderPanel();
+    /* 开合后重算落位：记忆里可能是上次浮窗的坐标，窗口/沉浸态一变就可能越界 */
+    var d = ensureDock();
+    if (d) mpApply(d);
     markToolOn(k);
     var chip = qs("#modePanelClose");
     if (chip) chip.focus();
@@ -360,8 +370,12 @@
     panelKey = null;
     var host = qs("#modePanel");
     if (host) { host.dataset.open = "off"; host.dataset.wide = "off"; host.setAttribute("aria-hidden", "true"); }
+    if (mpDock) mpApply(mpDock);
     if (S().padRO) { S().padRO.disconnect(); S().padRO = null; }
     if (S().padKey) { document.removeEventListener("keydown", S().padKey); S().padKey = null; }   /* 画板快捷键随面板收起解绑 */
+    /* 选段态是临时编辑态：面板一收就丢弃，不留下「半个洞」下次进来还在 */
+    if (S().fcKey) { document.removeEventListener("keydown", S().fcKey); S().fcKey = null; }
+    S().fcPick = false;
     savePadDraft();                     /* 收起草稿先落库：草稿不丢 */
     if (window.InkPadWin && InkPadWin.isOpen()) InkPadWin.close();
     clearToolOn();
@@ -409,6 +423,88 @@
     }
   };
 
+  /* ---------- 4.6 抽屉 ⇄ 浮窗（v2.19.6） ----------
+     随笔 / 引用摘录 / 双向链接 / 闪卡 四个工具原先钉死在右侧，拖不出去也合不回来，
+     而同页的批注与草稿纸早已能「拖到边缘吸附成侧栏、拖出去成浮窗」。
+     四个面板共用同一个 #modePanel 元素，所以挂**一个** InkDock 实例四个一起获得，
+     而不是各写一份（各写一份还要处理互相抢边）。
+     刻意不给浮窗能力的：目录 / 书签 / Aa / 更多 —— 那些是「看一眼就走」的临时弹层，
+     浮起来只会挡住正文，Material 3 supporting pane 的判据也是「常驻且主内容可重排」才停靠。 */
+  var mpDock = null, mpReady = false;
+  function mpNarrow() { return window.innerWidth <= 700; }
+  /* 最大化上界＝正文台顶（与批注浮窗同一口径，别盖住顶栏） */
+  function mpMaxTop() {
+    var book = qs("#book"), bar = qs(".reader-bar");
+    return (book && book.offsetTop) || (bar ? bar.offsetHeight : 0);
+  }
+  function ensureDock() {
+    if (mpDock || !window.InkDock) return mpDock;
+    var el = qs("#modePanel");
+    if (!el || !qs("#reader", document)) return null;
+    /* InkDock 的出厂态是 float，而这个抽屉的出厂语义是「钉在右侧」。
+       只在用户从没动过它时补一次 docked，之后一律尊重记忆值。 */
+    var firstTime = !InkDock.read()["modepanel"];
+    mpDock = InkDock.create(el, {
+      id: "modepanel", host: "#reader", handle: ".mpd-head",
+      min: { w: 300, h: 320 }, dock: { min: 280, max: 560, width: 344 }, snap: 24,
+      maxTop: mpMaxTop, narrow: mpNarrow,
+      onState: function (l) {
+        mpPaintDock();
+        /* 建实例时为「出厂钉右侧」补的那一次 setState 不算用户动作，别弹「已合并回侧栏」 */
+        if (!mpReady) return;
+        if (l.state === "docked") ctx.toast("已合并回" + (l.side === "right" ? "右" : "左") + "侧栏 · 拖标题栏可再拆出", "panel-right");
+        else if (l.state === "max") ctx.toast("已铺满正文区", "maximize-2");
+      }
+    });
+    if (firstTime) mpDock.setState("docked", { side: "right" });
+    mpReady = true;
+    return mpDock;
+  }
+  function mpPaintDock() {
+    var btn = qs("#mpdDockBtn");
+    if (!btn || !mpDock) return;
+    var docked = mpDock.state().state === "docked";
+    btn.innerHTML = icon(docked ? "panel-left-close" : "panel-right", 15);
+    btn.title = docked ? "解除停靠（拖标题栏也能拆出）" : "合并回侧栏（或直接把标题栏拖到左右边缘）";
+    btn.setAttribute("aria-pressed", docked ? "true" : "false");
+  }
+  /* InkDock 靠**计算样式里的 visibility** 判断面板还在不在（不在就不能占停靠边）。
+     而抽屉的开合带 .34s 的 visibility 过渡，过渡期间读到的还是旧值，两头都会错：
+     刚打开时以为面板隐藏 → 不去 claim 那条边，正文不让位；
+     刚收起时以为面板还在 → 不撤 claim，正文右边留下一条关不掉的 344px 空栏。
+     所以开、收两处都在过渡结束后补一次 apply()。（实测：收起后 --dock-w-right 仍为 344px） */
+  var MP_TRANS = 380;
+  function mpApply(d) {
+    d.apply();
+    clearTimeout(mpApply.t);
+    mpApply.t = setTimeout(function () { if (mpDock) mpDock.apply(); }, MP_TRANS);
+  }
+
+  /* 抽屉骨架只建一次：InkDock 会把八条缩放手柄与停靠调宽条挂在 #modePanel 上，
+     原先每次切面板都整体重写 innerHTML，会把那些节点连同监听一起抹掉。
+     现在换面板只改标题/副标题/正文三处。 */
+  function ensureShell(host) {
+    if (qs(".mpd-head", host)) return;
+    host.innerHTML =
+      '<div class="mpd-grip" aria-hidden="true"></div>' +
+      '<header class="mpd-head">' +
+        '<span class="mpd-title" id="mpdTitle"></span>' +
+        '<span class="spacer"></span>' +
+        '<button class="mpd-ic" id="mpdDockBtn" type="button" aria-label="拆分或合并侧栏"></button>' +
+        '<button class="mpd-x" id="modePanelClose" aria-label="收起">' + icon("x", 16) + '</button>' +
+      '</header>' +
+      '<p class="mpd-sub" id="mpdSub"></p>' +
+      '<div class="mpd-body" id="mpdBody"></div>';
+    qs("#modePanelClose", host).addEventListener("click", closePanel);
+    qs("#mpdDockBtn", host).addEventListener("click", function () {
+      var d = ensureDock();
+      if (!d) { ctx.toast("当前页面不支持拆成浮窗", "info"); return; }
+      if (mpNarrow()) { ctx.toast("窄屏下侧栏就是全屏 —— 拆成浮窗没有意义", "info"); return; }
+      d.toggleDock();
+    });
+    bindGrip(host);
+  }
+
   function renderPanel() {
     var host = qs("#modePanel");
     if (!host || !panelKey) return;
@@ -417,29 +513,11 @@
     if (panelKey === "pad") return;
     var p = PANEL[panelKey];
     if (!p) return;
-    host.innerHTML =
-      '<div class="mpd-grip" aria-hidden="true"></div>' +
-      '<header class="mpd-head">' +
-        '<span class="mpd-title">' + icon(p.icon, 15) + esc(p.title) + '</span>' +
-        '<span class="spacer"></span>' +
-        (panelKey === "pad"
-          ? '<button class="mpd-ic" id="mpdWide" aria-pressed="' + (host.dataset.wide === "on" ? "true" : "false") +
-            '" aria-label="全屏使用草稿纸">' + icon(host.dataset.wide === "on" ? "minimize" : "maximize-2", 15) + '</button>'
-          : "") +
-        '<button class="mpd-x" id="modePanelClose" aria-label="收起">' + icon("x", 16) + '</button>' +
-      '</header>' +
-      '<p class="mpd-sub">' + esc(p.sub) + '</p>' +
-      '<div class="mpd-body" id="mpdBody"></div>';
-    qs("#modePanelClose").addEventListener("click", closePanel);
-    var wb = qs("#mpdWide");
-    if (wb) wb.addEventListener("click", function () {
-      var on = host.dataset.wide !== "on";
-      host.dataset.wide = on ? "on" : "off";
-      wb.setAttribute("aria-pressed", on ? "true" : "false");
-      wb.innerHTML = icon(on ? "minimize" : "maximize-2", 15);
-    });
-    bindGrip(host);
-    p.render(qs("#mpdBody"));
+    ensureShell(host);
+    qs("#mpdTitle", host).innerHTML = icon(p.icon, 15) + esc(p.title);
+    qs("#mpdSub", host).textContent = p.sub;
+    p.render(qs("#mpdBody", host));
+    mpPaintDock();
   }
 
   function bindGrip(host) {
@@ -1026,24 +1104,33 @@
   var cardsReady = false;
 
   /* ymd 见文件顶部别名（srs.js 单一事实源） */
+  /* 卡源口径交给 srs.js 的 poolOf（≥8 字 + kind 过滤 + **同文去重**都在那一份里）。
+     poolDup 记最近一次被并掉的同文条数，卡组底部如实告知，不假装没发生。 */
+  var poolDup = 0;
   function poolAll() {
-    return ctx.notes().filter(function (n) {
-      return (n.kind === "highlight" || n.kind === "margin") && (n.text || "").length >= 8;
-    });
+    var p = poolOf(ctx.notes());
+    poolDup = p.dup;
+    return p.list;
   }
   /* 到期判定：从未复习过，或到期日不晚于今天 */
   function isDue(id) {
     var st = cards[id];
     return !st || !st.due || st.due <= ymd();
   }
-  /* 待复习张数：模式条徽标与闪卡面板共用同一口径，避免两处算出不同的数 */
+  /* 待复习张数：模式条徽标与闪卡面板共用同一口径，避免两处算出不同的数。
+     排除（excluded）与挂起（suspended）都不计 —— 挂起是「这轮先放着」，
+     排除是「这条本来就不该成卡」，两者都不该出现在徽标数字里。 */
   function dueCount() {
     if (!cardsReady) return 0;
-    return poolAll().filter(function (n) { return !isSuspended(n.id) && isDue(n.id); }).length;
+    return poolAll().filter(function (n) { return !isSuspended(n.id) && !isExcluded(n.id) && isDue(n.id); }).length;
   }
   /* 挂起：Anki 式「这张卡先放一放」—— 挂起卡不进复习队列、不计到期数，
      状态随 inkread.cards.v1 一并落库（suspended 字段），卡组视图里可随时恢复 */
   function isSuspended(id) { return !!(cards[id] && cards[id].suspended); }
+  /* 排除：墨墨「标示熟知 / 删除」在墨读里的等价物 —— 这条高亮不该成卡。
+     与挂起的差别只在语义：排除不进卡组计数（共 N 张），但**在卡组里始终可见可撤回**，
+     不做不可逆删除（删高亮是删用户的读书笔记，两回事）。 */
+  function isExcluded(id) { return !!(cards[id] && cards[id].excluded); }
   function loadCards() {
     return API.fetchCards().then(function (r) {
       cards = (r && r.data) || {};
@@ -1064,20 +1151,23 @@
     var all = poolAll();
     if (!all.length) {
       box.innerHTML = '<div class="empty">' + icon("layers", 24) +
-        '<p>还没有可做卡的内容<br>先高亮几句话，闪卡会自动生成</p></div>';
+        '<p>还没有可做卡的内容<br>先在书里高亮几句话，闪卡会从这里生成</p>' +
+        '<p class="empty-sub">成卡条件：≥ 8 字的高亮或页边随笔，且同文只留一张。<br>' +
+        '挖空取句中的术语、数字或定义后半句；挑不出考点的句子不会硬出卡，<br>' +
+        '可以在卡片上自己点选要背的那一段。</p></div>';
       return;
     }
-    /* 复习 / 卡组 两视图：卡组列出全部卡（含挂起），可随时挂起 / 恢复（Anki 式） */
+    /* 复习 / 卡组 两视图：卡组列出全部卡（含挂起、已排除），可随时改（Anki 式） */
     var view = S().fcView === "deck" ? "deck" : "review";
     var head = '<div class="fc-tabs" role="tablist">' +
       '<button class="fc-tab' + (view === "review" ? " on" : "") + '" data-fcview="review">复习</button>' +
       '<button class="fc-tab' + (view === "deck" ? " on" : "") + '" data-fcview="deck">卡组</button>' +
       '</div>';
     if (view === "deck") { renderDeck(box, head, all); return; }
-    var active = all.filter(function (n) { return !isSuspended(n.id); });
+    var active = all.filter(function (n) { return !isSuspended(n.id) && !isExcluded(n.id); });
     if (!active.length) {
       box.innerHTML = head + '<div class="empty">' + icon("layers", 24) +
-        '<p>卡片都在挂起中<br>到「卡组」里恢复需要复习的卡</p></div>';
+        '<p>卡片都不在复习中<br>到「卡组」里恢复或撤回排除</p></div>';
       bindViewSeg(box);
       return;
     }
@@ -1088,28 +1178,62 @@
     S().cardIdx = idx;
     var n = list[idx];
     var st = cards[n.id];
-    var cloze = makeCloze(n.text, n.id);
+    /* 出题权在人（Anki/RemNote 的一致做法）：机器只给默认值（L0），
+       人改过的洞存在 cards.v1 的 cloze 字段里，优先级最高。 */
+    var pick = S().fcPick === true;
+    var plan = pick ? { at: S().fcAt | 0, len: Math.max(1, S().fcLen | 0), why: "选段" } : clozeFor(n, st);
+    if (plan) {
+      var tlen = String(n.text || "").length;
+      if (plan.at + plan.len > tlen) { plan = { at: 0, len: Math.min(4, tlen), why: plan.why }; }
+    }
+    var noCand = !plan;
+    var cloze = makeCloze(n.text, n.id, st);
+
+    /* 正面：选段态逐字可点（预览用 .fc-pc.on 标出当前洞），普通态用挖空 HTML */
+    var frontHTML;
+    if (pick) {
+      var chars = [], txt = String(n.text || "");
+      for (var ci = 0; ci < txt.length; ci++) {
+        chars.push('<b class="fc-pc' + (ci >= plan.at && ci < plan.at + plan.len ? " on" : "") +
+          '" data-pat="' + ci + '">' + esc(txt.charAt(ci)) + '</b>');
+      }
+      frontHTML = '<p class="fc-pickline' + (ci > 60 ? " dense" : "") + '">' + chars.join("") + '</p>';
+    } else {
+      frontHTML = '<p' + (noCand ? ' class="fc-nocand"' : "") + '>' + (noCand ? esc(String(n.text || "")) : cloze.front) + '</p>';
+    }
 
     box.innerHTML = head +
       '<div class="fc-due">' +
         (due.length
-          ? icon("calendar-days", 12) + ' 到期 <b>' + due.length + '</b> 张 · 共 ' + all.length + ' 张'
-          : icon("circle-check", 12) + ' 今天已复习完 · 可提前复习 ' + all.length + ' 张') +
+          ? icon("calendar-days", 12) + ' 到期 <b>' + due.length + '</b> 张 · 共 ' + all.filter(function (x) { return !isExcluded(x.id); }).length + ' 张'
+          : icon("circle-check", 12) + ' 今天已复习完 · 可提前复习 ' + active.length + ' 张') +
         (st && st.last ? '<span class="spacer"></span>上次 ' + esc(st.last) + ' · 间隔 ' + esc(st.ivl) + ' 天' : "") +
       '</div>' +
       '<div class="fc-meta"><span>' + esc(anchorLabel(n.anchor)) + ' · P' + esc(n.page || 1) + '</span>' +
+        (noCand ? '<span class="fc-why">挑不出考点</span>' : '<span class="fc-why">' + esc(plan.why) + '</span>') +
         '<span class="spacer"></span><b>' + (idx + 1) + " / " + list.length + '</b></div>' +
-      '<div class="fc-card" id="fcCard" data-flip="off" role="button" tabindex="0" aria-label="点击卡片看答案">' +
+      '<div class="fc-card" id="fcCard" data-flip="' + (pick ? "off" : "off") + '" data-pick="' + (pick ? "on" : "off") + '"' +
+        ' role="button" tabindex="0" aria-label="' + (pick ? "点字选择要背的那一段" : "点击卡片看答案") + '">' +
         '<div class="fc-side fc-front">' +
-          '<span class="fc-tag">挖空</span>' +
-          '<p>' + cloze.front + '</p>' +
-          '<span class="fc-tip">点击卡片看答案</span>' +
+          '<span class="fc-tag">' + (pick ? "选段" : "挖空") + '</span>' +
+          frontHTML +
+          '<span class="fc-tip">' + (pick ? "点一个字定起点 · ← → 移动 · Shift+← → 改长度 · Enter 确定 · Esc 取消"
+            : (noCand ? "这句挑不出考点，可以自己选一段，或排掉它" : "点击卡片看答案")) + '</span>' +
         '</div>' +
         '<div class="fc-side fc-back">' +
           '<span class="fc-tag">原文</span>' +
           '<p>' + esc(n.text) + '</p>' +
           '<span class="fc-tip">' + (n.body && n.body !== n.text ? esc(String(n.body).slice(0, 120)) : "出自 " + esc(anchorLabel(n.anchor))) + '</span>' +
         '</div>' +
+      '</div>' +
+      '<div class="fc-edit">' +
+        (pick
+          ? '<button class="btn btn-accent btn-sm" id="fcPickOk">' + icon("check", 13) + '确定这个空</button>' +
+            '<button class="btn btn-ghost btn-sm" id="fcPickNo">取消</button>' +
+            (st && st.cloze ? '<button class="btn btn-ghost btn-sm" id="fcPickAuto">恢复自动</button>' : "")
+          : '<button class="btn btn-ghost btn-sm" id="fcPick">' + icon("text-select", 13) + '改挖这里</button>' +
+            '<button class="btn btn-ghost btn-sm" id="fcShift"' + (noCand ? " disabled" : "") + '>' + icon("shuffle", 13) + '换个空</button>' +
+            '<button class="btn btn-ghost btn-sm" id="fcExcl">' + icon("eye-off", 13) + '不再出卡</button>') +
       '</div>' +
       '<div class="fc-rate" id="fcRate" hidden>' +
         RATE.map(function (r) {
@@ -1122,18 +1246,95 @@
         '<span class="spacer"></span>' +
         '<button class="btn btn-ghost btn-sm" id="fcSkip">跳过' + icon("chevron-right", 13) + '</button>' +
       '</div>' +
-      '<p class="mpd-note">翻面后按「忘记 / 模糊 / 记得 / 熟练」评分，间隔按遗忘曲线自动排期（SM-2）。</p>';
+      '<p class="mpd-note">' + (pick
+        ? "自己选的那一段会记住（存在复习进度里），下次打开还是这一处；「恢复自动」交回机器判断。"
+        : "翻面后按「忘记 / 模糊 / 记得 / 熟练」评分。挖得不满意就点「改挖这里」—— 出题权在你。") + '</p>';
 
     bindViewSeg(box);
     var card = qs("#fcCard");
     var rate = qs("#fcRate");
     function flip() {
+      if (pick) return;                 /* 选段态点字是选位，不是翻面 */
       var toOn = card.dataset.flip !== "on";
       card.dataset.flip = toOn ? "on" : "off";
       rate.hidden = !toOn;   /* 只有翻到答案面，评分才有意义 */
     }
     card.addEventListener("click", flip);
     card.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+
+    /* ---------- L1 选段态：点字定起点，方向键微调，Enter 落库 ---------- */
+    function setPick(on) {
+      S().fcPick = !!on;
+      if (on) { var g0 = plan || clozeFor(n, st) || { at: 0, len: 4 }; S().fcAt = g0.at; S().fcLen = g0.len; }
+      renderPanel();
+    }
+    function commitPick() {
+      var cur = cards[n.id] || {};
+      /* 方向键能把起点推到句尾：落库前按整句长度夹一次，
+         否则写进一个越界的 cloze，下次渲染会被兜底逻辑挪回句首——空悄悄换了位置。 */
+      var L = String(n.text || "").length;
+      var a = Math.max(0, Math.min(S().fcAt | 0, Math.max(0, L - 1)));
+      var ln = Math.max(1, Math.min(S().fcLen | 0, L - a));
+      cur.cloze = { at: a, len: ln };
+      cards[n.id] = cur;
+      API.saveCard(n.id, cur);
+      S().fcPick = false;
+      renderPanel();
+      ctx.toast("已记住你选的那一段", "check");
+    }
+    if (S().fcKey) { document.removeEventListener("keydown", S().fcKey); S().fcKey = null; }
+    if (pick) {
+      qsa("[data-pat]", box).forEach(function (b) {
+        b.addEventListener("click", function (e) {
+          e.stopPropagation();
+          var g = snapHole(n.text, +b.dataset.pat);
+          if (!g) return;
+          S().fcAt = g.at; S().fcLen = g.len;
+          renderPanel();
+        });
+      });
+      var key = function (e) {
+        if (panelKey !== "card" || S().fcPick !== true) return;
+        var L = String(n.text || "").length, hit = true;
+        if (e.key === "ArrowLeft") { S().fcAt = Math.max(0, (S().fcAt | 0) - 1); }
+        else if (e.key === "ArrowRight") { S().fcAt = Math.min(L - 1, (S().fcAt | 0) + 1); }
+        else if (e.key === "ArrowUp") { S().fcLen = Math.min(L - (S().fcAt | 0), Math.max(1, (S().fcLen | 0) + (e.shiftKey ? 2 : 1))); }
+        else if (e.key === "ArrowDown") { S().fcLen = Math.max(1, (S().fcLen | 0) - (e.shiftKey ? 2 : 1)); }
+        else if (e.key === "Enter") { commitPick(); }
+        else if (e.key === "Escape") { S().fcPick = false; renderPanel(); }
+        else hit = false;
+        if (hit) { e.preventDefault(); e.stopPropagation(); renderPanel(); }
+      };
+      document.addEventListener("keydown", key, true);
+      S().fcKey = key;
+      var okBtn = qs("#fcPickOk"), noBtn = qs("#fcPickNo"), auBtn = qs("#fcPickAuto");
+      if (okBtn) okBtn.addEventListener("click", commitPick);
+      if (noBtn) noBtn.addEventListener("click", function () { S().fcPick = false; renderPanel(); });
+      if (auBtn) auBtn.addEventListener("click", function () {
+        var cur = cards[n.id] || {}; delete cur.cloze; cards[n.id] = cur;
+        API.saveCard(n.id, cur); S().fcPick = false; renderPanel();
+        ctx.toast("已交回机器判断", "rotate-ccw");
+      });
+    }
+
+    var btnPick = qs("#fcPick"), btnShift = qs("#fcShift"), btnExcl = qs("#fcExcl");
+    if (btnPick) btnPick.addEventListener("click", function () { setPick(true); });
+    if (btnShift) btnShift.addEventListener("click", function () {
+      var nx = nextCloze(n.text, plan);
+      if (!nx) { ctx.toast("这一句只有这一处可挖", "info"); return; }
+      var cur = cards[n.id] || {}; cur.cloze = { at: nx.at, len: nx.len, why: nx.why }; cards[n.id] = cur;
+      API.saveCard(n.id, cur); renderPanel();
+    });
+    /* L2 排除：这条高亮本来就不该成卡（不等于删掉笔记） */
+    if (btnExcl) btnExcl.addEventListener("click", async function () {
+      var cur = cards[n.id] || {};
+      cur.excluded = true;
+      cards[n.id] = cur;
+      await API.saveCard(n.id, cur);
+      S().cardIdx = 0; S().fcPick = false;
+      renderPanel(); renderStrip();
+      ctx.toast("已排掉这张卡 · 到「卡组」可撤回", "eye-off");
+    });
 
     qsa("[data-q]", box).forEach(function (b) {
       b.addEventListener("click", async function () {
@@ -1160,26 +1361,39 @@
       });
     });
   }
-  /* 卡组视图：全部卡片（含挂起）一览 —— 状态 / 间隔 / 连对，逐张挂起或恢复 */
+  /* 卡组视图：全部卡片（含挂起、已排除）一览 —— 状态 / 间隔 / 连对，逐张挂起或撤回排除 */
   function renderDeck(box, head, all) {
     var rows = all.map(function (n) {
       var st = cards[n.id] || {};
       var susp = isSuspended(n.id);
-      var status = susp ? "已挂起"
-        : (isDue(n.id) ? '<b class="fc-due-mark">待复习</b>' : "排期 " + esc(st.due || ""));
-      return '<div class="fc-row' + (susp ? " off" : "") + '">' +
+      var excl = isExcluded(n.id);
+      var due = !excl && !susp && isDue(n.id);
+      /* 状态徽标只说一件事：排期没日期就是「新卡」，不写「排期 」空尾巴。 */
+      var status = excl ? "已排除"
+        : susp ? "已挂起"
+        : (due ? "待复习" : (st.due ? "排期 " + esc(st.due) : "新卡"));
+      var noteTxt = esc(anchorLabel(n.anchor)) + ' · P' + esc(n.page || 1) +
+        (st.reps ? " · 连对 " + st.reps : "") + (st.ivl ? " · 间隔 " + st.ivl + " 天" : "");
+      return '<div class="fc-row' + (susp || excl ? " off" : "") + '">' +
         '<div class="fc-row-main">' +
-          '<p>' + esc(String(n.text).slice(0, 64)) + (String(n.text).length > 64 ? "…" : "") + '</p>' +
-          '<span class="card-note">' + esc(anchorLabel(n.anchor)) + ' · P' + esc(n.page || 1) +
-            (st.reps ? " · 连对 " + st.reps : " · 新卡") + (st.ivl ? " · 间隔 " + st.ivl + " 天" : "") + '</span>' +
+          '<p title="' + esc(String(n.text)) + '">' + esc(String(n.text).slice(0, 64)) + (String(n.text).length > 64 ? "…" : "") + '</p>' +
+          '<span class="fc-row-status' + (due ? " due" : "") + '">' + status + '</span>' +
         '</div>' +
-        '<span class="fc-row-status">' + status + '</span>' +
-        '<button class="tool-btn" data-susp="' + esc(n.id) + '">' + (susp ? "恢复" : "挂起") + '</button>' +
+        '<div class="fc-row-foot">' +
+          '<span class="card-note" title="' + noteTxt + '">' + noteTxt + '</span>' +
+          '<span class="fc-row-acts">' +
+            '<button class="tool-btn" data-susp="' + esc(n.id) + '">' + (susp ? "恢复" : "挂起") + '</button>' +
+            '<button class="tool-btn" data-excl="' + esc(n.id) + '">' + (excl ? "撤回排除" : "排除") + '</button>' +
+          '</span>' +
+        '</div>' +
         '</div>';
     }).join("");
+    var excludedN = all.filter(function (n) { return isExcluded(n.id); }).length;
     box.innerHTML = head +
       '<div class="fc-deck">' + rows + '</div>' +
-      '<p class="mpd-note">卡由高亮自动生成；挂起的卡不进复习队列，随时可恢复。</p>';
+      '<p class="mpd-note">挂起＝这轮先放着，仍算一张卡；排除＝这条高亮不该成卡，不进复习队列但随时可撤回。' +
+        (excludedN ? "当前已排除 <b>" + excludedN + "</b> 张。" : "") +
+        (poolDup ? '<br>另有 <b>' + poolDup + '</b> 条与已有卡片文字相同，已自动并入不重复出卡。' : "") + '</p>';
     bindViewSeg(box);
     qsa("[data-susp]", box).forEach(function (b) {
       b.addEventListener("click", async function () {
@@ -1191,6 +1405,19 @@
         renderStrip();
         renderPanel();
         ctx.toast(cur.suspended ? "已挂起，复习队列跳过这张卡" : "已恢复进入复习队列", "layers");
+      });
+    });
+    qsa("[data-excl]", box).forEach(function (b) {
+      b.addEventListener("click", async function () {
+        var id = b.dataset.excl;
+        var cur = cards[id] || {};
+        if (cur.excluded) { delete cur.excluded; } else { cur.excluded = true; }
+        cards[id] = cur;
+        await API.saveCard(id, cur);
+        S().cardIdx = 0;
+        renderStrip();
+        renderPanel();
+        ctx.toast(cur.excluded ? "已排掉这张卡" : "已撤回排除，重新进队列", "eye-off");
       });
     });
   }

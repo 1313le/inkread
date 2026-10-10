@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.19.5";
+window.InkVersion = "2.19.6";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -62,6 +62,11 @@ window.ICONS = {
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
   brain: '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/>',
   eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+  /* 闪卡「不再出卡 / 改挖这里 / 换个空」三枚：eye-off 直接在 eye 上加斜线，
+     保证与现有眼睛图形同源；另两枚取 lucide text-select / shuffle 轮廓。 */
+  "eye-off": '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/><path d="m2 2 20 20"/>',
+  "text-select": '<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4Z"/><path d="M5 4h6"/><path d="M8 4v8.5"/>',
+  shuffle: '<path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.9l-.5-.8"/><path d="m18 14 4 4-4 4"/>',
   monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
   cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
   smartphone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
@@ -136,6 +141,13 @@ window.ICONS = {
      候选六款同尺寸渲染比对（16/18/20/64px × 亮/暗/朱批 + 底栏原位）后选定这一款：
      带引导点的两款在小尺寸下多点像脏点，去掉界栏的那款退化成「排版」图标。 */
   "toc": '<path d="M4.5 5v14"/><path d="M8.5 7.5h11.5"/><path d="M12 12.5h8"/><path d="M12 17.5h5"/>',
+  /* v2.19.6 · 「AI 溯源」专用图标（用户指它借用了 list-tree，与「大纲」同形）。
+     溯源要做的事是「回到这句话的来处 / 查它的原文」，所以取「回指箭头 + 引文块」：
+     左端一枚直回指箭头，独立一条引文竖杠，杠右三行长短不齐的引文。
+     定稿靠真实工具条 3x 取证（与邻居「解析」scan-text 并排，18px × paper/night）：
+     圆形回环那款读作「刷新」，是错的可供性；箭头折尾勾进竖杠的那款，
+     杠与钩在 18px 下并成一团；只有两行的那款读成「等号」。三行才立得住。 */
+  "trace-back": '<path d="M6.5 9 2.5 12.5l4 3.5"/><path d="M2.5 12.5h6"/><path d="M10.5 6.5v12"/><path d="M21 8.5h-7"/><path d="M21 13h-7"/><path d="M18 17.5h-4"/>',
   "heading-1": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="m17 12 3-2v8"/>',
   "heading-2": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M21 18h-4c0-4 4-3 4-6 0-1.5-2-2.5-4-1"/>',
   "heading-3": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17.5 10.5c1.7-1 3.5 0 3.5 1.5a2 2 0 0 1-2 2"/><path d="M17 17.5c2 1.5 4 .3 4-1.5a2 2 0 0 0-2-2"/>',
@@ -1667,8 +1679,11 @@ window.InkSync = (function () {
      否则对端与服务端会保留旧值、下次拉取又把它复活。 */
   function push(force) {
     if (pushing) return Promise.resolve({ pushed: 0, busy: true });
-    var m = metaGet();
     var changed = stampChanges();
+    /* 必须在 stampChanges 之后再读 META：stampChanges 自己 metaGet/metaSet，
+       提前读到的旧对象既装不出新键的时间戳（信封退化成 t=0，对端 pull 的
+       t<=本地戳 判定会直接跳过），又会把刚盖好的戳 metaSet 掉。 */
+    var m = metaGet();
     var data = {}, live = {}, names;
     keys().forEach(function (k) { live[k] = 1; });
     Object.keys(m).forEach(function (k) {

@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>墨读 InkRead · 闪卡</title>
 <link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/local.css">
 <link rel="stylesheet" href="styles.css">
 <style>
 /* ---------- 闪卡页（v2.6 要求四）----------
@@ -409,10 +410,13 @@
     writeUI();
   }
 
+  /* 卡源口径 = srs.js 的 poolOf（≥8 字 + kind 过滤 + 同文去重），与阅读页 poolAll 同一份定义。
+     去重后同文高亮只留第一张：同一句话划两次不该背两遍；被并掉的条数在页脚如实报告。 */
+  var dupN = 0;
   function cardSources(notes) {
-    return (notes || []).filter(function (n) {
-      return n && (n.kind === "highlight" || n.kind === "margin") && String(n.text || "").length >= 8;
-    });
+    var p = InkSRS.poolOf(notes || []);
+    dupN = p.dup;
+    return p.list;
   }
 
   /* 遍历书架 → 每本书取其笔记里的成卡源 → 组装卡组 —— 阅读页 poolAll 同口径 */
@@ -428,23 +432,27 @@
     function makeDeck(docId, title, type, list) {
       var cards = list.map(function (n) {
         var st = state.cards[n.id] || null;
-        return { n: n, st: st, susp: isSusp(st), due: !isSusp(st) && isDueSt(st) };
+        var excl = !!(st && st.excluded);
+        /* 排除＝「这条高亮不该成卡」：与挂起（这轮先放着）分开计，都不进复习队列 */
+        return { n: n, st: st, susp: isSusp(st), excl: excl, due: !isSusp(st) && !excl && isDueSt(st) };
       });
-      /* 列表顺序：待复习 → 新卡 → 已排期 → 挂起；同档按页码 */
+      /* 列表顺序：待复习 → 新卡 → 已排期 → 挂起 → 已排除；同档按页码 */
       cards.sort(function (a, b) {
-        var ra = a.susp ? 3 : a.due ? 0 : (a.st && a.st.due ? 2 : 1);
-        var rb = b.susp ? 3 : b.due ? 0 : (b.st && b.st.due ? 2 : 1);
+        var ra = a.excl ? 4 : a.susp ? 3 : a.due ? 0 : (a.st && a.st.due ? 2 : 1);
+        var rb = b.excl ? 4 : b.susp ? 3 : b.due ? 0 : (b.st && b.st.due ? 2 : 1);
         return ra - rb || (a.n.page || 0) - (b.n.page || 0);
       });
       var dueN = cards.filter(function (c) { return c.due; }).length;
-      var suspN = cards.filter(function (c) { return c.susp; }).length;
+      var suspN = cards.filter(function (c) { return c.susp && !c.excl; }).length;
+      var exclN = cards.filter(function (c) { return c.excl; }).length;
       var custom = state.decks[docId];
       return {
         docId: docId, type: type || "other",
         bookTitle: title || "未知文档",
         name: (custom && String(custom).trim()) || title || "未知文档",
         custom: !!(custom && String(custom).trim()),
-        cards: cards, totalN: cards.length, dueN: dueN, suspN: suspN
+        cards: cards, totalN: cards.length, dueN: dueN, suspN: suspN, exclN: exclN,
+        liveN: cards.length - suspN - exclN
       };
     }
 
@@ -489,7 +497,7 @@
      同维度正项在 AND 内合并为 OR（kind:paper kind:plan = 论文 或 计划）。
      解析失败给人话提示，且保留上一次的有效结果（不清空列表）。
      ============================================================ */
-  var IS_VALUES = ["due", "new", "sched", "susp"];
+  var IS_VALUES = ["due", "new", "sched", "susp", "excl"];
 
   function lex(s) {
     var toks = [], i = 0, n = s.length;
@@ -610,9 +618,10 @@
     if (t.field === "doc") return (d.name + " " + d.bookTitle).toLowerCase().indexOf(String(t.value).toLowerCase()) >= 0;
     if (t.field === "is") {
       if (t.value === "due") return !!c.due;
-      if (t.value === "susp") return !!c.susp;
-      if (t.value === "new") return !c.susp && (!c.st || !c.st.reps);
-      if (t.value === "sched") return !c.susp && !!(c.st && c.st.due && c.st.due > ymd());
+      if (t.value === "susp") return !!c.susp && !c.excl;
+      if (t.value === "excl") return !!c.excl;
+      if (t.value === "new") return !c.susp && !c.excl && (!c.st || !c.st.reps);
+      if (t.value === "sched") return !c.susp && !c.excl && !!(c.st && c.st.due && c.st.due > ymd());
     }
     return false;
   }
@@ -630,17 +639,19 @@
     if (!ast) return decks;
     var out = [];
     decks.forEach(function (d) {
-      var cards = [], dueN = 0, suspN = 0;
+      var cards = [], dueN = 0, suspN = 0, exclN = 0;
       d.cards.forEach(function (c) {
         if (!matchCard({ deck: d, card: c, note: c.n }, ast)) return;
         cards.push(c);
         if (c.due) dueN++;
-        if (c.susp) suspN++;
+        if (c.susp && !c.excl) suspN++;
+        if (c.excl) exclN++;
       });
       if (!cards.length) return;
       var copy = {}, k;
       for (k in d) if (Object.prototype.hasOwnProperty.call(d, k)) copy[k] = d[k];
       copy.cards = cards; copy.totalN = cards.length; copy.dueN = dueN; copy.suspN = suspN;
+      copy.exclN = exclN; copy.liveN = cards.length - suspN - exclN;
       out.push(copy);
     });
     return out;
@@ -699,13 +710,14 @@
   function sumBy(decks, f) { var s = 0; decks.forEach(function (d) { s += f(d) || 0; }); return s; }
   function newCount(decks) {
     var n = 0;
-    decks.forEach(function (d) { d.cards.forEach(function (c) { if (!c.susp && (!c.st || !c.st.reps)) n++; }); });
+    decks.forEach(function (d) { d.cards.forEach(function (c) { if (!c.susp && !c.excl && (!c.st || !c.st.reps)) n++; }); });
     return n;
   }
 
   function renderHead(decks) {
     var due = sumBy(decks, function (d) { return d.dueN; });
-    qs("#cardsSub").textContent = "从高亮自动成卡 · 按遗忘曲线复习 · 共 " + decks.length + " 个卡组";
+    qs("#cardsSub").textContent = "从高亮自动成卡 · 按遗忘曲线复习 · 共 " + decks.length + " 个卡组" +
+      (dupN ? " · 已并入 " + dupN + " 条同文高亮" : "");
     /* v2.17：页头原本五个计数 pill 横排 578px，其中四个与左栏「状态」分组逐字重复
        （到期/新卡/已挂起），页头于是变成了第二条侧栏。只留「今日到期」——
        它是唯一决定「现在要不要复习」的数，其余口径留在侧栏（那里可点、可筛）。 */
@@ -774,13 +786,14 @@
     box.push("</section>");
 
     /* ② 状态（当前查询下的命中数） */
-    var st = { due: 0, new: 0, sched: 0, susp: 0 };
+    var st = { due: 0, new: 0, sched: 0, susp: 0, excl: 0 };
     res.forEach(function (d) {
       d.cards.forEach(function (c) {
-        if (c.susp) st.susp++;
+        if (c.excl) st.excl++;
+        else if (c.susp) st.susp++;
         else if (c.due) st.due++;
-        if (!c.susp && (!c.st || !c.st.reps)) st.new++;
-        if (!c.susp && c.st && c.st.due && c.st.due > ymd()) st.sched++;
+        if (!c.susp && !c.excl && (!c.st || !c.st.reps)) st.new++;
+        if (!c.susp && !c.excl && c.st && c.st.due && c.st.due > ymd()) st.sched++;
       });
     });
     box.push('<section class="side-sec"><div class="side-head">' + icon("filter", 13) + "状态</div>");
@@ -788,6 +801,7 @@
     box.push(sideItem("is", "is:new", "sparkles", "新卡", st.new, hasToken(q, "is:new"), "新卡：is:new"));
     box.push(sideItem("is", "is:sched", "clock", "已排期", st.sched, hasToken(q, "is:sched"), "已排期：is:sched"));
     box.push(sideItem("is", "is:susp", "minus-circle", "已挂起", st.susp, hasToken(q, "is:susp"), "已挂起：is:susp"));
+    box.push(sideItem("is", "is:excl", "eye-off", "已排除", st.excl, hasToken(q, "is:excl"), "已排除：is:excl"));
     box.push("</section>");
 
     /* ③ 类别（8 类，带计数；缺的显示 0） */
@@ -847,12 +861,13 @@
     var ren = state.renaming === d.docId;
     /* 进度条 = 已排期（不在到期）比例：一眼看出这组清到什么程度 */
     var pct = d.totalN ? Math.round((d.totalN - d.dueN) / d.totalN * 100) : 0;
-    var canReview = d.totalN - d.suspN > 0;
+    var canReview = d.liveN > 0;
     return '<article class="deck-card" data-deck="' + esc(d.docId) + '">' +
       '<div class="dc-top">' +
         '<span class="chip chip-accent">' + icon(catIcon(d.type), 13) + esc(catName(d.type)) + "</span>" +
         (d.custom ? '<span class="chip">' + icon("square-pen", 12) + "自定名</span>" : "") +
         (d.suspN ? '<span class="chip chip-amber">' + icon("minus-circle", 12) + "挂起 " + d.suspN + "</span>" : "") +
+        (d.exclN ? '<span class="chip">' + icon("eye-off", 12) + "已排除 " + d.exclN + "</span>" : "") +
         '<span class="spacer"></span>' +
         '<button class="btn btn-ghost btn-sm dc-more" data-more="' + esc(d.docId) + '" title="卡组操作" aria-label="卡组操作">' + icon("ellipsis", 16) + "</button>" +
       "</div>" +
@@ -863,7 +878,7 @@
         (d.custom ? " · " + esc(d.bookTitle) : "") + "</p>" +
       '<div class="dc-bar"><span class="bar bar-accent"><i style="width:' + pct + '%"></i></span></div>' +
       '<div class="dc-foot">' +
-        '<button class="btn btn-accent btn-sm" data-review="' + esc(d.docId) + '"' + (canReview ? "" : " disabled title=\"这一组的卡都在挂起中\"") + ">" +
+        '<button class="btn btn-accent btn-sm" data-review="' + esc(d.docId) + '"' + (canReview ? "" : " disabled title=\"这一组的卡都不在复习中（挂起或已排除）\"") + ">" +
           icon("play", 14) + "开始复习</button>" +
         '<button class="btn btn-ghost btn-sm" data-open="' + esc(d.docId) + '">' +
           icon("list-tree", 14) + (isOpen(d.docId) ? "收起" : "浏览") + "</button>" +
@@ -874,33 +889,42 @@
 
   function cardRowHTML(d, c) {
     var n = c.n, st = c.st || {};
-    var cloze = makeCloze(n.text, n.id);
-    var status = c.susp
-      ? '<span class="fc-row-status">已挂起</span>'
-      : (c.due
-          ? '<span class="fc-row-status"><b class="fc-due-mark">待复习</b></span>'
-          : '<span class="fc-row-status">' + (st.due ? "排期 " + esc(st.due) : "新卡") + "</span>");
+    /* 传入 st：用户手选过的洞（cards.v1 的 cloze 字段）在这里必须照样生效，
+       否则卡组看到的是机器默认挖空，与阅读页里复习到的不是同一处。 */
+    var cloze = makeCloze(n.text, n.id, c.st);
+    var status = c.excl ? "已排除"
+      : (c.susp ? "已挂起"
+        : (c.due ? "待复习" : (st.due ? "排期 " + esc(st.due) : "新卡")));
     var bits = ["P" + (n.page || 1)];
     if (st.reps) bits.push("连对 " + st.reps);
-    else bits.push("新卡");
     if (st.ivl) bits.push("间隔 " + st.ivl + " 天");
     if (n.kind === "margin") bits.push("随笔");
-    return '<div class="fc-row' + (c.susp ? " off" : "") + '" data-cid="' + esc(n.id) + '">' +
+    if (st.cloze) bits.push(st.cloze.why ? "挖「" + st.cloze.why + "」" : "自定挖空");
+    else if (cloze.none) bits.push("挑不出考点");
+    else if (cloze.why) bits.push("挖「" + cloze.why + "」");
+    var noteTxt = bits.map(esc).join(" · ");
+    return '<div class="fc-row' + (c.susp || c.excl ? " off" : "") + '" data-cid="' + esc(n.id) + '">' +
       '<div class="fc-row-main dk-main" data-flip="' + esc(n.id) + '" title="点击翻面">' +
-        '<p class="dk-front" data-side="front">' + cloze.front + "</p>" +
+        '<p class="dk-front" data-side="front" title="' + esc(n.text) + '">' + (cloze.none ? esc(n.text) : cloze.front) + "</p>" +
         '<p class="dk-back" data-side="back" hidden>' + esc(n.text) + "</p>" +
-        '<span class="card-note">' + bits.map(esc).join(" · ") + '<span class="dk-flip-tip">　点卡片翻面</span></span>' +
+        '<span class="fc-row-status' + (c.due && !c.susp && !c.excl ? " due" : "") + '">' + status + "</span>" +
       "</div>" +
-      status +
-      '<button class="tool-btn" data-susp="' + esc(n.id) + '">' + (c.susp ? "恢复" : "挂起") + "</button>" +
-      '<a class="tool-btn" href="' + esc(srcLink(d.docId, n.id)) + '" title="回到原文位置">' + icon("arrow-up-right", 14) + "原文</a>" +
+      '<div class="fc-row-foot">' +
+        '<span class="card-note" title="' + noteTxt + '">' + noteTxt + '<span class="dk-flip-tip">　点卡片翻面</span></span>' +
+        '<span class="fc-row-acts">' +
+          '<button class="tool-btn" data-shift="' + esc(n.id) + '"' + (cloze.none ? " disabled title=\"这句挑不出考点，到阅读页闪卡里自己选一段\"" : " title=\"换一处挖空\"") + ">" + icon("shuffle", 12) + "换个空</button>" +
+          '<button class="tool-btn" data-susp="' + esc(n.id) + '">' + (c.susp ? "恢复" : "挂起") + "</button>" +
+          '<button class="tool-btn" data-excl="' + esc(n.id) + '">' + (c.excl ? "撤回排除" : "排除") + "</button>" +
+          '<a class="tool-btn" href="' + esc(srcLink(d.docId, n.id)) + '" title="回到原文位置">' + icon("arrow-up-right", 14) + "原文</a>" +
+        "</span>" +
+      "</div>" +
       "</div>";
   }
 
   function deckDetailHTML(d) {
     return '<div class="deck-detail">' +
       '<div class="detail-head">' +
-        '<span class="dh-k">共 ' + d.totalN + " 张 · 到期 " + d.dueN + " 张" + (d.suspN ? " · 挂起 " + d.suspN + " 张" : "") + "</span>" +
+        '<span class="dh-k">共 ' + d.totalN + " 张 · 到期 " + d.dueN + " 张" + (d.suspN ? " · 挂起 " + d.suspN + " 张" : "") + (d.exclN ? " · 已排除 " + d.exclN + " 张" : "") + "</span>" +
         '<span class="spacer"></span>' +
         '<button class="btn btn-accent btn-sm" data-review="' + esc(d.docId) + '">' + icon("play", 14) + "开始复习</button>" +
         '<button class="btn btn-ghost btn-sm" data-open="' + esc(d.docId) + '">' + icon("chevron-up", 14) + "收起</button>" +
@@ -922,7 +946,7 @@
         '<span class="dr-cat">' + icon(catIcon(d.type), 13) + esc(catName(d.type)) + "</span>" + renameHTML(d) +
         "</div>";
     }
-    var canReview = d.totalN - d.suspN > 0;
+    var canReview = d.liveN > 0;
     return '<div class="deck-row' + (isOpen(d.docId) ? " open" : "") + '" data-deck="' + esc(d.docId) + '">' +
       '<button class="dr-namebtn" data-open="' + esc(d.docId) + '" title="浏览卡组：' + esc(d.bookTitle) + '">' +
         icon(catIcon(d.type), 14) + '<span class="dr-name">' + esc(d.name) + "</span>" +
@@ -932,7 +956,7 @@
       '<span class="dr-num">' + icon("calendar-days", 12) + "到期 <b>" + d.dueN + "</b> / " + d.totalN + "</span>" +
       '<span class="dr-recent" title="最近复习">' + icon("clock", 12) + esc(latestLast(d)) + "</span>" +
       '<span class="spacer"></span>' +
-      '<button class="btn btn-accent btn-sm" data-review="' + esc(d.docId) + '"' + (canReview ? "" : " disabled title=\"这一组的卡都在挂起中\"") + ">" + icon("play", 13) + "复习</button>" +
+      '<button class="btn btn-accent btn-sm" data-review="' + esc(d.docId) + '"' + (canReview ? "" : " disabled title=\"这一组的卡都不在复习中（挂起或已排除）\"") + ">" + icon("play", 13) + "复习</button>" +
       '<button class="btn btn-ghost btn-sm dr-more" data-more="' + esc(d.docId) + '" title="卡组操作" aria-label="卡组操作">' + icon("ellipsis", 15) + "</button>" +
       (state.menu === d.docId ? deckMenuHTML(d) : "") +
       (isOpen(d.docId) ? deckDetailHTML(d) : "") +
@@ -1063,12 +1087,47 @@
     toast(next.suspended ? "已挂起，复习队列跳过这张卡" : "已恢复进入复习队列", "layers");
   }
 
+  /* 「排除」与「挂起」分列：挂起＝这轮先放着（仍算一张卡）；
+     排除＝这条高亮本不该成卡（不进队列、不计到期），但卡组里始终可见、随时撤回。
+     都不动原始高亮 —— 删笔记是另一回事。 */
+  function toggleExcl(noteId) {
+    var cur = state.cards[noteId] || {};
+    var next = Object.assign({}, cur);
+    if (next.excluded) delete next.excluded; else next.excluded = true;
+    state.cards[noteId] = next;
+    API.saveCard(noteId, next);
+    render();
+    toast(next.excluded ? "已排掉这张卡，不再进入复习队列" : "已撤回排除，重新进入复习队列", "eye-off");
+  }
+
+  function findCard(noteId) {
+    var hit = null;
+    buildDecks().forEach(function (d) {
+      d.cards.forEach(function (c) { if (!hit && c.n.id === noteId) hit = c; });
+    });
+    return hit;
+  }
+
+  /* 换个空：机器把候选按分数排好，这里循环取下一处 —— 出题权在人，
+     但不必从空白手填。选中的位置写进 cards.v1 的 cloze 字段，永久覆盖机器默认。 */
+  function shiftCloze(noteId) {
+    var c = findCard(noteId);
+    if (!c) return;
+    var nx = InkSRS.nextCloze(c.n.text, InkSRS.clozeFor(c.n, c.st));
+    if (!nx) { toast("这一句只有这一处可挖", "info"); return; }
+    var next = Object.assign({}, state.cards[noteId] || {}, { cloze: { at: nx.at, len: nx.len, why: nx.why } });
+    state.cards[noteId] = next;
+    API.saveCard(noteId, next);
+    render();
+    toast("已换到「" + nx.why + "」处挖空", "shuffle");
+  }
+
   /* ============================================================
      八、复习流（页内全屏浮层）—— v2.10 未改动
      队列 = 该组非挂起卡里的到期卡；无到期则全部（提前复习），与阅读页同口径。
      ============================================================ */
   function deckQueue(d) {
-    var active = d.cards.filter(function (c) { return !c.susp; });
+    var active = d.cards.filter(function (c) { return !c.susp && !c.excl; });
     if (!active.length) return { list: [], ahead: false };
     var due = active.filter(function (c) { return c.due; });
     if (!due.length) return { list: active, ahead: true };
@@ -1079,7 +1138,7 @@
     var d = findDeck(docId);
     if (!d) return;
     var q = deckQueue(d);
-    if (!q.list.length) { toast("这一组的卡都在挂起中 · 到详情里恢复后再复习", "minus-circle"); return; }
+    if (!q.list.length) { toast("这一组的卡都不在复习中 · 到详情里恢复或撤回排除", "minus-circle"); return; }
     state.rv = { docId: docId, name: d.name, list: q.list, idx: 0, flipped: false, done: false, ahead: q.ahead, reviewed: 0 };
     qs("#fcStage").hidden = false;
     renderReview();
@@ -1108,22 +1167,24 @@
     qs("#fcsProg").textContent = (rv.idx + 1) + " / " + rv.list.length;
     /* 卡头信息：本组还到期多少 / 共多少（与阅读页 fc-due 同一口径） */
     var d = findDeck(rv.docId);
+    var rvCloze = makeCloze(n.text, n.id, st);
     var head = d
       ? (rv.ahead
           ? icon("circle-check", 12) + " 这一组今天已清空 · 提前复习 " + rv.list.length + " 张"
-          : icon("calendar-days", 12) + " 到期 <b>" + d.dueN + "</b> 张 · 本组共 " + d.totalN + " 张")
+          : icon("calendar-days", 12) + " 到期 <b>" + d.dueN + "</b> 张 · 本组共 " + (d.totalN - d.exclN) + " 张")
       : "";
     body.innerHTML =
       '<div class="fc-due">' + head +
         (st && st.last ? '<span class="spacer"></span>上次 ' + esc(st.last) + " · 间隔 " + esc(st.ivl) + " 天" : "") +
       "</div>" +
       '<div class="fc-meta"><span>P' + esc(n.page || 1) + " · " + esc(n.at || "本机笔记") + "</span>" +
+        (rvCloze.none ? '<span class="fc-why">挑不出考点</span>' : '<span class="fc-why">' + esc(rvCloze.why || "自定") + "</span>") +
         '<span class="spacer"></span><b>' + (rv.idx + 1) + " / " + rv.list.length + "</b></div>" +
       '<div class="fc-card" id="fcCard" data-flip="' + (rv.flipped ? "on" : "off") + '" role="button" tabindex="0" aria-label="点击卡片看答案">' +
         '<div class="fc-side fc-front">' +
           '<span class="fc-tag">挖空</span>' +
-          "<p>" + makeCloze(n.text, n.id).front + "</p>" +
-          '<span class="fc-tip">点击卡片看答案</span>' +
+          '<p' + (rvCloze.none ? ' class="fc-nocand"' : "") + ">" + (rvCloze.none ? esc(n.text) : rvCloze.front) + "</p>" +
+          '<span class="fc-tip">' + (rvCloze.none ? "这句没挑出考点，直接读一遍即可 · 也可到卡组里换个空" : "点击卡片看答案") + "</span>" +
         "</div>" +
         '<div class="fc-side fc-back">' +
           '<span class="fc-tag">原文</span>' +
@@ -1223,6 +1284,10 @@
     }
     var sp = t.closest("[data-susp]");
     if (sp) { toggleSusp(sp.dataset.susp); return; }
+    var ex = t.closest("[data-excl]");
+    if (ex) { toggleExcl(ex.dataset.excl); return; }
+    var sh = t.closest("[data-shift]");
+    if (sh && !sh.disabled) { shiftCloze(sh.dataset.shift); return; }
     var fl = t.closest("[data-flip]");
     if (fl) {                                  /* 行内翻面：正面（挖空）⇄ 背面（原文） */
       var front = fl.querySelector('[data-side="front"]');

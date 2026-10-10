@@ -147,9 +147,14 @@ html[data-theme="contrastNight"] { --mark: #ff725c; --on-mark: #1a0e0a; }
   --cinnabar: #B5382A;
   --cinnabar-hi: #D9604A;   /* 暗底文本级（对 #1B1916 ≈4.74:1） */
 
-  --font-serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
-  --font-sans: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-kai: "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", "FangSong", var(--font-serif);
+  /* v2.19.6 P0-2：三款核心中文体的 GB2312 级子集随包本地化（fonts/local.css），
+     断网首屏也是真字而不是系统兜底。族名另起 "InkRead *" 而不是沿用 "Noto …
+     Local"，两件事：① OFL 不许改作沿用原 Reserved Font Name；② 独立族名排在
+     栈首，子集里没有的生僻字才会按 CSS 逐字回落到下面那串 CDN 全量字体，
+     覆盖面不缩水。 */
+  --font-serif: "InkRead Serif", "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --font-sans: "InkRead Sans", "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-kai: "InkRead Kai", "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", "FangSong", var(--font-serif);
   --font-mono: "Noto Sans Mono", "Cascadia Code", "JetBrains Mono", "Consolas", "Courier New", monospace;
 
   /* ---- 字体注册表（fonts.js 按需注入；此处只声明 font-family 栈）----
@@ -164,7 +169,10 @@ html[data-theme="contrastNight"] { --mark: #ff725c; --on-mark: #1a0e0a; }
   --font-mashan: "Ma Shan Zheng", "Kaiti SC", "STKaiti", cursive;
   --font-longcang: "Long Cang", "Kaiti SC", "STKaiti", cursive;
   /* 拉丁 13 款（v2.14 新增 Crimson Pro） */
-  --font-crimson: "Crimson Pro", "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  /* 只有 crimson 例外：全站标题用它，中文本地化后它是仅剩的一处离线/在线可见
+     差异（标题里的数字与拉丁字母会掉到 Georgia），所以它的 400/600/700 三档
+     也进了 fonts/local.css，族名 InkRead Latin。其余拉丁款继续走 CDN。 */
+  --font-crimson: "InkRead Latin", "Crimson Pro", "Cormorant Garamond", Georgia, "Times New Roman", serif;
   --font-cormorant: "Cormorant Garamond", "EB Garamond", Georgia, "Times New Roman", serif;
   --font-garamond: "EB Garamond", Georgia, "Times New Roman", serif;
   --font-playfair: "Playfair Display", "Didot", Georgia, serif;
@@ -2007,7 +2015,14 @@ body.nw .work-card { max-height: none; min-height: 0; }
   overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
   border-radius: var(--r-sm); scrollbar-width: thin; -webkit-overflow-scrolling: touch;
 }
-.ap-seg-scroll .ap-seg-b { flex: none; padding: 7px 12px; font-size: 13.5px; }
+/* chip 只长不缩（flex-grow 吃掉余量、flex-shrink 0 保住样张不被压字）：
+   原先 flex:none 让整条边框盒子铺满 1410px 而 chip 只占左半边，实测中文行
+   右空尾 928px（66%）、拉丁行 608px（43%），是「框比字大」的空洞感来源。
+   宽处铺满、窄处（344px 抽屉）仍靠 overflow-x 滚动，两头都不裁字。
+   样张色提到 --ink：细脸字面（霞鹜文楷等）用 --ink-2 会读成「不可选」，
+   而这里刻意让每个 chip 用自己的字面显示，不做合成加粗。 */
+.ap-seg-scroll .ap-seg-b { flex: 1 0 auto; padding: 7px 12px; font-size: 13.5px; }
+.ap-seg-scroll .ap-seg-b:not(.on) { color: var(--ink); }
 .ap-seg-scroll::-webkit-scrollbar { height: 5px; }
 
 /* ---------- 下拉 / 数字 ---------- */
@@ -4010,6 +4025,18 @@ body.immersive .mode-pop {
   transition: transform .34s cubic-bezier(.2, .8, .3, 1), visibility .34s;
 }
 .mode-drawer[data-open="on"] { transform: none; visibility: visible; }
+/* v2.19.6 · 拖得出去的抽屉：浮动态按「窗」打扮，停靠态仍是贴着正文的一块纸。
+   取的是草稿纸浮窗 .pad-win（见 5490 前后）同一套边框与投影，
+   免得同一页里两种浮窗两种长相。 */
+.mode-drawer[data-dock-state="float"] {
+  border: 1px solid var(--line-2); border-radius: var(--r-md);
+  box-shadow: 0 26px 64px -34px var(--edge), 0 3px 12px -8px var(--edge);
+}
+.mode-drawer[data-dock-state="max"] { border-left: 0; box-shadow: none; }
+.mode-drawer[data-docked="left"] {
+  border-left: 0; border-right: var(--int-bd-2) solid var(--line);
+  box-shadow: 22px 0 46px -26px var(--edge);
+}
 
 /* 草稿纸全屏：344px 的窄抽屉里根本画不开，铺满视口后画布才够用 */
 .mode-drawer[data-wide="on"] {
@@ -4021,7 +4048,12 @@ body.immersive .mode-pop {
 .mode-drawer[data-wide="on"] .pad-canvas { height: min(62dvh, 620px); }
 
 .mpd-grip { display: none; flex: none; width: 42px; height: 4px; border-radius: 3px; background: var(--line); margin: 9px auto 0; }
-.mpd-head { display: flex; align-items: center; gap: 9px; padding: 13px 15px 9px; flex: none; }
+/* 2.19.6：与批注浮窗 #notesWin 同一类缺陷的第二处（那里修在 reader.html 的 .nw-dragbar）。
+   浮动态的顶边缩放手柄 .dock-rz[data-dir="n"] 贴在 top:0、高 6px、z-index:4，
+   而抽屉的拖动把手就是这条 52px 的表头 → 表头最上 ~5px 归了「改高度」。
+   elementFromPoint 实测：表头 +1px / +3px 命中的都是 dock-rz，只有正中才是 mpd-head。
+   现在整条表头只负责移动（z5 盖过 n 条）；调高度交给下边缘、左右边与四角。 */
+.mpd-head { display: flex; align-items: center; gap: 9px; padding: 13px 15px 9px; flex: none; position: relative; z-index: 5; }
 .mpd-title { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; letter-spacing: .04em; }
 .mpd-title .ic { color: var(--accent-ink); }
 .mpd-x {
@@ -4046,6 +4078,18 @@ body.immersive .mode-pop {
   font-size: 12px; color: var(--ink-3); letter-spacing: .02em; line-height: 1.7;
 }
 .mpd-body { flex: 1; overflow-y: auto; padding: 13px 15px 18px; }
+/* 空态居中：原先 .empty 是一块 179px 的虚线框浮在 770px 高的 body 顶端，
+   下面 591px（77%）全空，看着像页面没加载完。改成整块居中后，虚线框仍按内容
+   收拢（第一版让框去撑满 body，结果得到一个 739px 的巨型虚线空壳，更糟），
+   上下留的是对称空白。:has 只作用于「整块就是空态」的抽屉，
+   随笔 / 引用摘录 / 双向链接 三个空态同享，有内容的面板不受影响。 */
+.mpd-body:has(> .empty) { display: grid; place-items: center; }
+.mpd-body > .empty { width: 100%; padding: 34px 22px; }
+.mpd-body > .empty > p { max-width: 26em; }
+.mpd-body > .empty .empty-sub {
+  margin-top: 15px; padding-top: 13px; border-top: 1px dashed var(--line);
+  font-size: 12px; letter-spacing: .02em; line-height: 1.85; color: var(--ink-3);
+}
 
 .mpd-field { display: flex; flex-direction: column; gap: 8px; }
 .mpd-lb { font-size: 11.5px; letter-spacing: .12em; color: var(--ink-3); }
@@ -4165,6 +4209,30 @@ body.immersive .mode-pop {
   border-bottom: var(--int-bd-2) solid var(--accent-ink); border-radius: 2px;
   padding: 0 3px;
 }
+/* L1 选段态：逐字可点，字间不加额外空隙以保持原文排版；
+   .on 用「留白 + 底线」复用挖空的视觉语言，用户一眼看出当前定的是哪一段。
+   点偏了不报错：snapHole 会把落点收敛成整词或 ≥2 字的段，方向键是精调的替代路径。 */
+.fc-card[data-pick="on"] { cursor: crosshair; }
+.fc-pickline { cursor: crosshair; }
+.fc-pickline.dense { font-size: 13px; line-height: 1.8; }
+.fc-pc {
+  display: inline-block; padding: 0 1px; border-radius: 2px;
+  font-weight: inherit; color: inherit; cursor: pointer;
+  transition: background .14s, color .14s;
+}
+.fc-pc:hover { background: var(--accent-wash); color: var(--ink); }
+.fc-pc.on {
+  background: var(--paper-3); color: var(--ink-3);
+  box-shadow: inset 0 -2px 0 var(--accent-ink);
+}
+/* 挑不出考点：原文照排，但用次级色说明「这句机器没有把握」 */
+.fc-nocand { color: var(--ink-2); }
+.fc-why {
+  flex: none; padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--ink-2);
+  font-size: 10.5px; letter-spacing: .06em;
+}
+.fc-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
 
 /* ---------- 四、漫画分格引导：一次一格 ---------- */
 .guide-stage {
@@ -4841,15 +4909,24 @@ html[data-reduce="on"] .night-veil { transition: none; }
 .fc-tab:hover { color: var(--ink-2); }
 .fc-tab.on { color: var(--ink); font-weight: 700; border-bottom-color: var(--accent); }
 .fc-deck { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: 52vh; }
+/* 卡行两段式：上行「引文 + 状态」，下行「出处 + 操作」。
+   窄面板里把按钮摆在引文右边，引文会被压到 175px、元信息折行甩出孤字；
+   纵排后两段各自吃满整行，引文与出处都不必为按钮让位。 */
 .fc-row {
-  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper);
 }
 .fc-row.off { opacity: .5; }
-.fc-row-main { flex: 1; min-width: 0; }
-.fc-row-main p { margin: 0 0 3px; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fc-row-status { flex: none; font-size: 11px; color: var(--ink-3); letter-spacing: .04em; }
-.fc-row-status .fc-due-mark { color: var(--accent-ink); }
+.fc-row-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.fc-row-main p { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-row-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fc-row-foot .card-note { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
+.fc-row-status {
+  flex: none; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px;
+  font-size: 11px; line-height: 1.5; color: var(--ink-3); letter-spacing: .04em;
+}
+.fc-row-status.due { border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.fc-row-acts { flex: none; margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
 /* ============================================================
    v2.0 · 整体质感打磨（①）

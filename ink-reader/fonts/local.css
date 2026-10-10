@@ -1,0 +1,22 @@
+/* 自动生成：scripts/build-fonts.py（v2.19.6 P0-2 字体本地化）
+   请勿手改此文件；改字重/换字体请改脚本里的 FACES 再重跑。
+   三款核心中文体 + 标题拉丁展示体（Crimson Pro）的子集，随包离线可用。
+   族名刻意与 CDN 的 "Noto Serif SC" 等区分开：栈里排在最前，
+   子集里没有的生僻字才会继续回落到 CDN 那份全量字体。
+   字重档位与 fonts.js 向 CDN 请求的档位一致，离线在线选到同一字面。
+   字体许可证：SIL Open Font License 1.1（见 fonts/OFL.txt）。 */
+@font-face{font-family:"InkRead Serif";font-style:normal;font-weight:300;font-display:swap;src:url(noto-serif-sc-300.woff2) format("woff2")}
+@font-face{font-family:"InkRead Serif";font-style:normal;font-weight:400;font-display:swap;src:url(noto-serif-sc-400.woff2) format("woff2")}
+@font-face{font-family:"InkRead Serif";font-style:normal;font-weight:600;font-display:swap;src:url(noto-serif-sc-600.woff2) format("woff2")}
+@font-face{font-family:"InkRead Serif";font-style:normal;font-weight:700;font-display:swap;src:url(noto-serif-sc-700.woff2) format("woff2")}
+@font-face{font-family:"InkRead Serif";font-style:normal;font-weight:900;font-display:swap;src:url(noto-serif-sc-900.woff2) format("woff2")}
+@font-face{font-family:"InkRead Sans";font-style:normal;font-weight:300;font-display:swap;src:url(noto-sans-sc-300.woff2) format("woff2")}
+@font-face{font-family:"InkRead Sans";font-style:normal;font-weight:400;font-display:swap;src:url(noto-sans-sc-400.woff2) format("woff2")}
+@font-face{font-family:"InkRead Sans";font-style:normal;font-weight:500;font-display:swap;src:url(noto-sans-sc-500.woff2) format("woff2")}
+@font-face{font-family:"InkRead Sans";font-style:normal;font-weight:700;font-display:swap;src:url(noto-sans-sc-700.woff2) format("woff2")}
+@font-face{font-family:"InkRead Sans";font-style:normal;font-weight:900;font-display:swap;src:url(noto-sans-sc-900.woff2) format("woff2")}
+@font-face{font-family:"InkRead Kai";font-style:normal;font-weight:400;font-display:swap;src:url(lxgw-wenkai-400.woff2) format("woff2")}
+@font-face{font-family:"InkRead Kai";font-style:normal;font-weight:700;font-display:swap;src:url(lxgw-wenkai-700.woff2) format("woff2")}
+@font-face{font-family:"InkRead Latin";font-style:normal;font-weight:400;font-display:swap;src:url(crimson-pro-400.woff2) format("woff2")}
+@font-face{font-family:"InkRead Latin";font-style:normal;font-weight:600;font-display:swap;src:url(crimson-pro-600.woff2) format("woff2")}
+@font-face{font-family:"InkRead Latin";font-style:normal;font-weight:700;font-display:swap;src:url(crimson-pro-700.woff2) format("woff2")}

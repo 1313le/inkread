@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>墨读 InkRead · 阅读</title>
 <link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts/local.css">
 <link rel="stylesheet" href="styles.css">
 <style id="tts-extra">
 /* ============================================================
@@ -248,7 +249,7 @@ body.nw-drag .reader-notes .side-tabs { cursor: grabbing; }
    8px 细线是「逻辑上能拖、视觉上不存在」：用户实测直接判为「浮窗拖不动」。
    现在左端是抓握点阵、中间是窗名、停靠态整条下压并显出「拖出」提示。 */
 .nw-dragbar {
-  flex: none; height: 28px; position: relative; display: flex; align-items: center; gap: 8px;
+  flex: none; height: 28px; position: relative; z-index: 5; display: flex; align-items: center; gap: 8px;
   padding: 0 10px; cursor: grab; touch-action: none;
   user-select: none; -webkit-user-select: none;
   background: var(--paper-2); border-bottom: 1px solid var(--line-2);
@@ -280,6 +281,14 @@ body.dock-drag .nw-dragbar, body.nw-drag .nw-dragbar { cursor: grabbing; }
 .dock-rz[data-dir="ne"] { right: 0; top: 0; cursor: nesw-resize; }
 .dock-rz[data-dir="sw"] { left: 0; bottom: 0; cursor: nesw-resize; }
 .dock-rz[data-dir="se"] { right: 0; bottom: 0; cursor: nwse-resize; }
+/* 2.19.6：顶边那 6px 的缩放手柄压在标题条之上——v2.19.3 把拖动条从 8px 细线长成
+   28px 标题条时，这条一直贴在 top:0 的边手柄就吃进了标题条最上的 5px。实测：
+   抓条顶边 3px 处 pointerdown 命中的是 .dock-rz[data-dir=n]，于是"按标题条上的
+   提示去拖窗"变成"把窗口越拖越矮"（高 600→320，不出吸附引导，双击也被它截走）。
+   现在让标题条整条只负责移动（z 5 盖过 n 条），四角仍是缩放（z 6 盖回条上）。
+   代价是"用上边缘单独调高度"这条路没了——它本就长在移动把手身上，是陷阱不是功能；
+   调高度改由下边缘、左右边与四角负责。 */
+.dock-rz[data-dir="nw"], .dock-rz[data-dir="ne"] { z-index: 6; }
 body.dock-drag { user-select: none; -webkit-user-select: none; }
 body.dock-drag .sel-bar { display: none !important; }
 /* 三个页签 + 三个工具钮在停靠态（更窄）也要端得住：页签可缩、文字不换行 */
@@ -1141,7 +1150,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     /* v12 新增：书签与设置覆盖侧栏 */
     icSide: "panel-left",
     /* v13 新增：辅助阅读（解析 / 溯源） */
-    icSelExplain: "scan-text", icSelTrace: "list-tree", icAuxX: "x",
+    icSelExplain: "scan-text", icSelTrace: "trace-back", icAuxX: "x",
     /* v2.14 新增：顶栏书签钮 + 阅读底栏六钮 */
     icBm2: "bookmark", icDir2: "toc", icAa2: "type",
     icNotes2: "notebook-pen", icSpeak2: "volume-2", icMore2: "ellipsis",
@@ -2125,6 +2134,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     toast("已按实测选「" + InkTheme.DEN_NAME[pick.k] + "」：" + pick.pages + " 页 · 页底空白 " +
       Math.round(pick.blank * 100) + "% · 拆分 " + pick.splitN + " 处", "sparkles");
   };
+
+  /* 分页总数：竖排翻 state.pages，竖向浏览现量一次 —— 跳转与进度条都按它定位 */
+  function totalPages() { return (state.pageIdx.length || measuredPages().length) || 1; }
 
   function pageOfBlock(bi) {
     var idx = state.pageIdx.length ? state.pageIdx : measuredPages();
@@ -4698,7 +4710,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     brain:   { label: "AI 主脑",  icon: "brain",        hint: "问这本书的任何事", run: tkAskOpen },
     trans:   { label: "AI 翻译",  icon: "languages",    hint: "译选中的词句",     run: function () { tkSel("trans"); } },
     explain: { label: "AI 解析",  icon: "scan-text",    hint: "关键点与术语",     run: function () { tkSel("explain"); } },
-    trace:   { label: "AI 溯源",  icon: "list-tree",    hint: "溯清来处与原文",   run: function () { tkSel("trace"); } }
+    trace:   { label: "AI 溯源",  icon: "trace-back",   hint: "溯清来处与原文",   run: function () { tkSel("trace"); } }
   };
 
   /* 一级轮盘：阅读 / 学习模式五入口（与 modes.js 的四模式对齐，另加「通用」兜底）。
