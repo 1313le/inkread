@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.19.4";
+window.InkVersion = "2.19.5";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -129,6 +129,13 @@ window.ICONS = {
   "minus-circle": '<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/>',
   "text-cursor": '<path d="M12 20h-1a2 2 0 0 1-2-2 2 2 0 0 1-2 2H6"/><path d="M13 8h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-7"/><path d="M5 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1"/><path d="M6 4h1a2 2 0 0 1 2 2 2 2 0 0 1 2-2h1"/><path d="M9 6v12"/>',
   "list-tree": '<path d="M21 12h-8"/><path d="M21 6h-8"/><path d="M21 18h-8"/><path d="M3 10v4c0 1.1.9 2 2 2h3"/><path d="M3 6h1"/><path d="M3 18h1"/>',
+  /* v2.19.5 · 「目录」专用图标（用户指 list-tree 太丑）。list-tree 的左侧那段折钩
+     在 16~18px 下糊成一团噪点，读不出「章节」；而它同时还担着笔记的「大纲」与
+     AI 溯源，所以不改老图标，另立一枚。
+     取的是纸页上的目次本身：一条界栏（书脊）+ 一行满宽的「章」+ 两条缩进递短的「节」。
+     候选六款同尺寸渲染比对（16/18/20/64px × 亮/暗/朱批 + 底栏原位）后选定这一款：
+     带引导点的两款在小尺寸下多点像脏点，去掉界栏的那款退化成「排版」图标。 */
+  "toc": '<path d="M4.5 5v14"/><path d="M8.5 7.5h11.5"/><path d="M12 12.5h8"/><path d="M12 17.5h5"/>',
   "heading-1": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="m17 12 3-2v8"/>',
   "heading-2": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M21 18h-4c0-4 4-3 4-6 0-1.5-2-2.5-4-1"/>',
   "heading-3": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17.5 10.5c1.7-1 3.5 0 3.5 1.5a2 2 0 0 1-2 2"/><path d="M17 17.5c2 1.5 4 .3 4-1.5a2 2 0 0 0-2-2"/>',

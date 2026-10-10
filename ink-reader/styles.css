@@ -718,7 +718,12 @@ input[type="range"].range::-webkit-slider-thumb {
    类别筛选由连体分段改独立签条（可横滑）；封面沿用既有书脊画法，只加 hover 轻抬。
    朱砂只落在四处：唯一主按钮、继续阅读进度条、在读题签、当前筛选签条。 */
 .ph-main { min-width: 0; }
-.ph-sub { display: block; margin-top: 7px; font-size: 12.5px; color: var(--ink-3); letter-spacing: .06em; }
+/* min-height: 1lh —— 这行字要等数据就绪才填（"14 条批注 · 覆盖 N 份文档"），空 span 高度是 0，
+   填上就 +19px，把 .rule-2line 与整个工作台往下推。v2.19.3 那会儿幕布盖满全屏，这一推被遮住；
+   v2.19.4 揭纸交还给快照层、静止期消失，它就露在转场结束后 40~50ms 处 —— 用户看到的
+   「切到笔记时顿一下」正是这个（实测 notes：vtSheetDown 237ms 结束，推移 283ms 发生，CLS 0.055）。
+   用 1lh 而不是写死 19px：行高变了占位自动跟着变，不会又留出一道缝。 */
+.ph-sub { display: block; min-height: 1lh; margin-top: 7px; font-size: 12.5px; color: var(--ink-3); letter-spacing: .06em; }
 .ph-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* 宣言档页头自带撞色底线，界栏双线让位，免得两道线叠在一起 */
 html[data-int="bold"] .rule-2line { display: none; }

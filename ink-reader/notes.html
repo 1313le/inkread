@@ -347,6 +347,18 @@ body.embed .work-layout > .card:first-child { display: none; }
 .work-layout > .card:first-child {
   display: flex; flex-direction: column; min-height: 0; max-height: var(--work-h-max);
 }
+/* v2.19.5 · 「切到笔记顿一下」的真正落点（探针 probe-leftcard.js 逐帧 rect）：
+   —— 左卡 560 → 670 发生在 t=248ms，而 vtSheetDown 在 235ms 结束 —— 纸刚掀完，
+      两卡（stretch 等高）一起往下长 110px。用户说的「卡片纵向由短变长」是对的；
+      我先前用 ResizeObserver 量出「560 全程不变」是首帧取样偏晚，把这条漏了。
+   —— 病根：卡高由内容决定。列表为空时卡内自然高不足 min-height 560，
+      填上数据后自然高正好 = 预算 --work-h-max，于是「长到预算才停」。
+      让左卡从第一帧就占满预算，行高不再随数据变。
+   —— 只在双列布局钉：≤1180 是单列堆叠，列表另有 300px 上界（styles.css:1910），
+      那里撑满预算会留出一大段空白。 */
+@media (min-width: 1181px) {
+  .work-layout > .card:first-child { min-height: var(--work-h-max); }
+}
 .work-layout > .card:first-child .notes-list {
   flex: 1 1 auto; min-height: 0; max-height: none;
 }
@@ -356,6 +368,10 @@ body.embed .work-layout > .card:first-child { display: none; }
       筛选条被压到十几像素，12.5px 的文字被自身 overflow:hidden 整行裁光 —— 只剩色块与描边。
    —— 收缩只该落在列表上（它自己会滚），其余固定控件一律钉住。 */
 .work-layout > .card:first-child > :not(.notes-list) { flex-shrink: 0; }
+/* v2.19.5 · 同一条链上的 grow 也要收：.search-box 全局写的是 flex:1（styles.css:573），
+   那是给书架横向工具条准备的；落到这张 flex 列卡里就变成纵向拉伸 —— 实测首帧搜索框
+   被撑到 145.5px，数据到位后又掉回 40px。余量只该给列表。 */
+.work-layout > .card:first-child > :not(.notes-list) { flex-grow: 0; }
 /* 窗口极矮时（工作台上界小于固定控件之和）让整卡滚动，而不是把搜索框顶出卡框 */
 .work-layout > .card:first-child { overflow: auto; }
 /* 右卡在拉伸后编辑区自然增高（.work-card 已是 flex 列、min-height 560 保留） */
@@ -649,6 +665,12 @@ body[data-page="notes"] .mm-stage {
   Object.keys(IC).forEach(function (id) { var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16); });
   qs("#olHintIc").innerHTML = icon("info", 14);
 
+  /* v2.19.5 · 页头副标题首帧落字。数据本身就在 localStorage 里，是 API.fetchNotes() 前置的
+     delay(200) 让它 200ms 后才出现在页面上；而这段字要占几行取决于宽度（390px 下换到 4 行）。
+     min-height:1lh 只兜得住一行，窄屏照样往下顶 —— 这里在首次绘制前就把文案写进去，
+     首帧排版即最终排版，转场结束后不再有任何推移（renderList 稍后会用同一函数覆写，内容一致）。 */
+  qs("#notesSub").textContent = subText(window.InkStore ? InkStore.getNotes() : []);
+
   var COLOR_HEX = { accent: "var(--accent)", green: "var(--green)", amber: "var(--amber)", blue: "var(--blue)", ink: "var(--ink-3)" };
   var KIND_LABEL = { highlight: "高亮", note: "笔记", bookmark: "书签", margin: "随笔" };
   var NTYPE_ICON = { outline: "list-tree", mindmap: "network", md: "sigma" };
@@ -934,13 +956,17 @@ body[data-page="notes"] .mm-stage {
     return n.text || "";
   }
 
+  function subText(notes) {
+    var docs = DB.shelf.filter(function (d) { return notes.some(function (n) { return n.docId === d.id; }); }).length;
+    return notes.length + " 条批注 · 覆盖 " + docs + " 份文档 · 一棵笔记树，大纲 / 脑图 / Markdown 三视图同源";
+  }
+
   function renderList() {
     var q = (state.q || "").trim();
     var query = q ? parseQuery(q) : null;
     var list = filtered();
     qs("#listCount").textContent = query ? "命中 " + list.length + " / " + state.notes.length + " 条" : list.length + " 条";
-    var docs = DB.shelf.filter(function (d) { return state.notes.some(function (n) { return n.docId === d.id; }); }).length;
-    qs("#notesSub").textContent = state.notes.length + " 条批注 · 覆盖 " + docs + " 份文档 · 一棵笔记树，大纲 / 脑图 / Markdown 三视图同源";
+    qs("#notesSub").textContent = subText(state.notes);
     if (!list.length) {
       qs("#notesList").innerHTML = query
         ? '<div class="empty">' + icon("search-x", 28) +
