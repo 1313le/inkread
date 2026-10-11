@@ -486,13 +486,13 @@ body[data-page="notes"] .mm-stage {
             <!-- 一、文字大纲（含递进 / 优先级 / 分类） -->
             <div class="npane on" data-view="outline">
               <div class="md-toolbar">
-                <button class="tool-btn" id="olIndent" title="缩进一级（Tab）"><span id="icIndent"></span></button>
-                <button class="tool-btn" id="olOutdent" title="反缩进（Shift+Tab）"><span id="icOutdent"></span></button>
+                <button class="tool-btn" id="olIndent" title="缩进一级（Tab）" aria-label="缩进一级"><span id="icIndent"></span></button>
+                <button class="tool-btn" id="olOutdent" title="反缩进（Shift+Tab）" aria-label="取消缩进"><span id="icOutdent"></span></button>
                 <span class="sep"></span>
-                <button class="tool-btn" id="olUp" title="上移"><span id="icUp"></span></button>
-                <button class="tool-btn" id="olDown" title="下移"><span id="icDown"></span></button>
+                <button class="tool-btn" id="olUp" title="上移" aria-label="上移"><span id="icUp"></span></button>
+                <button class="tool-btn" id="olDown" title="下移" aria-label="下移"><span id="icDown"></span></button>
                 <span class="sep"></span>
-                <button class="tool-btn" id="olAdd" title="新增同级条目"><span id="icOlAdd"></span></button>
+                <button class="tool-btn" id="olAdd" title="新增同级条目" aria-label="新增同级条目"><span id="icOlAdd"></span></button>
                 <span class="spacer"></span>
                 <span class="card-note">行首 ○ 切优先级 · 行尾加分类</span>
               </div>
@@ -512,16 +512,16 @@ body[data-page="notes"] .mm-stage {
                 <svg class="mm-svg" id="mmSvg"></svg>
                 <div class="mm-tools">
                   <input class="field" id="mmEdit" placeholder="选中节点后改文字" style="width:168px">
-                  <button class="tool-btn" id="mmAdd" title="添加子节点"><span id="icMmAdd"></span></button>
-                  <button class="tool-btn" id="mmDel" title="删除节点"><span id="icMmDel"></span></button>
-                  <button class="tool-btn" id="mmOrder" title="按脑图布局重排大纲"><span id="icMmOrder"></span></button>
+                  <button class="tool-btn" id="mmAdd" title="添加子节点" aria-label="添加子节点"><span id="icMmAdd"></span></button>
+                  <button class="tool-btn" id="mmDel" title="删除节点" aria-label="删除节点"><span id="icMmDel"></span></button>
+                  <button class="tool-btn" id="mmOrder" title="按脑图布局重排大纲" aria-label="按脑图重排大纲"><span id="icMmOrder"></span></button>
                 </div>
                 <div class="mm-hint">拖节点移动 · 拖空白平移 · 滚轮缩放 · 双击空白新建 · 位置为视图信息，不写入正文</div>
                 <div class="mm-zoom">
-                  <button class="tool-btn" id="mmZoomOut" title="缩小"><span id="icZoomOut"></span></button>
+                  <button class="tool-btn" id="mmZoomOut" title="缩小" aria-label="缩小"><span id="icZoomOut"></span></button>
                   <span class="mm-zval" id="mmZoomVal">100%</span>
-                  <button class="tool-btn" id="mmZoomIn" title="放大"><span id="icZoomIn"></span></button>
-                  <button class="tool-btn" id="mmFit" title="适应画布"><span id="icFit"></span></button>
+                  <button class="tool-btn" id="mmZoomIn" title="放大" aria-label="放大"><span id="icZoomIn"></span></button>
+                  <button class="tool-btn" id="mmFit" title="适应画布" aria-label="适应画布"><span id="icFit"></span></button>
                 </div>
                 <div class="mm-empty" id="mmEmpty">还没有条目<br>双击空白处新建，或先在大纲视图分点，再回到这里</div>
               </div>
@@ -530,21 +530,21 @@ body[data-page="notes"] .mm-stage {
             <!-- 三、Markdown · LaTeX（树的实时序列化） -->
             <div class="npane" data-view="md">
               <div class="md-toolbar">
-                <button class="tool-btn" data-md="**" title="加粗"><span id="icBold"></span></button>
-                <button class="tool-btn" data-md="*" title="斜体"><span id="icItalic"></span></button>
-                <button class="tool-btn" data-md="## " title="标题"><span id="icH"></span></button>
+                <button class="tool-btn" data-md="**" title="加粗" aria-label="加粗"><span id="icBold"></span></button>
+                <button class="tool-btn" data-md="*" title="斜体" aria-label="斜体"><span id="icItalic"></span></button>
+                <button class="tool-btn" data-md="## " title="标题" aria-label="标题"><span id="icH"></span></button>
                 <span class="sep"></span>
-                <button class="tool-btn" data-md="- " title="无序列表"><span id="icList"></span></button>
-                <button class="tool-btn" data-md="1. " title="有序列表"><span id="icOlist"></span></button>
-                <button class="tool-btn" data-md="> " title="引用"><span id="icQuote"></span></button>
+                <button class="tool-btn" data-md="- " title="无序列表" aria-label="无序列表"><span id="icList"></span></button>
+                <button class="tool-btn" data-md="1. " title="有序列表" aria-label="有序列表"><span id="icOlist"></span></button>
+                <button class="tool-btn" data-md="> " title="引用" aria-label="引用"><span id="icQuote"></span></button>
                 <span class="sep"></span>
-                <button class="tool-btn" data-md="`" title="行内代码"><span id="icCode"></span></button>
-                <button class="tool-btn" data-md="$$" title="公式块"><span id="icSigma"></span></button>
-                <button class="tool-btn" data-md="[文字](链接)" title="链接"><span id="icLink"></span></button>
-                <button class="tool-btn" data-md="table" title="表格"><span id="icTable"></span></button>
+                <button class="tool-btn" data-md="`" title="行内代码" aria-label="行内代码"><span id="icCode"></span></button>
+                <button class="tool-btn" data-md="$$" title="公式块" aria-label="公式块"><span id="icSigma"></span></button>
+                <button class="tool-btn" data-md="[文字](链接)" title="链接" aria-label="链接"><span id="icLink"></span></button>
+                <button class="tool-btn" data-md="table" title="表格" aria-label="表格"><span id="icTable"></span></button>
                 <span class="spacer"></span>
-                <button class="tool-btn" id="btnMdFocus" title="专注模式" aria-pressed="false"><span id="icMdFocus"></span></button>
-                <button class="tool-btn" id="btnPreview" title="切换预览"><span id="icEye"></span></button>
+                <button class="tool-btn" id="btnMdFocus" title="专注模式" aria-label="专注模式" aria-pressed="false"><span id="icMdFocus"></span></button>
+                <button class="tool-btn" id="btnPreview" title="切换预览" aria-label="切换预览"><span id="icEye"></span></button>
               </div>
               <div class="md-split" id="mdSplit">
                 <textarea id="mdEditor" spellcheck="false" placeholder="Markdown 是笔记树的实时序列化，改这里会同步回大纲与脑图。&#10;&#10;## 一级要点&#10;- 子条目（缩进 2 空格降一级）&#10;&#10;行内公式 $C_{total}=\alpha\bar{t}+\beta r+\gamma L$&#10;&#10;$$ r = \frac{n_{regress}}{n_{lines}} \times 100\% $$"></textarea>

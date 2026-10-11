@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.19.6";
+window.InkVersion = "2.20.0";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -41,6 +41,7 @@ window.ICONS = {
   "refresh-cw": '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
   "rotate-ccw": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
   "chevron-right": '<path d="m9 18 6-6-6-6"/>',
+  "chevrons-right": '<path d="m6 17 5-5-5-5"/><path d="m12 17 5-5-5-5"/>',
   "chevron-left": '<path d="m15 18-6-6 6-6"/>',
   "chevron-down": '<path d="m6 9 6 6 6-6"/>',
   search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',

@@ -578,7 +578,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       <div class="reader" id="reader" data-notes="closed" data-side="closed">
 
         <!-- 左侧：书签 / 设置。覆盖式面板（v12），默认收起，不占版心宽度 -->
-        <aside class="reader-side">
+        <aside class="reader-side" id="sidePanel">
           <div class="side-tabs">
             <button class="side-tab active" data-stab="bm">书签</button>
             <button class="side-tab" data-stab="set">设置</button>
@@ -602,7 +602,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
                 <h4>阅读</h4>
                 <div class="set-row">
                   <span class="sr-k"><span id="icMark"></span>批注标记</span>
-                  <button class="switch" id="swMarks"></button>
+                  <button class="switch" id="swMarks" aria-pressed="false" aria-label="批注标记开关" title="批注标记"></button>
                 </div>
                 <div class="card-note" style="margin-top:9px">「任务出处」已并入「学习」阅读模式，随内容类别自动出现在模式条上。</div>
               </div>
@@ -614,12 +614,12 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
         <section class="reader-main">
           <div class="read-progress"><i id="readBar"></i></div>
           <div class="reader-bar">
-            <a class="tool-btn" href="index.html" title="返回书架"><span id="icBack"></span></a>
+            <a class="tool-btn" href="index.html" title="返回书架" aria-label="返回书架"><span id="icBack"></span></a>
             <span class="doc-title" id="docTitle"></span>
             <span class="chip" id="docKind"></span>
             <span class="spacer"></span>
-            <button class="tool-btn icon-only" id="tBookmark" title="书签与高亮" aria-expanded="false" aria-controls="sidePanel"><span id="icBm2"></span></button>
-            <button class="tool-btn icon-only" id="tFull" data-solo="plain" title="全屏沉浸阅读（F）"><span id="icFull"></span></button>
+            <button class="tool-btn icon-only" id="tBookmark" title="书签与高亮" aria-label="书签与高亮" aria-expanded="false" aria-controls="sidePanel"><span id="icBm2"></span></button>
+            <button class="tool-btn icon-only" id="tFull" data-solo="plain" title="全屏沉浸阅读（F）" aria-label="全屏阅读"><span id="icFull"></span></button>
             <!-- v2.14 更多：底部 sheet（原 more-pop 换壳，全部原 id/事件保留）；
                  目录 / 正文锁 / 任务清单 自顶栏移入此处，底栏同 id 转发触发 -->
             <div class="more-sheet reader-more" id="morePop" role="menu" hidden>
@@ -628,6 +628,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
               <button class="more-item" role="menuitem" id="tTasks" title="任务清单（T）" aria-expanded="false" aria-controls="taskDrawer"><span id="icTasks"></span><span class="mi-k">任务清单</span><em>阅读任务 <b class="tbadge" id="taskBadge">0</b></em></button>
               <button class="more-item" role="menuitem" id="tSide" aria-expanded="false" aria-controls="sidePanel"><span id="icSide"></span><span class="mi-k">书签与设置</span><em>覆盖侧栏 · 随时收起</em></button>
               <button class="more-item" role="menuitem" id="tSpeak"><span id="icSpeak"></span><span class="mi-k">朗读</span><em>旁听当前页</em></button>
+              <button class="more-item" role="menuitem" id="tAuto"><span id="icAuto"></span><span class="mi-k">自动翻页</span><em>按你的速度推进</em></button>
               <button class="more-item" role="menuitem" data-appearance><span id="icAppearance"></span><span class="mi-k">外观与阅读设置</span><em>主题 · 强度 · 时间</em></button>
               <button class="more-item" role="menuitem" data-more="mode"><span id="icMoreMode"></span><span class="mi-k">阅读模式…</span><em>书籍 / 文献 / 学习 / 漫画</em></button>
               <!-- 翻译三态收在一处：关闭 / 段落对照 / 悬停译。划词翻译不受此开关影响，随时可用 -->
@@ -668,9 +669,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
               <div class="doc" id="doc"></div>
             </div>
             <div class="page-nav">
-              <button class="tool-btn" id="pgPrev" title="上一页"><span id="icPrev"></span></button>
+              <button class="tool-btn" id="pgPrev" title="上一页" aria-label="上一页"><span id="icPrev"></span></button>
               <span class="page-ind" id="pageInd">1 / 1</span>
-              <button class="tool-btn" id="pgNext" title="下一页"><span id="icNext"></span></button>
+              <button class="tool-btn" id="pgNext" title="下一页" aria-label="下一页"><span id="icNext"></span></button>
             </div>
             <div class="flip-hint" id="flipHint"><span class="fh-key">← / → 翻页</span><span class="fh-sep">　·　</span><span class="fh-drag">拖拽纸页边缘亦可</span><span class="fh-sep">　·　</span><span class="fh-key">F 进入全屏</span></div>
           </div>
@@ -689,10 +690,24 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
             <button class="dock-btn" id="tMore2" title="更多" aria-haspopup="true" aria-expanded="false" aria-controls="morePop"><span id="icMore2"></span>更多</button>
           </div>
 
+          <!-- v2.20 自动翻页控制条：与 #ttsBar 同范式，常驻不自动消失。
+               暂停手段必须一直可达（WCAG 2.2 SC 2.2.2），所以沉浸态也不收它。 -->
+          <div class="auto-bar" id="autoBar" role="group" aria-label="自动翻页" hidden>
+            <button class="tool-btn auto-play" id="autoPlay" title="暂停（R）" aria-label="暂停自动翻页" aria-pressed="false"><span id="icAutoPlay"></span></button>
+            <span class="auto-now" id="autoNow">自动翻页</span>
+            <span class="auto-step">
+              <button class="tool-btn auto-ctl" id="autoDown" title="慢一档" aria-label="自动翻页慢一档"><span id="icAutoDown"></span></button>
+              <output class="auto-read" id="autoRead" for="autoUp autoDown">1.0× · 约 300 字/分</output>
+              <button class="tool-btn auto-ctl" id="autoUp" title="快一档" aria-label="自动翻页快一档"><span id="icAutoUp"></span></button>
+            </span>
+            <span class="spacer"></span>
+            <button class="tool-btn" id="autoStop" title="关闭自动翻页" aria-label="关闭自动翻页"><span id="icAutoStop"></span></button>
+          </div>
+
           <div class="tts-bar" id="ttsBar" style="display:none">
-            <button class="tool-btn" id="ttsPrev" title="上一段"><span id="icTtsPrev"></span></button>
-            <button class="tool-btn" id="ttsPlay" title="播放 / 暂停"><span id="icTtsPlay"></span></button>
-            <button class="tool-btn" id="ttsNext" title="下一段"><span id="icTtsNext"></span></button>
+            <button class="tool-btn" id="ttsPrev" title="上一段" aria-label="上一段"><span id="icTtsPrev"></span></button>
+            <button class="tool-btn" id="ttsPlay" title="播放 / 暂停" aria-label="播放或暂停"><span id="icTtsPlay"></span></button>
+            <button class="tool-btn" id="ttsNext" title="下一段" aria-label="下一段"><span id="icTtsNext"></span></button>
             <div class="tts-mid">
               <span class="tts-now" id="ttsNow">正在朗读…</span>
               <span class="tts-frac" id="ttsFrac"></span>
@@ -703,8 +718,8 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
               <select id="ttsVoice" aria-label="朗读音色"></select>
             </label>
             <button class="tool-btn tts-ctl" id="ttsSpeed" title="语速">1.0×</button>
-            <button class="tool-btn tts-ctl" id="ttsTimer" title="定时停止"><span id="icTtsTimer"></span></button>
-            <button class="tool-btn" id="ttsStop" title="停止"><span id="icStop"></span></button>
+            <button class="tool-btn tts-ctl" id="ttsTimer" title="定时停止" aria-label="定时停止"><span id="icTtsTimer"></span></button>
+            <button class="tool-btn" id="ttsStop" title="停止" aria-label="停止"><span id="icStop"></span></button>
           </div>
           <div class="tts-mini-pop" id="ttsSpeedPop" hidden>
             <div class="tmp-row"><b>语速</b><output id="ttsSpeedVal">1.0×</output></div>
@@ -756,13 +771,13 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
             </div>
             <div data-npanel="new" style="display:none">
               <div class="row mb-12 wrap" style="gap:6px">
-                <button class="tool-btn" data-md="**" title="加粗"><span id="icBold"></span></button>
-                <button class="tool-btn" data-md="*" title="斜体"><span id="icItalic"></span></button>
-                <button class="tool-btn" data-md="## " title="标题"><span id="icH"></span></button>
-                <button class="tool-btn" data-md="- " title="列表"><span id="icList"></span></button>
-                <button class="tool-btn" data-md="> " title="引用"><span id="icQuote"></span></button>
-                <button class="tool-btn" data-md="`" title="代码"><span id="icCode"></span></button>
-                <button class="tool-btn" data-md="$$" title="公式块"><span id="icSigma"></span></button>
+                <button class="tool-btn" data-md="**" title="加粗" aria-label="加粗"><span id="icBold"></span></button>
+                <button class="tool-btn" data-md="*" title="斜体" aria-label="斜体"><span id="icItalic"></span></button>
+                <button class="tool-btn" data-md="## " title="标题" aria-label="标题"><span id="icH"></span></button>
+                <button class="tool-btn" data-md="- " title="列表" aria-label="列表"><span id="icList"></span></button>
+                <button class="tool-btn" data-md="> " title="引用" aria-label="引用"><span id="icQuote"></span></button>
+                <button class="tool-btn" data-md="`" title="代码" aria-label="代码"><span id="icCode"></span></button>
+                <button class="tool-btn" data-md="$$" title="公式块" aria-label="公式块"><span id="icSigma"></span></button>
                 <span class="spacer"></span>
                 <span class="seg nfs-seg" id="noteFsSeg" role="group" aria-label="正文书写字号" title="正文书写字号（15 / 17 / 20px，随写随调，本机记忆）">
                   <button class="seg-btn" data-nfs="15" title="小 · 15px" aria-label="正文书写字号 小 15px">小</button>
@@ -770,7 +785,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
                   <button class="seg-btn" data-nfs="20" title="大 · 20px" aria-label="正文书写字号 大 20px">大</button>
                 </span>
                 <button class="tool-btn" id="noteFull" title="全屏写笔记（长笔记更舒服，Esc 退出不丢内容）"><span id="icNoteFull"></span>全屏</button>
-                <button class="tool-btn" id="mdPreview" title="预览"><span id="icEye"></span></button>
+                <button class="tool-btn" id="mdPreview" title="预览" aria-label="预览"><span id="icEye"></span></button>
               </div>
               <div class="card-note mb-12" id="quoteRef" style="display:none"></div>
               <div class="row mb-12" style="gap:6px" id="noteMetaRow">
@@ -938,21 +953,21 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   <span class="ib-sep"></span>
   <span class="ib-bar"><i id="immBar"></i></span>
   <span class="ib-ind" id="immPct">0%</span>
-  <button class="tool-btn" id="immToc" title="目录 · 检索 · 跳转（C）" aria-expanded="false" aria-controls="tocPanel"><span id="immIcToc"></span></button>
-  <button class="tool-btn" data-appearance title="外观与阅读设置"><span id="immIcAppearance"></span></button>
-  <button class="tool-btn" id="immMark" title="批注标记"><span id="immIcMark"></span></button>
-  <button class="tool-btn" id="immNotes" title="批注面板"><span id="immIcNotes"></span></button>
-  <button class="tool-btn" id="immEdit" title="修改正文（解锁后可改字）" aria-pressed="false"><span id="immIcEdit"></span></button>
-  <button class="tool-btn" id="immMode" title="阅读模式" aria-expanded="false" aria-controls="modePop"><span id="immIcMode"></span></button>
+  <button class="tool-btn" id="immToc" title="目录 · 检索 · 跳转（C）" aria-label="目录与检索" aria-expanded="false" aria-controls="tocPanel"><span id="immIcToc"></span></button>
+  <button class="tool-btn" data-appearance title="外观与阅读设置" aria-label="外观与阅读设置"><span id="immIcAppearance"></span></button>
+  <button class="tool-btn" id="immMark" title="批注标记" aria-label="批注标记"><span id="immIcMark"></span></button>
+  <button class="tool-btn" id="immNotes" title="批注面板" aria-label="批注面板"><span id="immIcNotes"></span></button>
+  <button class="tool-btn" id="immEdit" title="修改正文（解锁后可改字）" aria-label="修改正文" aria-pressed="false"><span id="immIcEdit"></span></button>
+  <button class="tool-btn" id="immMode" title="阅读模式" aria-label="阅读模式" aria-expanded="false" aria-controls="modePop"><span id="immIcMode"></span></button>
   <button class="tool-btn" id="immTasks" title="任务清单（T）" aria-expanded="false" aria-controls="taskDrawer"><span id="immIcTasks"></span><b class="tbadge" id="immTaskBadge">0</b></button>
-  <button class="tool-btn" id="immExit" title="退出全屏（Esc）"><span id="immIcExit"></span></button>
+  <button class="tool-btn" id="immExit" title="退出全屏（Esc）" aria-label="退出全屏"><span id="immIcExit"></span></button>
 </div>
 <div class="immerse-bar bottom hide" id="immBot">
   <button class="tool-btn wide" data-aa-toggle title="排版 · 边读边调（A）" aria-expanded="false" aria-controls="aaPanel"><span id="immIcAa"></span>排版</button>
   <span class="ib-sep"></span>
-  <button class="tool-btn" id="immPrev" title="上一页"><span id="immIcPrev"></span></button>
+  <button class="tool-btn" id="immPrev" title="上一页" aria-label="上一页"><span id="immIcPrev"></span></button>
   <span class="ib-ind" id="immPage">1 / 1</span>
-  <button class="tool-btn" id="immNext" title="下一页"><span id="immIcNext"></span></button>
+  <button class="tool-btn" id="immNext" title="下一页" aria-label="下一页"><span id="immIcNext"></span></button>
   <span class="ib-sep"></span>
   <span class="card-note" id="immHint">点击纸面中央呼出 / 隐藏控件　·　Esc 退出</span>
 </div>
@@ -964,13 +979,13 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   <span class="sel-dot" data-color="amber" style="background:var(--amber)"></span>
   <span class="sel-dot" data-color="blue" style="background:var(--blue)"></span>
   <span class="sel-sep"></span>
-  <button class="sel-btn" id="selExplain" title="解析这段（讲什么 / 关键点 / 术语）"><span id="icSelExplain"></span></button>
-  <button class="sel-btn" id="selTrace" title="溯源（溯清来处：一切事物皆可溯 —— 事件 · 典故 · 节日 · 引文……只是举例，凡「它从哪来、谁先说、原话是什么」皆可考）"><span id="icSelTrace"></span></button>
+  <button class="sel-btn" id="selExplain" title="解析这段（讲什么 / 关键点 / 术语）" aria-label="解析这段"><span id="icSelExplain"></span></button>
+  <button class="sel-btn" id="selTrace" title="溯源（溯清来处：一切事物皆可溯 —— 事件 · 典故 · 节日 · 引文……只是举例，凡「它从哪来、谁先说、原话是什么」皆可考）" aria-label="溯源"><span id="icSelTrace"></span></button>
   <span class="sel-sep"></span>
-  <button class="sel-btn" id="selNote" title="写笔记"><span id="icSelNote"></span></button>
-  <button class="sel-btn" id="selMark" title="加书签"><span id="icSelMark"></span></button>
-  <button class="sel-btn" id="selTrans" title="翻译选中的词 / 句（未配置模型时为原型译文）"><span id="icSelTrans"></span></button>
-  <button class="sel-btn" id="selCopy" title="复制"><span id="icSelCopy"></span></button>
+  <button class="sel-btn" id="selNote" title="写笔记" aria-label="写笔记"><span id="icSelNote"></span></button>
+  <button class="sel-btn" id="selMark" title="加书签" aria-label="加书签"><span id="icSelMark"></span></button>
+  <button class="sel-btn" id="selTrans" title="翻译选中的词 / 句（未配置模型时为原型译文）" aria-label="翻译选中内容"><span id="icSelTrans"></span></button>
+  <button class="sel-btn" id="selCopy" title="复制" aria-label="复制"><span id="icSelCopy"></span></button>
 </div>
 
 <!-- 辅助阅读浮层：解析 / 溯源。只对选中文字作答 ——
@@ -1156,6 +1171,8 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     icNotes2: "notebook-pen", icSpeak2: "volume-2", icMore2: "ellipsis",
     /* v14 新增：文档修改（修改条上的图标；工具栏锁按钮由 paintEditBar 整段重写） */
     icEditOn: "lock-open", icRestore: "rotate-ccw", icDone: "circle-check",
+    /* v2.20 新增：自动翻页（更多入口 / 控制条；播放位由 autoPaint 随态改写） */
+    icAuto: "chevrons-right", icAutoPlay: "pause", icAutoDown: "minus", icAutoUp: "plus", icAutoStop: "x",
     /* v2.5 新增：批注浮窗最大化 / 还原（状态由 paintNoteWin 改写） */
     icNotesMax: "maximize-2"
   };
@@ -1939,6 +1956,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     paintTocChrome();
     immSync();
     statBumpWords();     /* v2.7 统计埋点：翻页完成即量一次字数增量（只读位置，不碰渲染） */
+    if (!AUTO.inTick) autoRetime();   /* v2.20：读者自己动了页就重新计时，自动翻页不退出也不暂停 */
   }
 
   /* 竖向浏览：按屏滚动 */
@@ -3530,6 +3548,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
      ============================================================ */
   function paintSettings() {
     qs("#swMarks").classList.toggle("on", read.marks);
+    qs("#swMarks").setAttribute("aria-pressed", String(!!read.marks));
     paintSummary();
   }
 
@@ -3549,6 +3568,10 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       renderPage(0, false);
     }
     statMark(off);       /* v2.7 统计埋点：模式切换 / 重排后把字数基准重设到真实位置（防假增量） */
+    /* v2.20：换了阅读方式，自动翻页就地停（速度种子按类别分，跨态续跑没意义）；
+       其余重排只为让分页跟上控制条占掉的高度 */
+    if (AUTO.on && state.scroll !== AUTO.wasScroll) { autoStop("已切换阅读方式，自动翻页已停止"); return; }
+    autoSyncBook();
     if (animate) InkFX.flash();
   }
 
@@ -3643,6 +3666,256 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     if (hl && hl.dataset.note) focusNote(hl.dataset.note);
   });
 
+  /* ============================================================
+     6b. 自动翻页（v2.20）—— 计时单位是「字」，不是「页」
+     ------------------------------------------------------------
+     我们的页不是定长的（v2.19.3 会把长段 / 长表 / 长列表就地拆开），所以 Kobo
+     那套固定 5–60 秒档在引言页上让人等、在满页上逼人赶。分页态每页停留 =
+     本页字数 ÷（读者实测速度 × 倍速）；通栏态按「每个滚动像素摊到多少字」匀速推进。
+     两条时间轴都必须随时叫停（WCAG 2.2 SC 2.2.2），控制条常驻、沉浸态也不收。
+     调研与验收口径见《墨读InkRead-v2.20-自动翻页方案.md》。
+     ============================================================ */
+  var AUTO_KEY = "inkread.autoread.v1";
+  var AUTO_MULTS = [0.6, 0.8, 1.0, 1.3, 1.6];
+  var AUTO = {
+    on: false, manual: false, blocked: null, mult: 1.0,
+    timer: null, raf: null, acc: 0, wrote: -1, last: 0, beat: null,
+    wasScroll: null, inTick: false, bookH: null
+  };
+  /* 只存倍速：运行态刻意不落库 —— 刷新后自动翻页回到关闭才对，
+     它要求读者对「当前页」有预期，接着上次跑等于吓人。 */
+  try {
+    var AUTO_SAVED = JSON.parse(localStorage.getItem(AUTO_KEY) || "null");
+    if (AUTO_SAVED && AUTO_MULTS.indexOf(+AUTO_SAVED.mult) >= 0) AUTO.mult = +AUTO_SAVED.mult;
+  } catch (e) {}
+  function autoSave() { try { localStorage.setItem(AUTO_KEY, JSON.stringify({ mult: AUTO.mult })); } catch (e) {} }
+
+  /* 速度种子：与「剩余时间」估算同一口径（近 14 天 / 同类实测 / 平均 300） */
+  function autoSeed() {
+    var sp = (window.API && API.readSpeed) ? API.readSpeed(doc.type) : { wpm: 300, source: "default" };
+    return { wpm: Math.max(80, Math.min(1200, sp.wpm || 300)), source: sp.source || "default" };
+  }
+  function autoWpm() { return autoSeed().wpm * AUTO.mult; }
+  /* 双读数：倍速是操作，字/分是「我到底在读多快」的量。未实测时如实标注。 */
+  function autoReadTxt() {
+    var s = autoSeed();
+    return AUTO.mult.toFixed(1) + "× · 约 " + Math.round(s.wpm * AUTO.mult) + " 字/分" +
+      (s.source === "default" ? "（未实测，按平均 300）" : "");
+  }
+  /* 按「这一页真的有多少字」计时，而不是「这几个块共有多少字」：
+     长段落会被拆到连续两页，用块字数会向上虚报，读者等着一句早就读完的话。 */
+  /* 减弱动效有两个来源：应用内开关（read.reduce）与系统偏好（OS 说了「减」也得减，WCAG 2.3.3）。
+     开关值不动它 —— 用户那份选择要原样存着，这里问的是「现在到底该不该动」。 */
+  function autoReduced() {
+    return !!(read.reduce || (window.InkTheme && InkTheme.reduced && InkTheme.reduced()));
+  }
+  function autoPageChars(i) {
+    var h = state.pages[i] || "";
+    if (h) return h.replace(/<[^>]*>/g, "").replace(/\s+/g, "").length;
+    var idx = state.pageIdx[i] || [], n = 0;
+    for (var k = 0; k < idx.length; k++) n += (BLOCK_TEXT[idx[k]] || "").length;
+    return n;
+  }
+  /* 每页时长的两个下限各有来头：纯图页 / 满页表格没有文字，按公式算是 0 秒
+     （= 连环空翻，Kindle Word Runner 被抱怨得最多的就是这条），给 4 秒；
+     一句引言页按公式只有几百毫秒，读者还没看清就翻走，兜到 1.2 秒。 */
+  function autoMsFor(chars) {
+    if (!chars) return 4000;
+    return Math.max(1200, Math.min(120000, chars / Math.max(1, autoWpm()) * 60000));
+  }
+  /* 通栏态：整篇文档摊在多高的滚动距离上，一个字占多少像素 —— 双栏、图、表、
+     段距全自动算进去，比「字号 × 行数」不易失真。图多的地方摊得薄 → 自然慢下来。 */
+  function autoPxPerChar() { return Math.max(0.2, qs("#sheet").scrollHeight / Math.max(1, DOC_CHARS)); }
+  function autoIdle() { return !AUTO.on || AUTO.manual || !!AUTO.blocked; }
+  /* 位移是「机器推的」还是「眼睛读的」：只有后者才配进速度种子 */
+  function autoDriving() { return AUTO.on && !AUTO.manual && !AUTO.blocked; }
+
+  /* 「停下来做事」的地方一律暂停：方案 §4.4 的成败关键 */
+  function autoBlocked() {
+    if (document.hidden || document.visibilityState !== "visible") return "hidden";
+    if (EDIT.on) return "edit";
+    var ap = document.getElementById("aaPanel");
+    if (ap && !ap.hidden) return "panel";
+    /* 「更多」里全是要先读完才能选的字，页在底下自己翻等于抢答 */
+    var mp = document.getElementById("morePop");
+    if (mp && !mp.hidden) return "panel";
+    if (tocOpen || tk.open || tOpen) return "panel";
+    var rd = qs("#reader");
+    if (rd.dataset.notes === "open" || rd.dataset.side === "open") return "panel";
+    var s = window.getSelection ? window.getSelection() : null;
+    if (s && String(s).trim()) return "sel";
+    return null;
+  }
+  var AUTO_WHY = { hidden: "不在前台", panel: "面板打开", sel: "划词选中", edit: "修改正文" };
+
+  function autoPaint() {
+    var bar = qs("#autoBar");
+    if (!bar) return;
+    bar.hidden = !AUTO.on;
+    if (!AUTO.on) return;
+    var paused = AUTO.manual || !!AUTO.blocked;
+    qs("#icAutoPlay").innerHTML = icon(paused ? "play" : "pause", 16);
+    var pb = qs("#autoPlay");
+    pb.setAttribute("aria-pressed", String(paused));
+    pb.setAttribute("aria-label", paused ? "继续自动翻页" : "暂停自动翻页");
+    pb.title = paused ? "继续（R）" : "暂停（R）";
+    qs("#autoRead").textContent = autoReadTxt();
+    var txt = "自动翻页 · ";
+    txt += state.scroll ? "匀速滚动" : "定时翻页 · 本页约 " + Math.round(autoMsFor(autoPageChars(state.cur)) / 100) / 10 + " 秒";
+    if (AUTO.manual) txt += " · 已暂停";
+    else if (AUTO.blocked) txt += " · 已暂停（" + (AUTO_WHY[AUTO.blocked] || AUTO.blocked) + "）";
+    qs("#autoNow").textContent = txt;
+  }
+
+  function autoStopRaf() { if (AUTO.raf) { cancelAnimationFrame(AUTO.raf); AUTO.raf = null; } }
+
+  /* 通栏态：rAF 累加器。dt 钳到 50ms —— 切走再回来不跳屏。 */
+  function autoFrame(ts) {
+    if (autoIdle()) { AUTO.raf = null; return; }
+    var sheet = qs("#sheet");
+    var dt = AUTO.last ? Math.min(0.05, (ts - AUTO.last) / 1000) : 0;
+    AUTO.last = ts;
+    var max = sheet.scrollHeight - sheet.clientHeight;
+    if (max <= 0) { AUTO.raf = requestAnimationFrame(autoFrame); return; }
+    AUTO.acc += autoWpm() / 60 * autoPxPerChar() * dt;
+    if (AUTO.acc >= max - 0.5) { AUTO.acc = max; AUTO.wrote = max; sheet.scrollTop = max; autoFinish(); return; }
+    /* 读者自己滚了一下就顺着他去：位置以实况为准，绝不把他拽回累加器里 */
+    if (Math.abs(sheet.scrollTop - AUTO.wrote) > 1.5) AUTO.acc = sheet.scrollTop;
+    AUTO.acc = Math.max(0, AUTO.acc);
+    AUTO.wrote = AUTO.acc;
+    sheet.scrollTop = AUTO.acc;
+    AUTO.raf = requestAnimationFrame(autoFrame);
+  }
+  /* 滚动条只在「真的在跑」时活着，暂停 / 阻塞时不空转耗电 */
+  function autoScrollSync() {
+    if (!AUTO.on || !state.scroll) { autoStopRaf(); return; }
+    if (AUTO.manual || AUTO.blocked) { autoStopRaf(); return; }
+    if (AUTO.raf) return;
+    AUTO.acc = qs("#sheet").scrollTop;
+    AUTO.wrote = AUTO.acc;
+    AUTO.last = 0;
+    AUTO.raf = requestAnimationFrame(autoFrame);
+  }
+
+  function autoArmPage() {
+    clearTimeout(AUTO.timer); AUTO.timer = null;
+    if (!AUTO.on || state.scroll) return;
+    AUTO.timer = setTimeout(autoTick, autoMsFor(autoPageChars(state.cur)));
+  }
+
+  function autoTick() {
+    AUTO.timer = null;
+    if (!AUTO.on || state.scroll) return;
+    autoReview();                 /* 到期先复核实况；解除阻塞会重头给一整页（见 autoReview） */
+    if (AUTO.timer) return;
+    if (AUTO.manual || AUTO.blocked) { AUTO.timer = setTimeout(autoTick, 200); return; }
+    if (state.cur >= state.pages.length - 1) { autoFinish(); return; }
+    AUTO.inTick = true;
+    try { go(1); } finally { AUTO.inTick = false; }
+    autoArmPage();
+    /* 自动翻页这一支不走 autoRetime（renderPage 里被 inTick 挡住），
+       条子得自己跟上，否则翻到新页还报着上一页的秒数。 */
+    autoPaint();
+  }
+
+  /* 控制条占掉的高度会压小版心 → 分页必须按新高度重排，否则页内又长出滚动条
+     （v2.19.3 的老坑）。通栏态不受影响：条子是同列兄弟，文档高度不变。 */
+  function autoSyncBook() {
+    if (!AUTO.on) {
+      if (AUTO.bookH !== null) { AUTO.bookH = null; if (!state.scroll) repaginate(false); }
+      return;
+    }
+    var h = qs("#book").clientHeight;
+    if (state.scroll) { AUTO.bookH = h; autoRetime(); return; }
+    if (AUTO.bookH !== null && h > AUTO.bookH - 8) return;   /* 版心没被压小：条子是叠上来的 */
+    AUTO.bookH = h;
+    repaginate(false);   /* repaginate 自己会把字数基准锚回原位，不留假增量 */
+    autoRetime();
+  }
+
+  /* 手动翻页 / 拖进度条 / 跳目录：重新计时，不退出、不暂停 */
+  function autoRetime() {
+    if (!AUTO.on) return;
+    if (state.scroll) { var st = qs("#sheet").scrollTop; AUTO.acc = st; AUTO.wrote = st; autoPaint(); return; }
+    if (!AUTO.manual && !AUTO.blocked) autoArmPage();
+    /* 条子上那句「本页约 X 秒」必须跟着实况走：读者自己翻了一页还报上一页的时长，
+       等于当着人面说假话（暂停时也一样要报准，他才判断得了什么时候恢复）。 */
+    autoPaint();
+  }
+
+  function autoWatch(on) {
+    clearInterval(AUTO.beat); AUTO.beat = null;
+    if (on) AUTO.beat = setInterval(autoReview, 200);
+  }
+
+  /* 实况复核：状态真的变了才动，平时一次比较就返回 */
+  function autoReview() {
+    if (!AUTO.on) return false;
+    /* 系统「减弱动效」是运行途中也会变的 OS 级偏好，匀速滚动这种连续位移得当场停 */
+    if (state.scroll && autoReduced()) { autoStop("系统已开启「减弱动效」，匀速滚动已停止"); return true; }
+    var b = autoBlocked();
+    if (b === AUTO.blocked) return false;
+    AUTO.blocked = b;
+    if (b === "edit") { autoStop("修改正文时不自动翻页"); return true; }
+    autoPaint();
+    if (state.scroll) autoScrollSync(); else autoArmPage();
+    return true;
+  }
+
+  function autoStart() {
+    if (AUTO.on) return;
+    /* 连续位移正是前庭敏感者要避开的东西：减弱动效（应用内或系统级）下匀速档不开 */
+    if (autoReduced() && state.scroll) { toast("已按「减弱动效」关闭匀速滚动，定时翻页请改用分页模式", "info"); return; }
+    if (qs("#ttsBar").style.display === "flex") { toast("听书时页面跟着朗读走，不需要自动翻页", "info"); return; }
+    AUTO.on = true; AUTO.manual = false; AUTO.blocked = null;
+    /* 先记下当前方式：条子一现身就压小版心 → repaginate 的守卫会把「自己引起的重排」
+       误判成用户切了阅读方式，刚开的自动翻页会被它自己关掉。 */
+    AUTO.wasScroll = state.scroll;
+    autoPaint();            /* 先出条，再量高度：分页要按条在时的高度重排 */
+    autoSyncBook();
+    autoScrollSync(); autoArmPage();
+    autoWatch(true);
+    toast(state.scroll ? "自动滚动已开始 · 按 R 暂停" : "自动翻页已开始 · 按 R 暂停", "chevrons-right");
+  }
+
+  function autoStop(why) {
+    if (!AUTO.on) return;
+    AUTO.on = false; AUTO.manual = false; AUTO.blocked = null;
+    clearTimeout(AUTO.timer); AUTO.timer = null;
+    autoStopRaf(); autoWatch(false); autoSave();
+    autoPaint();            /* 收起控制条 */
+    autoSyncBook();         /* 条子没了 → 版心长回来，页容量复原 */
+    if (why) toast(why, "info");
+  }
+
+  function autoToggle() {
+    if (!AUTO.on) { autoStart(); return; }
+    if (AUTO.manual) { AUTO.manual = false; autoSave(); autoPaint(); autoScrollSync(); autoRetime(); }
+    else { AUTO.manual = true; autoPaint(); autoScrollSync(); }
+  }
+  function autoFinish() { autoStop("已读到结尾"); }
+
+  function autoStep(dir) {
+    var i = AUTO_MULTS.indexOf(AUTO.mult); if (i < 0) i = 2;
+    var j = Math.max(0, Math.min(AUTO_MULTS.length - 1, i + dir));
+    if (j === i) { toast(dir < 0 ? "已经是最慢一档" : "已经是最快一档", "info"); return; }
+    AUTO.mult = AUTO_MULTS[j];
+    autoSave(); autoPaint(); autoRetime();
+  }
+
+  qs("#autoPlay").addEventListener("click", autoToggle);
+  qs("#autoStop").addEventListener("click", function () { autoStop(); });
+  qs("#autoDown").addEventListener("click", function () { autoStep(-1); });
+  qs("#autoUp").addEventListener("click", function () { autoStep(1); });
+  qs("#tAuto").addEventListener("click", function () { autoToggle(); });
+
+  /* 面板开合、划词、切后台都在这一秒内改变「该不该停」；200ms 兜底轮询之外，
+     这三个事件让暂停当场反映到按钮上（WCAG 2.2.2 要求的是「随时能停」）。 */
+  document.addEventListener("selectionchange", autoReview);
+  document.addEventListener("pointerdown", function () { autoReview(); }, true);
+  document.addEventListener("visibilitychange", autoReview);
+  window.addEventListener("resize", autoRetime);
+
   /* ---------- 翻页交互：按钮 / 键盘 / 拖拽 ---------- */
   qs("#pgPrev").addEventListener("click", function () { go(-1); });
   qs("#pgNext").addEventListener("click", function () { go(1); });
@@ -3664,6 +3937,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     else if (k.toLowerCase() === "t") { e.preventDefault(); toggleTasks(); }
     else if (k.toLowerCase() === "c") { e.preventDefault(); toggleToc(); }
     else if (k.toLowerCase() === "m") { e.preventDefault(); InkModes.openPicker(); }
+    else if (k.toLowerCase() === "r") { e.preventDefault(); autoToggle(); }
     else if (k === "Escape") {
       /* 浮层优先级：越靠上越先收，避免一次 Esc 收掉两层 */
       if (!morePop.hidden) closeMore();
@@ -4703,6 +4977,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     learn:   { label: "任务出处", icon: "list-checks",  hint: "标出任务出处",     run: function () { tkToggle("learn"); } },
     guide:   { label: "分格引导", icon: "scan-text",    hint: "一次一格自动放大", run: function () { tkGuide(); } },
     speak:   { label: "听书",     icon: "audio-lines",  hint: "从当前页开始朗读", run: tkSpeak },
+    auto:    { label: "自动翻页", icon: "chevrons-right", hint: "按你的速度推进", run: autoToggle },
     bookmark:{ label: "书签",     icon: "bookmark",     hint: "看本文的书签",     run: function () { tkNotes("list", "bookmark"); } },
     notes:   { label: "笔记面板", icon: "notebook-pen", hint: "批注与完整笔记",   run: function () { tkNotes("list"); } },
     annot:   { label: "批注",     icon: "highlighter",  hint: "就当前页写批注",   run: function () { tkNotes("new", null, true); } },
@@ -4723,15 +4998,15 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     { k: "comic",   name: "漫画", icon: "image",          desc: "图版连读 · 分格引导",
       tools: ["guide", "annot", "notes"] },
     { k: "book",    name: "书籍", icon: "book-open",      desc: "长文连读 · 页边随笔",
-      tools: ["speak", "bookmark", "annot", "notes"] },
+      tools: ["speak", "auto", "bookmark", "annot", "notes"] },
     { k: "general", name: "通用", icon: "sparkles",       desc: "不限类别 · 全部工具",
-      tools: ["embed", "notes", "annot", "speak", "brain", "trans", "explain", "trace"] }
+      tools: ["embed", "notes", "annot", "speak", "auto", "brain", "trans", "explain", "trace"] }
   ];
-  /* 中心「全部」= 16 项能力按用途合并到 12 项扇区：
+  /* 中心「全部」= 17 项能力按用途合并到 13 项扇区：
      ① 三个 AI 划选动作（翻译 / 解析 / 溯源）合成一枚「AI 划选」（点开同环换成三枚）；
      ② 笔记面板 / 写笔记 / 完整笔记本就是一个浮窗的三个页签，合成「笔记面板」一枚。
      其余各项保持独立，一项不丢。 */
-  var TK_ALL = ["marg", "pad", "card", "learn", "cite", "back", "guide", "speak", "bookmark", "notes", "brain", "#aiSel"];
+  var TK_ALL = ["marg", "pad", "card", "learn", "cite", "back", "guide", "speak", "auto", "bookmark", "notes", "brain", "#aiSel"];
   var TK_GROUP = { "#aiSel": { label: "AI 划选", icon: "sparkles", hint: "翻译 · 解析 · 溯源", items: ["trans", "explain", "trace"] } };
 
   function tkItemOf(k) { return TK_GROUP[k] || TK_TOOL[k] || null; }
@@ -5301,7 +5576,13 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       if (statOff == null || !isFinite(statOff)) { statOff = off; return; }
       var d = off - statOff;
       statOff = off;
-      if (d > 0 && d <= 3000) { API.statsBump("words", d); try { API.speedBump(doc.type, "words", d); } catch (e) {} }
+      if (d > 0 && d <= 3000) {
+        API.statsBump("words", d);
+        /* v2.20 反身性防护：自动翻页推进的字数不能进速度种子，否则
+           自动翻页 → speedBump → readSpeed 变大 → 翻页更快 → 更快。
+           人确实读过了这些字（全局统计照记），但这段位移不是他眼睛的速度。 */
+        try { if (!autoDriving()) API.speedBump(doc.type, "words", d); } catch (e) {}
+      }
     } catch (e) {}
   }
   /* 模式切换 / 重排后把基准重设为切换前的真实位置（此时位置尚未跳变）：
@@ -5316,7 +5597,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     statBeat = setInterval(function () {
       if (document.visibilityState !== "visible" || document.hidden) return;
       if (!window.API || !API.statsBump) return;
-      try { API.statsBump("sec", 5); try { API.speedBump(doc.type, "sec", 5); } catch (e) {}; } catch (e) {}
+      try { API.statsBump("sec", 5); try { if (!autoDriving()) API.speedBump(doc.type, "sec", 5); } catch (e) {}; } catch (e) {}
     }, 5000);
   }
   /* 隐藏 / 离开即落库：最后不到 2 秒的内存挂账不丢 */

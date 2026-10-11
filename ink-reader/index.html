@@ -181,7 +181,7 @@
   <div class="modal">
     <div class="modal-head">
       <h3><span id="editIco"></span>编辑藏书</h3>
-      <button class="modal-x" id="editClose"></button>
+      <button class="modal-x" id="editClose" aria-label="关闭" title="关闭"></button>
     </div>
     <div class="modal-body">
       <div class="edit-src" id="editSrc"></div>
@@ -252,7 +252,7 @@
   <div class="modal">
     <div class="modal-head">
       <h3><span id="impTitleIco"></span>导入文档 · 解析任务</h3>
-      <button class="modal-x" id="impClose"></button>
+      <button class="modal-x" id="impClose" aria-label="关闭" title="关闭"></button>
     </div>
     <div class="modal-body">
       <div class="dropzone" id="dropzone">
@@ -328,7 +328,6 @@
   qs("#resIco").innerHTML = icon("list-checks", 18);
   qs("#impClsIco").innerHTML = icon("layers", 18);
   qs("#impClose").innerHTML = icon("x", 18);
-  qs("#impCancel").innerHTML = "";
   qs("#editIco").innerHTML = icon("pen-line", 18);
   qs("#editClose").innerHTML = icon("x", 18);
   qs("#btnManage").innerHTML = icon("list-checks", 15) + "管理";

@@ -337,6 +337,15 @@
     return out;
   }
 
+  /* 系统级「减弱动效」与应用内开关同效（WCAG 2.3.3 / 开关旁那句「同时遵循系统的…」）。
+     read().reduce 保持是「用户自己的选择」不动它，这里给的是「现在到底该不该动」——
+     匀速滚动这类连续位移，OS 说了「减」就必须减。 */
+  function reduced() {
+    if (read().reduce) return true;
+    try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+    catch (e) { return false; }
+  }
+
   function write(patch) {
     storeWrite(patch);
     var cur = read();
@@ -1499,6 +1508,7 @@
     GROUPS: GROUPS, THEMES: THEMES, DEFAULTS: DEFAULTS, CITIES: CITIES,
     PREINSTALL: PREINSTALL,
     read: read, commit: commit, resolve: resolve, activeSlot: activeSlot,
+    reduced: reduced,
     apply: apply, paint: paint, start: start, open: open, close: close,
     syncToggle: syncToggle, cpl: cpl,
     /* 主题商城：安装态与自建主题 */

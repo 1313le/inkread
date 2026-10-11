@@ -307,7 +307,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   <div class="modal modal-lg">
     <div class="modal-head">
       <h3><span id="icModelTitle"></span>模型设置</h3>
-      <button class="modal-x" id="modelX"></button>
+      <button class="modal-x" id="modelX" aria-label="关闭" title="关闭"></button>
     </div>
     <div class="modal-body">
       <label class="field-label">服务商</label>
@@ -342,7 +342,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
         <input type="range" class="range" id="tempRange" min="0" max="10" value="4">
         <label class="field-label" for="mTokens">最大输出 tokens</label>
         <input class="field" id="mTokens" type="number" min="256" max="32768" step="256" value="2048">
-        <div class="set-row"><span class="sr-k">流式输出（逐字返回）</span><button class="switch on" id="swStream"></button></div>
+        <div class="set-row"><span class="sr-k">流式输出（逐字返回）</span><button class="switch on" id="swStream" aria-pressed="true" aria-label="流式输出开关" title="流式输出"></button></div>
       </div>
 
       <div class="hr"></div>
@@ -826,6 +826,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     qs("#tempVal").textContent = t.toFixed(1);
     qs("#mTokens").value = draft.maxTokens || 2048;
     qs("#swStream").classList.toggle("on", draft.stream);
+    qs("#swStream").setAttribute("aria-pressed", String(!!draft.stream));
     qs("#mTest").hidden = true;
     qs("#advBox").hidden = true;
     qs("#advToggle").textContent = "展开 ›";
@@ -898,7 +899,11 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     qs("#advToggle").setAttribute("aria-expanded", String(!box.hidden));
   });
   qs("#tempRange").addEventListener("input", function (e) { qs("#tempVal").textContent = (e.target.value / 10).toFixed(1); });
-  qs("#swStream").addEventListener("click", function () { qs("#swStream").classList.toggle("on"); });
+  qs("#swStream").addEventListener("click", function () {
+    var b = qs("#swStream");
+    b.classList.toggle("on");
+    b.setAttribute("aria-pressed", String(b.classList.contains("on")));
+  });
 
   qs("#mTestBtn").addEventListener("click", function () { testCfg(readForm(), qs("#mTestBtn")); });
   qs("#mPull").addEventListener("click", function () { testCfg(readForm(), qs("#mPull")); });
