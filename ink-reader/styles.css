@@ -397,7 +397,11 @@ html[data-tone="dark"] .eink-flash { background: var(--paper); }
 
 /* ============ 内容区 ============ */
 /* overflow-x 用 clip（同 .page-sheet 的处方）：hidden 仍可被 scrollIntoView 程序化滚动 */
-.app-content { flex: 1; overflow-y: auto; overflow-x: clip; position: relative; }
+/* min-width:0 是结构性的：flex 项默认 min-width:auto，会把「子孙里最宽的那个不可收缩盒」
+   一路当成自己的 min-content —— 390 实测一拉起朗读条（音色 select 撑出 187px 硬块），
+   min-content 累到 728px，整列就被顶出视口，底栏连「停止」都按不到。
+   既然 overflow-x 已经是 clip（本来就不打算横向露出去），就让宽度老老实实听容器的。 */
+.app-content { flex: 1; min-width: 0; overflow-y: auto; overflow-x: clip; position: relative; }
 .page { padding: 26px 34px 54px; max-width: 1260px; margin: 0 auto; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
 /* 页头动作组必须可折行：.row 默认不换行，窄屏下末位按钮会被挤出视口 */
@@ -896,11 +900,15 @@ body[data-page="reader"] .app-content { overflow: clip; }   /* 同 .screen：cli
 .dock-prog input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; border-radius: 50%; background: var(--paper); border: 2px solid var(--mark); }
 .dock-prog input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ≤600：图标化一行放下；百分比交给顶栏进度线 */
+/* ≤600：图标在上、10px 文字在下。原先的 font-size:0 把文字整个抹掉，
+   六钮只剩图标 —— 而 Aa / 批注 / 更多 都是自造语义，纯图标认不出来。
+   NN/g《Icon Usability》：图标必须带「无需任何交互就能看见」的文字标签，
+   tooltip 要悬停才出，触屏等于没有。高度沿用基础规则的 44px，条子总高不变，
+   也不去碰刚修好的 .book 高度链。百分比交给顶栏进度线。 */
 @media (max-width: 600px) {
   .reader-dock { gap: 2px; padding: 5px 8px calc(5px + env(safe-area-inset-bottom)); }
-  .dock-btn { flex: 1; min-width: 0; padding: 0; font-size: 0; gap: 0; }
-  .dock-btn b { font-size: 11px; }
+  .dock-btn { flex: 1; min-width: 0; padding: 0 2px; flex-direction: column; gap: 1px; font-size: 10px; letter-spacing: 0; line-height: 1.1; }
+  .dock-btn b { font-size: 10px; }
   .dock-prog { flex: 1.35; min-width: 96px; }
   .dock-pct { display: none; }
 }
@@ -1246,11 +1254,15 @@ html[data-auto="on"] .doc[data-doc-theme="academic"] p { text-align: justify; }
   display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper);
   color: var(--ink-2); cursor: pointer;
+  /* 音色名最长的一条（「晓晓 · 温润女声（小说 · 女声 · 青年）」）给 select 撑出 148px 硬块，
+     整块又 min-width:auto 不可收缩 → 朗读条 min-content 累到 728px（390 实测顶出视口）。
+     让它先缩：括号里那串是元数据，认嗓靠前面的名字。 */
+  min-width: 0; flex: 0 1 auto;
 }
-.tts-voice .ic { color: var(--ink-3); }
+.tts-voice .ic { color: var(--ink-3); flex: none; }
 .tts-voice select {
   border: none; background: none; font: inherit; font-size: 12px; color: inherit;
-  padding: 0 2px; cursor: pointer; max-width: 148px;
+  padding: 0 2px; cursor: pointer; max-width: 148px; min-width: 0; flex: 1 1 auto;
 }
 .tts-voice select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 不可用的菜单项：朗读只对书籍开放 */

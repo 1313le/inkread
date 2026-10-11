@@ -177,7 +177,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
             <div class="chat-msgs" id="chatMsgs"></div>
             <div class="chat-quick" id="chatQuick"></div>
             <div class="chat-input-row">
-              <input class="field" id="chatInput" placeholder="问点什么：总结当前文档 / 这本书讲了什么 / 帮我写段代码 / 解释「注意力机制」…">
+              <input class="field" id="chatInput" placeholder="问点什么：总结当前文档 / 这本书讲了什么 / 帮我写段代码 / 解释「注意力机制」…" aria-label="向主脑提问">
               <button class="btn btn-primary" id="chatSend"><span id="icSend"></span>发送</button>
             </div>
           </div>
@@ -243,8 +243,8 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
 
               <div id="glList"></div>
               <div class="gl-add">
-                <input class="field" id="glSrc" placeholder="原词，如「注意力」">
-                <input class="field" id="glDst" placeholder="译名，如 attention">
+                <input class="field" id="glSrc" placeholder="原词，如「注意力」" aria-label="原词">
+                <input class="field" id="glDst" placeholder="译名，如 attention" aria-label="译名">
                 <button class="btn btn-primary btn-sm" id="glAdd">添加</button>
               </div>
             </div>
@@ -1166,12 +1166,16 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     if (!text.trim()) {
       IMP.rows = [];
       pv.textContent = "还没有内容 —— 粘贴两列文本，或选一个 CSV / TSV 文件。";
+      doBtn.textContent = "导入";
       doBtn.disabled = true;
       return;
     }
     var r = API.parseGlossary(text, { delim: qs("#glDelim").value, header: qs("#glHeader").checked });
     IMP.rows = r.rows;
     doBtn.disabled = !r.rows.length;
+    /* 术语卡上有两个「导入」：开面板的和提交点的。同名会让读者以为点了两次同一件事。
+       提交钮报出当次条数（这个数预览行本来就算好了），入口钮保持「导入」不动。 */
+    doBtn.textContent = r.rows.length ? "导入 " + r.rows.length + " 条" : "导入";
     var bits = ["识别到 <b>" + r.rows.length + "</b> 条"];
     if (r.delimName) bits.push("分隔符 <b>" + esc(r.delimName) + "</b>");
     if (r.skippedHeader) bits.push("已跳过表头");

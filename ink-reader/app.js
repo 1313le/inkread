@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.20.0";
+window.InkVersion = "2.20.1";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -1067,7 +1067,10 @@ window.InkDate = (function () {
     ["ai", "sparkles", "ai.html", "主脑"]
   ];
   var navLinks = NAVS.map(function (n) {
-    return '<a class="nav-link" data-nav="' + n[0] + '" href="' + n[2] + '">' + icon(n[1], 19) + "<span>" + n[3] + "</span></a>";
+    /* 601–1180 是图标 rail 档：styles.css 把 .nav-link span 收掉了，DOM 里只剩一张 svg。
+       没有 aria-label，读屏用户在这七页的主导航上听到的只是「链接」，整条导航没有名字；
+       title 则是鼠标用户在 rail 里唯一的解释。两处都用可见文案本身（WCAG 2.5.3 标签在名字中）。 */
+    return '<a class="nav-link" data-nav="' + n[0] + '" href="' + n[2] + '" aria-label="' + n[3] + '" title="' + n[3] + '">' + icon(n[1], 19) + "<span>" + n[3] + "</span></a>";
   }).join("");
 
   /* ---------- 打卡 / 阅读状态（v2.7 升级）----------

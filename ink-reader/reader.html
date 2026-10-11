@@ -16,6 +16,17 @@
 /* 播放条：三区布局 —— 走带控制 | 段落预览+进度 | 音色/语速/定时/停止 */
 #ttsBar { align-items: center; gap: 8px; flex-wrap: nowrap; }
 #ttsBar .tts-mid { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+/* 窄屏必须折行：全局 .tts-bar 本来就是 wrap（styles.css 那条注释写着「不把进度条挤没」），
+   本页的 nowrap 把它盖掉了 —— 390 实测八个子元的不可收缩宽（44×3 + 音色 + 52×2 + 44 + 7×8 间隙）
+   正好吃掉整行，只有 .tts-mid 允许缩到 0，于是段落预览和进度条整块消失（clientW=0 / scrollW=136），
+   读者正在听第几页完全看不见。热区不能靠缩钮换来，所以把中间区单独放一行、并给它下限。 */
+@media (max-width: 600px) {
+  #ttsBar { flex-wrap: wrap; column-gap: 6px; row-gap: 8px; }
+  #ttsBar .tts-mid { flex: 1 1 168px; min-width: 168px; }
+  /* 行间距收到 6 + 音色名收窄，是为了让 音色/语速/定时/停止 正好落在第二行：
+     三条折行在 844 高的手机上要吃掉 168px，播放器不该比正文还高。 */
+  #ttsBar .tts-voice select { max-width: 120px; }
+}
 #ttsBar .tts-now {
   flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); letter-spacing: .02em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -182,6 +193,17 @@ body.nim-pv-drag .nim-pv-bar { cursor: grabbing; }
   .nim-text { padding: 18px 16px; }
   .nim-quote { max-width: 38%; }
 }
+
+/* ---------- 无书可读态（?doc= 指向已被清掉的书 / 空书架直接进阅读页） ----------
+   脚本在 renderNoDoc() 后 return，底栏六钮 / 翻页 / 模式条 / 顶栏书签与全屏的事件都没绑上，
+   点了没有任何反应，纸页上也还没有可操作的对象。Apple HIG、Material 与微软对「当前态用不了」
+   的控件是同一条分工：可能恢复可用的置灰，此刻及本页都不可能可用的直接收掉 ——
+   一排按了没反应的按钮比少一排按钮更糟。回书架的出口（顶栏返回 + 空态里的「回书架」）保留。 */
+body[data-nodoc] #readerDock,
+body[data-nodoc] .page-nav,
+body[data-nodoc] .mode-band,
+body[data-nodoc] #tBookmark,
+body[data-nodoc] #tFull { display: none; }
 </style>
 <style id="annwin-extra">
 /* ============================================================
@@ -627,7 +649,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
               <button class="more-item" role="menuitem" id="tEdit" title="解锁后可改正文文字（不影响排版格式）" aria-pressed="false"><span id="icEdit"></span><span class="mi-k">正文锁</span><em>解锁后可改字</em></button>
               <button class="more-item" role="menuitem" id="tTasks" title="任务清单（T）" aria-expanded="false" aria-controls="taskDrawer"><span id="icTasks"></span><span class="mi-k">任务清单</span><em>阅读任务 <b class="tbadge" id="taskBadge">0</b></em></button>
               <button class="more-item" role="menuitem" id="tSide" aria-expanded="false" aria-controls="sidePanel"><span id="icSide"></span><span class="mi-k">书签与设置</span><em>覆盖侧栏 · 随时收起</em></button>
-              <button class="more-item" role="menuitem" id="tSpeak"><span id="icSpeak"></span><span class="mi-k">朗读</span><em>旁听当前页</em></button>
+              <button class="more-item" role="menuitem" id="tSpeak"><span id="icSpeak"></span><span class="mi-k">朗读</span><em>从当前页开始读</em></button>
               <button class="more-item" role="menuitem" id="tAuto"><span id="icAuto"></span><span class="mi-k">自动翻页</span><em>按你的速度推进</em></button>
               <button class="more-item" role="menuitem" data-appearance><span id="icAppearance"></span><span class="mi-k">外观与阅读设置</span><em>主题 · 强度 · 时间</em></button>
               <button class="more-item" role="menuitem" data-more="mode"><span id="icMoreMode"></span><span class="mi-k">阅读模式…</span><em>书籍 / 文献 / 学习 / 漫画</em></button>
@@ -686,7 +708,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
             </div>
             <button class="dock-btn" id="tAa2" data-aa-toggle title="排版 · 边读边调（A）" aria-expanded="false" aria-controls="aaPanel"><span id="icAa2"></span>Aa</button>
             <button class="dock-btn" id="tNotes2" title="批注面板"><span id="icNotes2"></span>批注 <b id="noteCount2">0</b></button>
-            <button class="dock-btn" id="tSpeak2" title="听书"><span id="icSpeak2"></span>听书</button>
+            <button class="dock-btn" id="tSpeak2" title="朗读"><span id="icSpeak2"></span>朗读</button>
             <button class="dock-btn" id="tMore2" title="更多" aria-haspopup="true" aria-expanded="false" aria-controls="morePop"><span id="icMore2"></span>更多</button>
           </div>
 
@@ -1098,6 +1120,50 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 <script src="modes.js"></script>
 <script>
 (function () {
+  /* ---------- 图标填充（页壳，与读哪一本书无关） ----------
+     这一段必须排在「查不到书就 renderNoDoc() + return」之前：底栏六钮、顶栏书签/全屏、
+     翻页箭头、批注浮窗的三颗钮都是静态 HTML 里的空 <span>，图标靠这里落。
+     曾经它排在早退之后，于是 ?doc= 指向已删掉的书时整页图标一个都不画，只剩一排空白圆角框
+     —— 而 verify-nodoc.js 只量文字与空态，看不见这个，闸是绿的、屏幕是坏的。 */
+  var IC = {
+    icBack: "arrow-left", icAa: "type", icAaSide: "type", icStore: "grid-2x2",
+    icDir: "toc", icDirH: "toc", icTpX: "x",
+    icMark: "highlighter",
+    icSpeak: "volume-2", icNotes: "notebook-pen", icPrev: "chevron-left", icNext: "chevron-right",
+    icVol: "volume-2", icStop: "x", icBold: "bold", icItalic: "italic", icH: "heading",
+    icList: "list", icQuote: "quote", icCode: "code", icSigma: "sigma", icEye: "eye",
+    icSave: "circle-check", icSelNote: "pen-line", icSelMark: "bookmark", icSelCopy: "copy",
+    icTasks: "list-checks", immIcTasks: "list-checks", icTdTitle: "list-checks", icTdX: "x",
+    icPalette: "palette", icAppearance: "palette",
+    icFull: "maximize", immIcMark: "highlighter", immIcNotes: "notebook-pen", immIcExit: "minimize",
+    immIcAppearance: "palette", immIcAa: "type",
+    immIcPrev: "chevron-left", immIcNext: "chevron-right",
+    /* v9 新增：更多菜单 / 翻译 / 模式 / 全屏目录 */
+    icMore: "ellipsis", icMoreMode: "wand-2", icMoreTrans: "languages", icStore2: "grid-2x2",
+    icSelTrans: "languages", immIcToc: "toc", immIcMode: "wand-2",
+    /* v12 新增：书签与设置覆盖侧栏 */
+    icSide: "panel-left",
+    /* v13 新增：辅助阅读（解析 / 溯源） */
+    icSelExplain: "scan-text", icSelTrace: "trace-back", icAuxX: "x",
+    /* v2.14 新增：顶栏书签钮 + 阅读底栏六钮 */
+    icBm2: "bookmark", icDir2: "toc", icAa2: "type",
+    icNotes2: "notebook-pen", icSpeak2: "volume-2", icMore2: "ellipsis",
+    /* v14 新增：文档修改（修改条上的图标；工具栏锁按钮由 paintEditBar 整段重写） */
+    icEditOn: "lock-open", icRestore: "rotate-ccw", icDone: "circle-check",
+    /* v2.20 新增：自动翻页（更多入口 / 控制条；播放位由 autoPaint 随态改写） */
+    icAuto: "chevrons-right", icAutoPlay: "pause", icAutoDown: "minus", icAutoUp: "plus", icAutoStop: "x",
+    /* v2.5 新增：批注浮窗最大化 / 还原（状态由 paintNoteWin 改写） */
+    icNotesMax: "maximize-2"
+  };
+  /* 图标补充：ICONS 表里只有 minimize（四角内折），浮窗「还原」要的是双斜角的 minimize-2，
+     此处按 Lucide 原形补一条 —— 只补本页要用的，不动 app.js 的全局图标表。 */
+  if (window.ICONS && !ICONS["minimize-2"]) {
+    ICONS["minimize-2"] = '<path d="m14 10 7-7"/><path d="M20 10h-6V4"/><path d="m3 21 7-7"/><path d="M4 14h6v6"/>';
+  }
+  Object.keys(IC).forEach(function (id) {
+    var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16);
+  });
+
   var params = new URLSearchParams(location.search);
   /* 深链的 ?doc= 一律精确查书，不走 byId 的「查不到就取首本」：
      清空本机数据后书架为空，byId 返回 undefined，boot 里一句 doc.title 就抛异常、整页空白；
@@ -1145,45 +1211,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     scroll: false, ttsTimer: null, sel: null
   };
 
-  /* ---------- 图标填充 ---------- */
-  var IC = {
-    icBack: "arrow-left", icAa: "type", icAaSide: "type", icStore: "grid-2x2",
-    icDir: "toc", icDirH: "toc", icTpX: "x",
-    icMark: "highlighter",
-    icSpeak: "volume-2", icNotes: "notebook-pen", icPrev: "chevron-left", icNext: "chevron-right",
-    icVol: "volume-2", icStop: "x", icBold: "bold", icItalic: "italic", icH: "heading",
-    icList: "list", icQuote: "quote", icCode: "code", icSigma: "sigma", icEye: "eye",
-    icSave: "circle-check", icSelNote: "pen-line", icSelMark: "bookmark", icSelCopy: "copy",
-    icTasks: "list-checks", immIcTasks: "list-checks", icTdTitle: "list-checks", icTdX: "x",
-    icPalette: "palette", icAppearance: "palette",
-    icFull: "maximize", immIcMark: "highlighter", immIcNotes: "notebook-pen", immIcExit: "minimize",
-    immIcAppearance: "palette", immIcAa: "type",
-    immIcPrev: "chevron-left", immIcNext: "chevron-right",
-    /* v9 新增：更多菜单 / 翻译 / 模式 / 全屏目录 */
-    icMore: "ellipsis", icMoreMode: "wand-2", icMoreTrans: "languages", icStore2: "grid-2x2",
-    icSelTrans: "languages", immIcToc: "toc", immIcMode: "wand-2",
-    /* v12 新增：书签与设置覆盖侧栏 */
-    icSide: "panel-left",
-    /* v13 新增：辅助阅读（解析 / 溯源） */
-    icSelExplain: "scan-text", icSelTrace: "trace-back", icAuxX: "x",
-    /* v2.14 新增：顶栏书签钮 + 阅读底栏六钮 */
-    icBm2: "bookmark", icDir2: "toc", icAa2: "type",
-    icNotes2: "notebook-pen", icSpeak2: "volume-2", icMore2: "ellipsis",
-    /* v14 新增：文档修改（修改条上的图标；工具栏锁按钮由 paintEditBar 整段重写） */
-    icEditOn: "lock-open", icRestore: "rotate-ccw", icDone: "circle-check",
-    /* v2.20 新增：自动翻页（更多入口 / 控制条；播放位由 autoPaint 随态改写） */
-    icAuto: "chevrons-right", icAutoPlay: "pause", icAutoDown: "minus", icAutoUp: "plus", icAutoStop: "x",
-    /* v2.5 新增：批注浮窗最大化 / 还原（状态由 paintNoteWin 改写） */
-    icNotesMax: "maximize-2"
-  };
-  /* 图标补充：ICONS 表里只有 minimize（四角内折），浮窗「还原」要的是双斜角的 minimize-2，
-     此处按 Lucide 原形补一条 —— 只补本页要用的，不动 app.js 的全局图标表。 */
-  if (window.ICONS && !ICONS["minimize-2"]) {
-    ICONS["minimize-2"] = '<path d="m14 10 7-7"/><path d="M20 10h-6V4"/><path d="m3 21 7-7"/><path d="M4 14h6v6"/>';
-  }
-  Object.keys(IC).forEach(function (id) {
-    var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16);
-  });
+  /* ---------- 图标填充：见本 IIFE 开头（页壳图标，必须先于无书早退执行） ---------- */
 
   /* ---------- 主题：由 theme.js 统一提供，此处只做摘要展示 ---------- */
   function themeName(k) {
@@ -3866,7 +3894,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     if (AUTO.on) return;
     /* 连续位移正是前庭敏感者要避开的东西：减弱动效（应用内或系统级）下匀速档不开 */
     if (autoReduced() && state.scroll) { toast("已按「减弱动效」关闭匀速滚动，定时翻页请改用分页模式", "info"); return; }
-    if (qs("#ttsBar").style.display === "flex") { toast("听书时页面跟着朗读走，不需要自动翻页", "info"); return; }
+    if (qs("#ttsBar").style.display === "flex") { toast("朗读时页面跟着声音走，不需要自动翻页", "info"); return; }
     AUTO.on = true; AUTO.manual = false; AUTO.blocked = null;
     /* 先记下当前方式：条子一现身就压小版心 → repaginate 的守卫会把「自己引起的重排」
        误判成用户切了阅读方式，刚开的自动翻页会被它自己关掉。 */
@@ -4061,10 +4089,15 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     qs("#icTtsPlay").innerHTML = icon(playing ? "pause" : "play", 16);
     qs("#ttsPlay").classList.toggle("active", !!playing);
   }
-  function openTTSBar() { qs("#ttsBar").style.display = "flex"; }
+  /* 播放条在文档流的同列底部：一现身就把版心压掉 64~117px。分页是按开条前的高度切的，
+     不重排就会让末行被条子拦腰切掉、页内又长出滚动条（autoSyncBook 治的是自动翻页条，
+     同一个坑：两条互斥，见 autoStart 的自拒，所以各治各的）。通栏不分页，跳过。 */
+  function ttsSyncBook() { if (!state.scroll) repaginate(false); }
+  function openTTSBar() { qs("#ttsBar").style.display = "flex"; ttsSyncBook(); }
   function closeTTSBar() {
     qs("#ttsBar").style.display = "none";
     hideSpeedPop(); hideTimerPop();
+    ttsSyncBook();
   }
   function ttsCleanup() {
     closeTTSBar();
@@ -4929,6 +4962,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   /* 书不在书架上了（清空数据 / 换了机器的旧深链）：正文区如实说明，
      不给一册空白书，也不抛异常把整页留在空白。 */
   function renderNoDoc(wantId) {
+    /* 本页没有可操作的对象，事件也一条都没绑：把用不上的阅读控件收掉，
+       只留「顶栏返回 + 空态里的回书架」两条出路（收法见上面 body[data-nodoc] 那段）。 */
+    document.body.setAttribute("data-nodoc", "1");
     var el = document.createElement("div");
     el.className = "empty";
     el.style.cssText = "margin:16vh auto 0;max-width:460px";
@@ -4976,7 +5012,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     back:    { label: "双向链接", icon: "link-2",       hint: "看同处的所有引用", run: function () { tkPanel("back"); } },
     learn:   { label: "任务出处", icon: "list-checks",  hint: "标出任务出处",     run: function () { tkToggle("learn"); } },
     guide:   { label: "分格引导", icon: "scan-text",    hint: "一次一格自动放大", run: function () { tkGuide(); } },
-    speak:   { label: "听书",     icon: "audio-lines",  hint: "从当前页开始朗读", run: tkSpeak },
+    speak:   { label: "朗读",     icon: "audio-lines",  hint: "从当前页开始朗读", run: tkSpeak },
     auto:    { label: "自动翻页", icon: "chevrons-right", hint: "按你的速度推进", run: autoToggle },
     bookmark:{ label: "书签",     icon: "bookmark",     hint: "看本文的书签",     run: function () { tkNotes("list", "bookmark"); } },
     notes:   { label: "笔记面板", icon: "notebook-pen", hint: "批注与完整笔记",   run: function () { tkNotes("list"); } },
@@ -5236,7 +5272,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   function tkSpeak() {
     var b = qs("#tSpeak");
     if (!b || b.disabled) { toast("本文没有可朗读的文字段落", "info"); return; }
-    if (qs("#ttsPlay").classList.contains("active")) { toast("听书进行中：沉浸态不打断朗读", "audio-lines"); return; }
+    if (qs("#ttsPlay").classList.contains("active")) { toast("朗读进行中：沉浸态不打断声音", "audio-lines"); return; }
     b.click();
   }
   /* 批注浮窗（v2.5）：开合仍走 #reader[data-notes]，页签仍走 switchNoteTab —— 不复制一份实现 */
