@@ -4,7 +4,9 @@
    —— 清理对象：
       1) .work/sync-store.json      同步服务器快照（测试推送的残留数据）
       2) .work/tts-cache/           听书 TTS 合成缓存
-      3) 浏览器 localStorage        验收脚本的 Playwright 临时 profile 已随进程消散；
+      3) .work/ebooks/              v2.21 书仓：serve.js 单跑时 EPUB 正文的落盘位置
+                                    （Electron 下书仓在 userData/ebooks，属应用数据不在此清）
+      4) 浏览器 localStorage        验收脚本的 Playwright 临时 profile 已随进程消散；
                                     若曾用真实浏览器测过，请在应用「设置 → 清空全部数据」
                                     （会广播同步墓碑并写清空哨兵，演示数据不再回流）。
    ============================================================ */
@@ -27,5 +29,6 @@ function rm(p) {
 
 rm(path.join(ROOT, ".work", "sync-store.json"));
 rm(path.join(ROOT, ".work", "tts-cache"));
+rm(path.join(ROOT, ".work", "ebooks"));
 
 console.log(removed ? "测试数据初始化完成（" + removed + " 项）" : "没有需要清理的测试数据");

@@ -1145,8 +1145,8 @@ html[data-auto="on"] .doc[data-doc-theme="academic"] p { text-align: justify; }
 .doc.two-col { column-count: 2; column-gap: 34px; column-rule: 1px solid var(--line-2); }
 /* 表格与代码块自带横向滚动，在分栏里必须通栏 —— 栏宽一半时它们只会挤成渣。
    注意要 span 外层容器（md-tablebox / md-code），span 内层 table 是不生效的。 */
-.doc.two-col h1, .doc.two-col .doc-meta, .doc.two-col .doc-fig, .doc.two-col .math-block,
-.doc.two-col .md-tablebox, .doc.two-col .md-code { column-span: all; }
+.doc.two-col h1, .doc.two-col .doc-meta, .doc.two-col .doc-fig, .doc.two-col .doc-img,
+.doc.two-col .math-block, .doc.two-col .md-tablebox, .doc.two-col .md-code { column-span: all; }
 /* 竖向双栏里表格保留自身外边距，靠 span 通栏而不是靠父级 margin */
 .doc.two-col .md-tablebox { margin-left: 0; margin-right: 0; }
 /* 横向翻页 × 双栏：每页定高两栏，column-fill:auto 先填满第一栏再续第二栏 */
@@ -1154,7 +1154,7 @@ html[data-auto="on"] .doc[data-doc-theme="academic"] p { text-align: justify; }
   column-count: 2; column-gap: 34px; column-rule: 1px solid var(--line-2);
   column-fill: auto; height: 100%;
 }
-.doc.pg-cols h1, .doc.pg-cols .doc-meta, .doc.pg-cols .doc-fig,
+.doc.pg-cols h1, .doc.pg-cols .doc-meta, .doc.pg-cols .doc-fig, .doc.pg-cols .doc-img,
 .doc.pg-cols .math-block, .doc.pg-cols table,
 .doc.pg-cols .md-tablebox, .doc.pg-cols .md-code { column-span: all; }
 /* 竖向浏览：连续滚动，滚动条细窄、不抢纸面 */
@@ -1164,6 +1164,30 @@ html[data-auto="on"] .doc[data-doc-theme="academic"] p { text-align: justify; }
 .doc-fig .fig-box { height: 116px; display: grid; place-items: center; color: var(--ink-3); }
 .doc-fig figcaption { font-size: .8em; color: var(--ink-2); letter-spacing: .06em; margin-top: 10px; }
 .doc-fig .fig-note { font-size: .74em; color: var(--ink-3); margin-top: 4px; }
+
+/* EPUB 正文插图（v2.21 E4）：图在页里是「正文的一部分」，不是附件。
+   宽高由服务端探明后写进内联 width/aspect-ratio，版位在图片落地前就定死；
+   未知尺寸的外链图留 max-width 兜住，boot 里等它到货后重排一次。
+   暗色主题一律不反相（与天幕同规），透明底的线描图靠墨线边框仍看得见。 */
+.doc-img { margin: 1.2em 0; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+.doc-img img {
+  display: block; margin: 0 auto; height: auto; max-width: 100%;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm);
+}
+.doc-img figcaption { font-size: .78em; color: var(--ink-2); letter-spacing: .06em; margin-top: .55em; text-indent: 0; }
+/* 脚注／作者注：压在小字里，靠左花括号线，与正文之间留出「注」的呼吸 */
+.doc-note {
+  display: flex; align-items: flex-start; gap: .55em; margin: 1em 0 1.15em; padding: .62em .9em;
+  font-size: .84em; line-height: 1.75; color: var(--ink-2); text-indent: 0; text-align: left;
+  background: var(--paper-2); border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0; break-inside: avoid; page-break-inside: avoid;
+}
+.doc-note .note-mark {
+  flex: none; font-family: var(--font-kai); font-size: .86em; line-height: 1.6; letter-spacing: .1em;
+  color: var(--accent-ink); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--r-xs); padding: 0 5px;
+}
+.doc-note .note-txt { min-width: 0; }
 
 /* 批注标记 */
 .hl { border-radius: 2px; padding: .04em .1em; cursor: pointer; transition: background .2s; }
@@ -1613,6 +1637,16 @@ html[data-reduce="on"] .mem-row.on { animation: none; }
 .dev-row span { font-size: 11.5px; color: var(--ink-3); }
 .dev-row .dev-state { margin-left: auto; font-size: 11.5px; color: var(--green); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .sync-log { margin-top: 12px; border-top: 1px dashed var(--line-2); padding-top: 10px; }
+/* 单键超限：这批数据没上行，界面要说得出是哪一类，别让用户以为两端已经一致 */
+.sync-warn {
+  display: flex; align-items: flex-start; gap: 6px; margin: 10px 0 0;
+  font-size: 12px; line-height: 1.7; letter-spacing: .02em; color: var(--amber);
+  padding: 7px 10px; border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--amber) 38%, transparent);
+  background: color-mix(in oklab, var(--amber) 10%, transparent);
+}
+.sync-warn[hidden] { display: none; }
+.sync-warn .ic { width: 13px; height: 13px; flex: 0 0 auto; margin-top: 3px; }
 .sync-log li { list-style: none; font-size: 12px; color: var(--ink-2); padding: 7px 0; border-bottom: 1px dashed var(--line-2); letter-spacing: .03em; line-height: 1.65; }
 .sync-log li:last-child { border-bottom: none; }
 .sync-log b { color: var(--ink); font-size: 11px; letter-spacing: .1em; margin-right: 8px; }

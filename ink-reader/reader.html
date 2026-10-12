@@ -639,6 +639,8 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
             <a class="tool-btn" href="index.html" title="返回书架" aria-label="返回书架"><span id="icBack"></span></a>
             <span class="doc-title" id="docTitle"></span>
             <span class="chip" id="docKind"></span>
+            <!-- 正文未落库的书：长期挂出状态，别让用户以为这本存住了（原因与补救见 title） -->
+            <span class="chip chip-amber" id="docStored" hidden></span>
             <span class="spacer"></span>
             <button class="tool-btn icon-only" id="tBookmark" title="书签与高亮" aria-label="书签与高亮" aria-expanded="false" aria-controls="sidePanel"><span id="icBm2"></span></button>
             <button class="tool-btn icon-only" id="tFull" data-solo="plain" title="全屏沉浸阅读（F）" aria-label="全屏阅读"><span id="icFull"></span></button>
@@ -649,6 +651,11 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
               <button class="more-item" role="menuitem" id="tEdit" title="解锁后可改正文文字（不影响排版格式）" aria-pressed="false"><span id="icEdit"></span><span class="mi-k">正文锁</span><em>解锁后可改字</em></button>
               <button class="more-item" role="menuitem" id="tTasks" title="任务清单（T）" aria-expanded="false" aria-controls="taskDrawer"><span id="icTasks"></span><span class="mi-k">任务清单</span><em>阅读任务 <b class="tbadge" id="taskBadge">0</b></em></button>
               <button class="more-item" role="menuitem" id="tSide" aria-expanded="false" aria-controls="sidePanel"><span id="icSide"></span><span class="mi-k">书签与设置</span><em>覆盖侧栏 · 随时收起</em></button>
+              <!-- 出纸的两个入口（方案 §3.8）：低频、零破坏，收在文档簇末尾。
+                   这里不放纸型选择器 —— 出什么纸由纸面视图那张纸说了算（inkread.paper.v1 存在它自己的页里），
+                   两处各选各的会让同一本书出现两个版式。文案按能力改：这台设备出得了 PDF 才叫「导出 PDF」。 -->
+              <button class="more-item" role="menuitem" id="tExport" title="把整本书排成一张纸，导出成文件"><span id="icExport"></span><span class="mi-k">导出 PDF</span><em id="expHint">整本排印 · 另存为</em></button>
+              <button class="more-item" role="menuitem" id="tPrint" title="先看纸面预览，再交给系统打印面板"><span id="icPrint"></span><span class="mi-k">打印</span><em id="printHint">纸面预览 · 系统面板</em></button>
               <button class="more-item" role="menuitem" id="tSpeak"><span id="icSpeak"></span><span class="mi-k">朗读</span><em>从当前页开始读</em></button>
               <button class="more-item" role="menuitem" id="tAuto"><span id="icAuto"></span><span class="mi-k">自动翻页</span><em>按你的速度推进</em></button>
               <button class="more-item" role="menuitem" data-appearance><span id="icAppearance"></span><span class="mi-k">外观与阅读设置</span><em>主题 · 强度 · 时间</em></button>
@@ -1119,7 +1126,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 <script src="brain.js"></script>
 <script src="modes.js"></script>
 <script>
-(function () {
+(async function () {
   /* ---------- 图标填充（页壳，与读哪一本书无关） ----------
      这一段必须排在「查不到书就 renderNoDoc() + return」之前：底栏六钮、顶栏书签/全屏、
      翻页箭头、批注浮窗的三颗钮都是静态 HTML 里的空 <span>，图标靠这里落。
@@ -1153,12 +1160,19 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     /* v2.20 新增：自动翻页（更多入口 / 控制条；播放位由 autoPaint 随态改写） */
     icAuto: "chevrons-right", icAutoPlay: "pause", icAutoDown: "minus", icAutoUp: "plus", icAutoStop: "x",
     /* v2.5 新增：批注浮窗最大化 / 还原（状态由 paintNoteWin 改写） */
-    icNotesMax: "maximize-2"
+    icNotesMax: "maximize-2",
+    /* v2.21 新增：出纸两个入口（文案随能力改写，图标不用改 —— 打印机就是打印机） */
+    icExport: "download", icPrint: "printer"
   };
   /* 图标补充：ICONS 表里只有 minimize（四角内折），浮窗「还原」要的是双斜角的 minimize-2，
      此处按 Lucide 原形补一条 —— 只补本页要用的，不动 app.js 的全局图标表。 */
   if (window.ICONS && !ICONS["minimize-2"]) {
     ICONS["minimize-2"] = '<path d="m14 10 7-7"/><path d="M20 10h-6V4"/><path d="m3 21 7-7"/><path d="M4 14h6v6"/>';
+  }
+  /* 「打印」没有专属图标（ICONS 里有 download 却漏了 printer）：按纸面视图工具条上那颗
+     同一形制补上，两处共用一个画法，别长成两种零件。 */
+  if (window.ICONS && !ICONS["printer"]) {
+    ICONS["printer"] = '<path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><path d="M7 16h10v4H7z"/>';
   }
   Object.keys(IC).forEach(function (id) {
     var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16);
@@ -1184,6 +1198,18 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       if (c && c.length) return c;
     }
     return DB.contents[docId] || [];
+  }
+  /* 书仓书（EPUB）：正文与插图落在本机 ebooks，书架条目里只有指针。
+     开书前先把正文取进内存（API.diskContent），之后 sourceBlocks 走的仍是同步路径。
+     取不到就如实停下：在别的设备导入的书本机没有正文，硬开等于给用户一本空书。 */
+  if (doc.src === "disk") {
+    try {
+      if (window.API && API.diskContent) await API.diskContent(doc);
+    } catch (e) {
+      renderNoDoc(wantId, "《" + esc(doc.title || "这本书") + "》的正文不在本机书仓<br>" +
+        esc(String((e && e.message) || "读取失败")) + " · 换设备阅读请重新导入原文件");
+      return;
+    }
   }
   var blocks = sourceBlocks().map(function (b) { return Object.assign({}, b); });
   var read = InkTheme.read();
@@ -1288,6 +1314,24 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       case "abstract": return '<div class="doc-abstract"><b>' + esc(b.label) + "　</b>" + esc(b.x) + "</div>";
       case "kw": return '<div class="doc-kw"><b>关键词：</b>' + b.items.map(esc).join("　·　") + "</div>";
       case "refs": return '<div class="doc-refs"><ol>' + b.items.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ol></div>";
+      /* EPUB 插图：src 由书仓资源端点给出（/e/<bookId>/…），离线随书一起落盘。
+         宽高已知就把「版位高度」在图片落地前钉死：宽度取 min(容器, 原始像素, 由页高上限反推)，
+         量具与实况都只认宽度算高度，加载前后同一尺寸。若只给 aspect-ratio 不限高，
+         一张 1:1.5 的书封会把整页吃满，页底挤出一条页内滚动。
+         页高上限走 --ink-img-h（paginate 每次量完再写），88px 是图注 + 块前后距的预留 ——
+         只限图不限注，页底仍会多出几十像素。图注只在作者写了 alt 时出现。 */
+      case "img":
+        var dim = (+b.w > 0 && +b.h > 0)
+          ? ' style="width:min(100%,' + b.w + "px,calc(" + (Math.round(b.w * 1000 / b.h) / 1000) +
+            " * (var(--ink-img-h,56vh) - 88px)));aspect-ratio:" + (Math.round(b.w * 1000 / b.h) / 1000) + '"'
+          : "";
+        return '<figure class="doc-img"><img src="' + esc(b.src || "") + '" alt="' + esc(b.alt || "") + '"' + dim +
+          ' loading="lazy" decoding="async">' +
+          (b.alt ? "<figcaption>" + esc(b.alt) + "</figcaption>" : "") + "</figure>";
+      /* EPUB 脚注：独立成块，压在所属章末。行内链接会把注脚混进正文，读起来是串味的。 */
+      case "note":
+        return '<aside class="doc-note"' + (b.id ? ' id="' + esc(b.id) + '"' : "") +
+          '><span class="note-mark">注</span><span class="note-txt">' + esc(String(b.text || "")) + "</span></aside>";
       default: return "<p>" + esc(b.x || "") + "</p>";
     }
   }
@@ -1312,7 +1356,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   function blockText(b) {
     var s = "";
     if (typeof b.x === "string") s += b.x;
+    if (typeof b.text === "string") s += b.text;   /* note 块：注脚文字同样进检索与偏移口径 */
     if (b.cap) s += b.cap;
+    if (b.alt) s += b.alt;
     if (b.label) s += b.label;
     if (b.head) s += b.head.join(" ");
     if (b.rows) s += b.rows.map(function (r) { return r.join(" "); }).join(" ");
@@ -1708,6 +1754,13 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     var book = qs("#book");
     var W = book.clientWidth, H = book.clientHeight;
     if (!W || !H) return;
+
+    /* 插图限高 = 这一页真正放正文的高度。用 vh 会算错：天幕带、顶栏、页脚、
+       沉浸模式各吃掉一百多像素，图就会比可用页高出一截，整页撑出一条页内滚动。
+       量具与实况同读 #doc 的内边距（同一套 CSS），所以两边量到的是同一个上限。 */
+    var live = qs("#doc"), lcs = live && getComputedStyle(live);
+    var ipad = (parseFloat(lcs && lcs.paddingTop) || 0) + (parseFloat(lcs && lcs.paddingBottom) || 0);
+    book.style.setProperty("--ink-img-h", Math.max(120, H - ipad) + "px");
 
     var pages, htmls;
     if (read.twoCol) {
@@ -3219,6 +3272,87 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   document.addEventListener("click", function (e) {
     if (!morePop.hidden && !morePop.contains(e.target) && !tMore.contains(e.target)) closeMore();
   });
+
+  /* ---------- 出纸：导出 / 打印（v2.21 §3.8） ----------
+     两条出路共用同一张 print.html —— 版式只有一处定义，导出的文件与打出来的纸不会两个样。
+     出什么纸也不在这里选：纸面视图那张纸自带选择器，也自己记住偏好（inkread.paper.v1）；
+     阅读页只把「是哪一本」递过去，搬运偏好是为了让两个入口落在同一档纸上。 */
+  (function () {
+    var DESK = !!(window.inkread && window.inkread.desktop);
+    var expBtn = qs("#tExport"), printBtn = qs("#tPrint");
+    /* 桌面有 printToPDF，出来的是真 PDF；浏览器 / 局域网手机没有那个引擎，
+       这条出路实际给的是同源附件端点下发的离线 HTML（能离线打开、能直接打印）。
+       文案按能力改写 —— 不拿「导出 PDF」骗人点下去再解释。 */
+    if (!DESK) {
+      qs("#tExport .mi-k").textContent = "存为文件";
+      qs("#expHint").textContent = "离线 HTML · 可打印";
+      expBtn.title = "这台设备没有 PDF 引擎，改为下载可离线打开、可直接打印的 HTML 文件";
+      qs("#printHint").textContent = "打开纸面视图";
+      printBtn.title = "先在纸面视图里核对版式，系统打印面板由那张纸自己的「打印」钮开";
+    }
+    /* 纸型偏好住在纸面视图那个页面的域里，这里只做搬运，不另立一份设置。 */
+    function paperQuery(withBook) {
+      var p = null;
+      try { p = JSON.parse(localStorage.getItem("inkread.paper.v1") || "null"); } catch (e) {}
+      p = (p && typeof p === "object") ? p : {};
+      var sp = new URLSearchParams();
+      if (withBook && doc.bookId) sp.set("book", String(doc.bookId));
+      if (p.paper) sp.set("paper", String(p.paper));
+      if (p.land) sp.set("land", "1");
+      if (p.chap === false) sp.set("chap", "0");
+      return sp.toString();
+    }
+    function busy(on) {
+      expBtn.classList.toggle("is-off", !!on);
+      expBtn.setAttribute("aria-busy", on ? "true" : "false");
+    }
+    expBtn.addEventListener("click", function () {
+      if (expBtn.classList.contains("is-off")) return;
+      if (!DESK) {
+        /* 同源附件（Content-Disposition: attachment）：浏览器自己接管下载，页面不跳走。
+           不用 Blob + a[download] —— 那要先把这个文件整份读进内存，手机上大书会卡住。 */
+        var s = paperQuery(true);
+        var a = document.createElement("a");
+        a.href = "/api/export/" + encodeURIComponent(docId) + ".html" + (s ? "?" + s : "");
+        a.rel = "noopener";
+        document.body.appendChild(a); a.click(); a.remove();
+        toast("已请求下载，浏览器里没有 PDF 引擎", "download");
+        return;
+      }
+      /* 排版要几秒：先把钮按住（连点只会在主进程里排队等同一张纸），并把「正在做」说出来 */
+      busy(true);
+      toast("正在排版《" + (doc.title || "这本书") + "》…", "printer");
+      window.inkread.paper.toPdf({ doc: docId }).then(function (r) {
+        busy(false);
+        if (r && r.ok) {
+          var name = String(r.path || "").split(/[\\/]/).pop();
+          toast("已导出 " + (name || "PDF"), "download");
+        } else if (r && r.busy) {
+          toast(r.error || "已有一个导出在进行，等它结束。", "x");
+        } else if (!r || !r.canceled) {
+          /* 取消是用户自己按的，不吭声；其余都要说清楚为什么没出文件 */
+          toast((r && r.error) || "导出没能完成", "x");
+        }
+      }, function (e) {
+        busy(false);
+        toast("导出没能完成：" + String((e && e.message) || e), "x");
+      });
+    });
+    printBtn.addEventListener("click", function () {
+      if (DESK) {
+        window.inkread.paper.print({ doc: docId }).then(function (r) {
+          if (r && (r.ok || r.canceled)) return;   /* 预览窗开了 / 用户自己关掉了：不吭声 */
+          toast((r && r.error) || "打印没能开始", "x");
+        }, function (e) { toast("打印没能开始：" + String((e && e.message) || e), "x"); });
+        return;
+      }
+      /* 浏览器 / 手机：先看纸面视图，再按那张纸自己的「打印」——
+         直接 window.print() 打的是阅读页那把被分页切过的舞台，纸上会是一片空白。 */
+      var s2 = paperQuery(false);
+      var w = window.open("print.html?doc=" + encodeURIComponent(docId) + (s2 ? "&" + s2 : ""), "_blank");
+      if (!w) toast("浏览器拦住了新窗口：允许弹出窗口后再点一次打印", "x");
+    });
+  })();
 
   /* ---------- v2.14 阅读底栏：六钮转发原有入口（原 id 全保留，只换容器） ---------- */
   function fwd(from, to) {
@@ -4944,12 +5078,18 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 
   /* 空书空态：正文区给出 .empty（icon + 说明 + 回书架），不渲染空书；
      后续渲染 / 分页 / 目录一概跳过（blocks 为 0 时它们没有意义）。 */
-  function renderEmptyDoc() {
+  function renderEmptyDoc(missing) {
     var el = document.createElement("div");
     el.className = "empty";
     el.style.cssText = "margin:16vh auto 0;max-width:440px";
-    el.innerHTML = icon("book", 34) +
-      "<p>这本文档没有提取到正文<br>多为扫描版 / 纯图片页 —— 文字层缺失，暂时读不了</p>" +
+    var none = !!(missing && missing.stored === "none");
+    el.innerHTML = icon(none ? "database" : "book", 34) +
+      "<p>" + (none
+        ? "《" + esc(missing.title || "这本书") + "》的正文没有存进本机<br>" +
+          esc((window.API && API.storedNote) ? API.storedNote(missing.storedWhy) : "本机存储不可用") +
+          " —— 清理旧书腾出空间后，重新导入原文件"
+        : "这本文档没有提取到正文<br>多为扫描版 / 纯图片页 —— 文字层缺失，暂时读不了") +
+      "</p>" +
       '<a class="btn btn-ghost" href="index.html" style="margin-top:12px">回书架</a>';
     var docEl = qs("#doc");
     docEl.className = "doc";
@@ -4961,7 +5101,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 
   /* 书不在书架上了（清空数据 / 换了机器的旧深链）：正文区如实说明，
      不给一册空白书，也不抛异常把整页留在空白。 */
-  function renderNoDoc(wantId) {
+  function renderNoDoc(wantId, note) {
     /* 本页没有可操作的对象，事件也一条都没绑：把用不上的阅读控件收掉，
        只留「顶栏返回 + 空态里的回书架」两条出路（收法见上面 body[data-nodoc] 那段）。 */
     document.body.setAttribute("data-nodoc", "1");
@@ -4969,11 +5109,11 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     el.className = "empty";
     el.style.cssText = "margin:16vh auto 0;max-width:460px";
     el.innerHTML = icon("book-open", 34) +
-      "<p>" + (wantId
+      "<p>" + (note || (wantId
         ? "「" + esc(wantId) + "」已经不在书架上<br>本机数据可能被清空过，或这本书是在别的设备上导入的"
-        : "书架还是空的<br>先在书架导入文档，再来这里读") + "</p>" +
+        : "书架还是空的<br>先在书架导入文档，再来这里读")) + "</p>" +
       '<a class="btn btn-ghost" href="index.html" style="margin-top:12px">回书架' + (wantId ? "" : " · 导入文档") + '</a>';
-    qs("#docTitle").textContent = wantId ? "文档不存在" : "还没有可读的书";
+    qs("#docTitle").textContent = note ? "正文不在本机" : (wantId ? "文档不存在" : "还没有可读的书");
     qs("#docKind").style.display = "none";
     var docEl = qs("#doc");
     docEl.className = "doc";
@@ -5523,6 +5663,16 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       (doc.type === "paper" ? "论文" : doc.type === "plan" ? "计划" : "文学");
     qs("#docKind").className = "chip " + (doc.type === "paper" ? "chip-blue" : doc.type === "plan" ? "chip-accent" : "chip-green");
 
+    /* 正文未落库：顶栏长期挂出这枚状态 —— 这一本现在能读是因为内存里还留着，
+       下一次打开就读不到了，得让用户在还能补救的时候看见。 */
+    if (doc.stored === "none") {
+      var se = qs("#docStored");
+      se.hidden = false;
+      se.innerHTML = icon("database", 13) + "仅本机 · 正文未落库";
+      se.title = (window.API && API.storedNote ? API.storedNote(doc.storedWhy) : "本机存储不可用") +
+        " · 清理旧书腾出空间后，重新导入原文件";
+    }
+
     /* 设置面板先按当前阅读偏好上漆：空书（解析不出正文块）也要显示真实的
        开关状态，不能停在标记未点的默认态 —— 原先这行在空书 return 之后，
        每册空书的「显示批注标记」都与设置不符。 */
@@ -5530,8 +5680,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     paintSettings();
 
     /* 空书空态：导入的 DOCX / PDF 原型解析不了二进制，没有正文块 ——
-       与其渲染一册空白书，不如在正文区明说，并给出回书架的出口。 */
-    if (!blocks.length) { renderEmptyDoc(); return; }
+       与其渲染一册空白书，不如在正文区明说，并给出回书架的出口。
+       正文没落库的书走另一句实话：不是解析不出来，是这台机器存不下。 */
+    if (!blocks.length) { renderEmptyDoc(doc.stored === "none" ? doc : null); return; }
 
     statHeartbeat();     /* v2.7 统计埋点：真的打开了一本书，才开始 5s 阅读时长心跳 */
 
@@ -5590,6 +5741,30 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
         renderPage(0, false);
       });
     }
+
+    /* 少数插图读不出尺寸（无 width/height 的 SVG 等）：它们的高度要等解码才有。
+       先让图加载完，再按字体那套「重测 + 偏移锚回」走一遍，坏图四秒后也不再等。 */
+    (function () {
+      var noDim = blocks.filter(function (b) { return b.type === "img" && !(+b.w > 0 && +b.h > 0) && b.src; });
+      if (!noDim.length) return;
+      var left = noDim.length, fired = false;
+      var settle = function () {
+        if (fired) return;
+        fired = true;
+        if (state.scroll) return;
+        var off = curOffset();
+        paginate();
+        restorePaged(off);
+        if (state.cur >= state.pages.length) state.cur = Math.max(0, state.pages.length - 1);
+        renderPage(0, false);
+      };
+      var one = function () { if (--left <= 0) settle(); };
+      noDim.forEach(function (b) {
+        var im = new Image();
+        im.onload = one; im.onerror = one; im.src = b.src;
+      });
+      setTimeout(settle, 4000);
+    })();
   }
 
   /* ============================================================

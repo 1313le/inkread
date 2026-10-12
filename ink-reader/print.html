@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>墨读 InkRead · 打印视图</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="paper.css">
+<link rel="stylesheet" href="fonts/local.css">
+<!-- 纸面排印样式在 paper.css：与 /api/export 的离线 HTML 同一份，两处不会各自漂移。
+     它必须排在下面两条之前：@page 的默认值在 paper.css 里，纸型由 #pageSize 覆盖，
+     顺序反了 A5 / 横版就会被 paper.css 按回 A4。 -->
+<!-- 纸型与页边：Chromium 130 的 printToPDF 只认 CSS 给的 @page（实测 preferCSSPageSize 生效，
+     margins:{marginType:"custom"} 抛错、landscape:true 不改 MediaBox），所以这两行由脚本按
+     查询参数重写，主进程一律 preferCSSPageSize:true。 -->
+<style id="pageSize">@page { size: A4 portrait; margin: 20mm 18mm; }
+:root { --p-imgh: 180mm; }</style>
+<style>
+/* 本页外壳：屏幕上的工具条与空态。纸面排印不在这里（见 paper.css） */
+.bar {
+  max-width: 170mm; margin: 0 auto; padding: 10px 6mm; display: flex; align-items: center;
+  gap: 10px; flex-wrap: wrap; font-family: "InkRead Sans", system-ui, sans-serif;
+  font-size: 12.5px; color: #4a453d; border-bottom: 1px solid #e2ddd2;
+}
+.bar .bar-t { font-weight: 600; letter-spacing: .04em; }
+.bar .bar-hint { color: #6b6459; flex: 1; min-width: 0; }
+.bar button, .bar a.btn {
+  font: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  min-height: 34px; padding: 0 12px; border: 1px solid #cbc4b6; border-radius: 6px;
+  background: #faf8f3; color: #2b2721; text-decoration: none;
+}
+.bar button:hover, .bar a.btn:hover { border-color: #b3382c; color: #8f2d24; }
+.bar button svg, .bar a.btn svg { flex: none; }
+/* 出纸规格用原生控件：select 与 checkbox 在各平台都有现开的选择器和键盘语义，
+   自绘一份只是把系统的可用性换成一套要自己维护的假样子。 */
+.bar-ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ctl { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #4a453d; }
+.ctl select {
+  font: inherit; color: #2b2721; background: #faf8f3; border: 1px solid #cbc4b6;
+  border-radius: 6px; min-height: 34px; padding: 0 6px 0 8px; cursor: pointer;
+}
+.ctl select:hover { border-color: #b3382c; }
+.ctl input[type="checkbox"] { width: 15px; height: 15px; margin: 0; cursor: pointer; accent-color: #b3382c; }
+.ctl select:focus-visible, .ctl input:focus-visible, .bar button:focus-visible {
+  outline: 2px solid #b3382c; outline-offset: 2px;
+}
+/* 触屏热区：纸面视图也可能从手机上「打印」调出 */
+@media (pointer: coarse) {
+  .bar { padding: 12px 4mm; gap: 8px; }
+  .bar button, .bar a.btn { min-height: 44px; min-width: 44px; padding: 0 14px; }
+  .bar-ctl { gap: 8px; }
+  .ctl select { min-height: 44px; min-width: 44px; }
+  /* 勾选的整块文字都要按得动 —— 15px 的方框在手指下是误触源 */
+  .ctl { min-height: 44px; }
+  .ctl input[type="checkbox"] { width: 20px; height: 20px; }
+}
+.blank { max-width: 170mm; margin: 14mm auto; padding: 0 6mm; font-family: "InkRead Sans", system-ui, sans-serif; }
+.blank h2 { font-size: 14pt; margin: 0 0 .5em; }
+.blank p { font-size: 11pt; color: #4a453d; margin: 0 0 1.2em; text-align: left; }
+.blank a { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px;
+           border: 1px solid #cbc4b6; border-radius: 6px; text-decoration: none; color: #2b2721; }
+</style>
+
+</head>
+<body class="paper" data-doc="">
+
+<div class="bar no-print" role="toolbar" aria-label="纸面视图工具">
+  <span class="bar-t">纸面视图</span>
+  <span class="bar-hint" id="barHint">排版 11.5pt · 行高 1.85</span>
+  <!-- 出纸规格：纸型/横版/章首分页在这里改，改一次就重算 @page 并重排正文。
+       这里是出纸规格的唯一权威入口 —— 阅读页的「导出 PDF」不另设一份选择器，
+       两处各选各的会让同一个键出现两个版本。 -->
+  <div class="bar-ctl" id="paperCtl">
+    <label class="ctl ctl-sel">纸张
+      <select id="selPaper" aria-label="纸张尺寸">
+        <option value="A4">A4</option>
+        <option value="A5">A5</option>
+        <option value="B5">B5</option>
+        <option value="Letter">Letter</option>
+        <option value="Legal">Legal</option>
+      </select>
+    </label>
+    <label class="ctl ctl-chk"><input type="checkbox" id="ckLand">横版</label>
+    <label class="ctl ctl-chk"><input type="checkbox" id="ckChap">章首分页</label>
+  </div>
+  <button type="button" id="btnPrint" aria-label="打开系统打印面板">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+      <path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><path d="M7 16h10v4H7z"/>
+    </svg>打印
+  </button>
+  <a class="btn" href="index.html">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+      <path d="M15 6l-6 6 6 6"/>
+    </svg>返回书架
+  </a>
+</div>
+
+<main class="sheet" id="sheet">
+  <header class="p-head" id="head">
+    <h1 class="p-title" id="bkTitle"></h1>
+    <div class="byline" id="byline"></div>
+  </header>
+  <article id="doc"></article>
+</main>
+
+<section class="blank no-print" id="blank" hidden>
+  <h2 id="blankTitle">没有可打印的正文</h2>
+  <p id="blankWhy"></p>
+  <a class="btn" href="index.html">回书架重新导入</a>
+</section>
+
+<script src="mock.js"></script>
+<script src="md.js"></script>
+<script src="api.js"></script>
+<script src="paper-spec.js"></script>
+<script>
+/* 只挂四个脚本：不引 app.js（同步定时器、导航、图标库都不该出现在纸上），
+   书架条目直接读 inkread.shelf.v1 —— 与 InkStore 同一个键，不是第二套存储。 */
+(function () {
+  var q = new URLSearchParams(location.search);
+  var docId = q.get("doc") || "";
+  /* 出纸规格的三级来源，从前往后：
+       ① 查询参数 —— 阅读页与主进程点名了这一版要什么纸（printUrl 只在调用方真点了名时才写这三个键）；
+       ② 本机记住的偏好 —— 直接在地址栏打开这张纸（手机浏览器、另一台设备）时跟着上次的选择走；
+       ③ A4 竖版、章首另起一页。
+     工具条上每改一次就写回 ②：出什么纸跟着人走，而不是每次回到 A4。
+     纸型尺寸与 @page 算法在 paper-spec.js —— 与 /api/export 同一份，两处不会各排各的。 */
+  var SPEC = window.PaperSpec;
+  var PREF_KEY = "inkread.paper.v1";
+  function stored() {
+    var o = null;
+    try { o = JSON.parse(localStorage.getItem(PREF_KEY) || "null"); } catch (e) {}
+    return (o && typeof o === "object") ? o : {};
+  }
+  var st0 = stored();
+  var paper = String(q.get("paper") || st0.paper || "A4").toUpperCase();
+  var land = q.has("land") ? q.get("land") === "1" : st0.land === true;
+  var chap = q.has("chap") ? q.get("chap") !== "0" : st0.chap !== false;
+  var elCtl = document.getElementById("paperCtl");
+  var elPaper = document.getElementById("selPaper");
+  var elLand = document.getElementById("ckLand");
+  var elChap = document.getElementById("ckChap");
+  var elHint = document.getElementById("barHint");
+  /* 排布结果只算一次，改纸型时不必重读正文；done 表示「有正文可排」，
+     没正文时工具条讲的是空态实话，不能被纸型读数盖掉。 */
+  var laid = { done: false, blocks: 0, chars: 0, words: 0 };
+  var fixed = null;
+  var cur = SPEC.spec({ paper: paper, land: land });
+
+  function applySpec() {
+    cur = SPEC.spec({ paper: paper, land: land });
+    document.getElementById("pageSize").textContent = cur.css +
+      "\n@media screen { .bar { max-width: " + cur.view + "mm; } }";
+    document.body.dataset.paper = cur.paper + (cur.land ? "-landscape" : "-portrait");
+    document.body.dataset.chap = chap ? "1" : "0";
+    /* 回显：查询参数带进来的规格也要摆在选择器上，否则「纸上的」和「选着的」是两个权威。
+       认不出的纸型（?paper=JISB5）由 PaperSpec 退到 A4，选择器跟着显示 A4 —— 不骗人。 */
+    elPaper.value = cur.paper;
+    elLand.checked = cur.land;
+    elChap.checked = chap;
+    if (laid.done) {
+      elHint.textContent = cur.paper + (cur.land ? " 横版" : "") + " · " + laid.blocks + " 块 · " +
+        (laid.words || laid.chars).toLocaleString("zh-CN") + " 字";
+    }
+  }
+  function saveSpec() {
+    try {
+      localStorage.setItem(PREF_KEY, JSON.stringify({ paper: cur.paper, land: cur.land, chap: chap }));
+    } catch (e) {}
+  }
+  /* 章首分页改的是块的排法，不是页框 —— 只重排正文，纸型与横版不必走这条路 */
+  function repaint() {
+    if (!fixed) return;
+    document.getElementById("doc").innerHTML = MD.blocksHtml(fixed, { chapterBreak: chap });
+    applySpec();
+  }
+  /* 写回偏好必须在重算之后：saveSpec 落的是 cur（规范化后的规格），
+     先存后算会把上一档纸型存进去（选 B5 先落 A4，选两次才对）—— E9 入口闸抓到过这一手。 */
+  elPaper.addEventListener("change", function () { paper = elPaper.value; applySpec(); saveSpec(); });
+  elLand.addEventListener("change", function () { land = elLand.checked; applySpec(); saveSpec(); });
+  elChap.addEventListener("change", function () { chap = elChap.checked; repaint(); saveSpec(); });
+  applySpec();
+
+  /* 找书只认「这一本」：?doc= 点名了却没点到，宁可出空状态，也不能退到书架第一本 ——
+     纸上印错书比印不出更糟，标题、文件名、页脚会跟着一起错。
+     演示书架只在「本机没书架数据 + 没清空哨兵」时并入（与 app.js getShelf 的首次播种同规则）；
+     哨兵在这里直接读键：本页故意不引 app.js，纸上不该有同步定时器。 */
+  function docOf(id) {
+    var cleared = false;
+    try { cleared = localStorage.getItem("inkread-cleared.v1") === "1"; } catch (e) {}
+    var shelf = null;
+    try { shelf = JSON.parse(localStorage.getItem("inkread.shelf.v1") || "null"); } catch (e) {}
+    /* 播种条件与 getShelf 对齐：读不到数组（键缺失或已损坏）且没清空哨兵才用演示书架。
+       「键在但为空」是真删过书，不是没数据 —— 那种情况下纸上也不该冒出演示书。 */
+    if (!Array.isArray(shelf)) {
+      shelf = (!cleared && window.DB && Array.isArray(DB.shelf)) ? DB.shelf : [];
+    }
+    if (id) return shelf.filter(function (d) { return d && d.id === id; })[0] || null;
+    return shelf[0] || null;
+  }
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  /* 与 app.js getDocEdits 同一份数据、同一条规则：只盖字符串块的文字，索引一个不动 */
+  function applyEdits(list) {
+    var all = null;
+    try { all = JSON.parse(localStorage.getItem("inkread.docs.edit.v1") || "{}"); } catch (e) {}
+    var ed = all && all[docId];
+    if (!ed || typeof ed !== "object") return list;
+    return list.map(function (b, i) {
+      var v = ed[i];
+      return (v != null && typeof b.x === "string") ? Object.assign({}, b, { x: v }) : b;
+    });
+  }
+
+  var blanked = false;
+  function blank(title, why) {
+    blanked = true;
+    document.getElementById("sheet").hidden = true;
+    /* 旗子给主进程看：没有正文的纸印出来是一页空白（空态本身是 .no-print，打印时不上纸），
+       所以「导出 PDF」必须在出文件之前就停住，而不是生成一个同名空壳骗用户说导出成功了。 */
+    document.body.dataset.blank = "1";
+    /* 没有正文可排，纸型、章首分页、打印都是空谈：把死控件收掉，别留一排按了没反应的钮 */
+    elCtl.hidden = true;
+    document.getElementById("btnPrint").hidden = true;
+    document.getElementById("barHint").textContent = "没有正文可排";
+    document.getElementById("blankTitle").textContent = title;
+    document.getElementById("blankWhy").textContent = why;
+    document.getElementById("blank").hidden = false;
+    ready();
+  }
+
+  /* 就绪信号：主进程在隐藏窗口里等 body[data-ready]，等到才 printToPDF。
+     图片也要等（EPUB 插图没落地就印 = 白纸上一块空框），但坏图不能把导出挂死，
+     所以整段封顶 5 秒：到点照样放行，缺的图由浏览器按 alt 出文字。 */
+  function ready() {
+    var f = (document.fonts && document.fonts.ready) || Promise.resolve();
+    var imgs = Array.prototype.slice.call(document.images || []);
+    var wait = Promise.all(imgs.map(function (im) {
+      if (im.complete) return Promise.resolve();
+      return new Promise(function (r) {
+        im.addEventListener("load", r, { once: true });
+        im.addEventListener("error", r, { once: true });
+      });
+    }));
+    Promise.all([f, wait]).then(fin, fin);
+    var done = false;
+    function fin() { if (done) return; done = true; document.body.dataset.ready = "1"; }
+    setTimeout(fin, 5000);
+  }
+
+  document.getElementById("btnPrint").addEventListener("click", function () { window.print(); });
+
+  var doc = docOf(docId);
+  if (!doc) {
+    document.getElementById("bkTitle").textContent = "未命名";
+    blank("没有可打印的书", "本机书架里没有这个条目（?doc=" + (docId || "空") + "）。回到书架打开这本书，再从「更多 → 打印」进来。");
+    return;
+  }
+  docId = doc.id;
+  document.body.dataset.doc = docId;
+  /* 字数只有一个来源：书架算出来的 doc.words。工具条与副题若各算各的，
+     同一张纸上就会出现「525 字 / 420 字」两个数 —— 读者只会认为其中一个在撒谎。 */
+  function words() { var n = +doc.words; return n > 0 ? n : 0; }
+  function setHead(title) {
+    document.title = title + " · 墨读导出";
+    document.getElementById("bkTitle").textContent = title;
+    var by = [doc.author && doc.author !== "本地导入" ? doc.author : "",
+              words() ? words().toLocaleString("zh-CN") + " 字" : "",
+              "墨读 InkRead 导出 · " + new Date().toLocaleDateString("zh-CN")].filter(Boolean);
+    document.getElementById("byline").textContent = by.join("　·　");
+  }
+  setHead(doc.title || "未命名");
+
+  (async function () {
+    var blocks = null, why = "";
+    try {
+      if (doc.src === "disk" && window.API && API.diskContent) await API.diskContent(doc);
+    } catch (e) { why = String((e && e.message) || "书仓读取失败"); }
+    if (window.API && API.localContent) {
+      var c = API.localContent(docId);
+      if (c && c.length) blocks = c;
+    }
+    if (!blocks && window.DB && DB.contents && DB.contents[docId]) blocks = DB.contents[docId];
+    if (!blocks || !blocks.length) {
+      if (doc.stored === "none") {
+        blank("正文没有存进本机", "《" + (doc.title || "这本书") + "》的正文当初就没写进本机存储：" +
+          (window.API ? API.storedNote(doc.storedWhy || "") : "本机存储空间已满") +
+          "。腾出空间后重新导入原文件，才能打印或导出 PDF。");
+      } else {
+        blank("取不到这本书的正文", why || "本机既没有落库正文，书仓里也没有这本书（可能是在别的设备上导入的）。在本机重新导入原文件后再导出。");
+      }
+      return;
+    }
+    /* 解锁改过的正文必须跟着上纸：阅读页把 inkread.docs.edit.v1 按块序号盖在副本上，
+       这里不盖就会出现「屏幕上读的是改过的、纸上印的是原文」—— 同一本书两个版本。
+       盖的顺序也与阅读页一致（先盖改动、再重组表格），否则两处索引口径会分叉。 */
+    blocks = applyEdits(blocks);
+    fixed = window.MD && MD.fixTables ? MD.fixTables(blocks) : blocks;
+    /* 正文自带的一级标题就是这本书的书名：导入的 md/txt 在书架上顶多是文件名，
+       拿它当标题页会把「e7-rich / 纸面视图用例」两个标题叠在第一页上。
+       首个块是 h1 就把它提上去，正文里不再重复印一遍。 */
+    if (fixed.length && fixed[0] && fixed[0].type === "h1") {
+      var own = window.MD && MD.plain ? MD.plain(String(fixed[0].x || "")).trim() : "";
+      if (own) { fixed = fixed.slice(1); setHead(own); }
+    }
+    var chars = 0;
+    fixed.forEach(function (b) { chars += String((b && (b.x || b.text)) || "").length; });
+    document.getElementById("doc").innerHTML = MD.blocksHtml(fixed, { chapterBreak: chap });
+    laid = { done: true, blocks: fixed.length, chars: chars, words: words() };
+    applySpec();
+    document.body.dataset.blocks = String(fixed.length);
+    document.body.dataset.chars = String(chars);
+    ready();
+  })();
+})();
+</script>
+</body>
+</html>

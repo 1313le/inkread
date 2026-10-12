@@ -1,0 +1,117 @@
+/* ============================================================
+   paper.css · 一张纸的排法（v2.21 E7/E9）
+   —— 两个消费者共用这一份：print.html（纸面视图 / PDF 管线）与
+      /api/export/<id>.html（浏览器与手机「存成文件」的离线 HTML）。
+      导出侧把本文件整段内联进产物，所以这里不许出现只服务于
+      纸面视图外壳的规则（工具条 .bar、空态 .blank 留在 print.html 内联）。
+   —— 阅读 DOM 是被分页机切过的舞台（#doc 只装当前页），拍平它只会把正文裁光
+      —— 实测原样 printToPDF 出的是 0 字体 0 文本的白纸。故导出必须走这张纸：
+      全部块一次性流式排布，全局无 fixed/absolute，页边只由 @page 给。
+   ============================================================ */
+
+/* 纸型默认值：print.html 用后挂的 <style id="pageSize"> 按查询参数覆盖它 */
+@page { size: A4 portrait; margin: 20mm 18mm; }
+
+html, body { margin: 0; padding: 0; background: #fff; }
+body {
+  font-family: "InkRead Serif", "Noto Serif SC", "Songti SC", serif;
+  font-size: 11.5pt; line-height: 1.85; color: #1c1a17;
+  max-width: 170mm; margin: 0 auto; padding: 0 6mm;
+  orphans: 2; widows: 2;
+}
+.sheet { padding: 10mm 0 14mm; }
+
+.p-title { font-size: 21pt; line-height: 1.35; font-weight: 700; margin: 0; letter-spacing: .01em; }
+.byline {
+  font-family: "InkRead Sans", system-ui, sans-serif; font-size: 9.5pt; color: #5f5950;
+  margin: .5em 0 2.2em; padding-bottom: .8em; border-bottom: 1px solid #d8d2c6;
+}
+.p-head { break-after: avoid; }
+
+.p-h1 { font-size: 18pt; line-height: 1.45; font-weight: 700; margin: 1.4em 0 .5em; break-after: avoid; }
+.p-h2 { font-size: 14pt; line-height: 1.5; font-weight: 700; margin: 1.7em 0 .6em; break-after: avoid; }
+.p-h2.p-chap { break-before: page; margin-top: 0; }
+.p-h3 { font-size: 12pt; font-weight: 600; margin: 1.3em 0 .45em; break-after: avoid; }
+p { margin: 0 0 .85em; text-align: justify; orphans: 2; widows: 2; }
+.p-meta {
+  font-family: "InkRead Sans", system-ui, sans-serif; font-size: 9pt; color: #5f5950;
+  letter-spacing: .06em; margin: 0 0 1.4em;
+}
+blockquote {
+  margin: 1.1em 0; padding: .1em 0 .1em 1em; border-left: 3px solid #b3382c;
+  color: #3d3830; break-inside: avoid;
+}
+.p-list { margin: 0 0 .9em; padding-left: 1.6em; }
+.p-list li { margin: 0 0 .3em; break-inside: avoid; }
+.p-task { list-style: none; margin-left: -1.35em; }
+/* 方框描边、勾用 U+2713：☐ 这类整字符在中文字体里常有缺字，纸上会印成豆腐块 */
+.p-box { display: inline-block; width: .82em; height: .82em; border: 1.2pt solid #4a453d;
+         border-radius: 2px; margin-right: .42em; vertical-align: -.06em; position: relative; }
+.p-task.on .p-box { border-color: #1c1a17; }
+.p-task.on .p-box::after { content: "✓"; position: absolute; left: 0; right: 0; top: -.08em;
+                           text-align: center; font-size: .82em; line-height: 1; color: #1c1a17; }
+.p-taskref { list-style: none; margin-left: -1.2em; }
+.md-tablebox { margin: 1.1em 0; break-inside: avoid; }
+table { width: 100%; border-collapse: collapse; font-size: 10pt; line-height: 1.6; }
+th, td { border: 1px solid #c9c2b4; padding: .45em .6em; text-align: left; vertical-align: top; }
+th { background: #f2eee5; font-family: "InkRead Sans", system-ui, sans-serif; font-weight: 500; }
+td.al-right, th.al-right { text-align: right; }
+td.al-center, th.al-center { text-align: center; }
+.p-code { margin: 1.1em 0; break-inside: avoid; background: #f6f3ec; border: 1px solid #e4dfd3;
+          border-radius: 3px; padding: .7em .9em; }
+.p-code pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
+.p-code code, .p-code pre { font-family: "InkRead Mono", "Cascadia Mono", Consolas, monospace; font-size: 9.5pt; line-height: 1.6; }
+.p-math { margin: 1.1em 0; text-align: center; break-inside: avoid; font-size: 11pt; }
+.p-abs, .p-kw, .p-refs {
+  font-size: 10.5pt; margin: 1em 0; padding: .7em .9em; background: #faf8f3;
+  border: 1px solid #e4dfd3; break-inside: avoid;
+}
+.p-fig { margin: 1.2em 0; break-inside: avoid; }
+.p-figph {
+  height: 34mm; border: 1px dashed #cbc4b6; color: #6b6459; background: #faf8f3;
+  display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 8px;
+  font-family: "InkRead Sans", system-ui, sans-serif; font-size: 9.5pt;
+}
+.p-img { margin: 1.2em 0; break-inside: avoid; text-align: center; }
+.p-img img, .p-fig img { max-width: 100%; max-height: var(--p-imgh, 180mm); height: auto; }
+.p-img figcaption, .p-fig figcaption, .p-fignote {
+  font-family: "InkRead Sans", system-ui, sans-serif; font-size: 9pt; color: #5f5950;
+  margin: .45em 0 0; text-align: center;
+}
+.p-note {
+  font-size: 9.5pt; color: #3d3830; margin: .8em 0 1.4em; padding-left: .7em;
+  border-left: 2px solid #d8d2c6; break-inside: avoid;
+}
+.p-notemark { font-family: "InkRead Sans", system-ui, sans-serif; color: #8f2d24; margin-right: .4em; }
+a { color: #2b2721; text-decoration: underline; }
+/* ---- md.js 在引用块内层与行内还会吐出一批屏幕类名，纸面一律给对应排法 ----
+   重点是两件事：① 复制钮、行号、代码条这些「屏幕件」不许上纸；
+   ② 高亮不能只靠底色 —— 主进程默认不带背景打印（省墨），底色会被丢掉，
+      所以 mark 同时给一条下划线，纸面上「这处被标过」仍然看得见。 */
+mark.mk { background: #f6e58b; border-bottom: 2px solid #b8912f; padding: 0 .1em; }
+del { color: #5f5950; }
+strong { font-weight: 700; }
+p code, li code, td code, th code, blockquote code, h1 code, h2 code, h3 code {
+  font-family: "InkRead Mono", "Cascadia Mono", Consolas, monospace; font-size: 9.5pt;
+  background: #f2eee5; padding: .05em .25em; border-radius: 2px;
+}
+.md-code .md-copy, .md-code-bar, .md-gut { display: none !important; }
+.md-code { background: #f6f3ec; border: 1px solid #e4dfd3; border-radius: 3px; padding: .7em .9em;
+           margin: 1.1em 0; break-inside: avoid; }
+.md-code pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
+.md-code pre code { font-family: "InkRead Mono", "Cascadia Mono", Consolas, monospace; font-size: 9.5pt;
+                    background: none; padding: 0; }
+.md-box { display: inline-block; width: 1em; margin-right: .35em; }
+.md-img { max-width: 100%; height: auto; display: block; margin: 1em auto; }
+hr.md-hr { border: 0; border-top: 1px solid #cbc4b6; margin: 1.6em 0; }
+.md-fns { font-size: 9.5pt; color: #3d3830; margin-top: 1.4em; padding-top: .6em; border-top: 1px solid #e4dfd3; }
+.md-fns-t { font-family: "InkRead Sans", system-ui, sans-serif; font-weight: 600; }
+sup.fnref a, a.md-fnback { text-decoration: none; color: #8f2d24; }
+
+@media print {
+  .no-print { display: none !important; }
+  .sheet { padding: 0; }
+  body { max-width: none; padding: 0; }
+  /* 外链把地址印在纸上：读者拿不到能点的 PDF 链接 */
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 8.5pt; color: #5f5950; word-break: break-all; }
+}

@@ -501,19 +501,39 @@
      ------------------------------------------------------------ */
   var K_CONTENTS = "inkread.contents.v1";
   var K_TASKS = "inkread.tasks.v1";
-
+  /* 写不进去只可能是两种实情：配额满了，或这台设备根本不让写（无痕模式 / 站点数据被禁）。
+     旧版把 setItem 包在 catch (e) {} 里 —— 撞墙也当没事，用户以为书存住了，
+     下次开书是一片空白。现在一律把原因如实报给调用方，由界面说清楚。 */
+  var memContents = {};              /* 落库失败的正文留本轮会话引用，不把对象直接丢掉 */
+  var LS_CEIL = 8 * 1024 * 1024;     /* 预检上限：整库序列化超过它就不做无用功（真配额各浏览器更低，由 catch 兜） */
+  function lsWrite(key, str) {
+    try { localStorage.setItem(key, str); return ""; }
+    catch (e) {
+      var name = String((e && e.name) || "");
+      var code = e && e.code;
+      if (/^QuotaExceeded|^NS_ERROR_DOM_QUOTA/.test(name) || code === 22 || code === 1014) return "quota";
+      /* 不认识的异常：探一个跟业务无关的键位 —— 探针写得进就是体积问题，写不进就是禁写 */
+      try { localStorage.setItem("lsprobe.v0", "1"); localStorage.removeItem("lsprobe.v0"); return "quota"; }
+      catch (e2) { return "blocked"; }
+    }
+  }
   function contentsGet() {
     try {
       var v = JSON.parse(localStorage.getItem(K_CONTENTS));
       return v && typeof v === "object" ? v : {};
     } catch (e) { return {}; }
   }
+  /* 返回 {ok, why, bytes}：ok=false 时 blocks 已转存 memContents，
+     调用方（importDoc）据此在书架条目上打 stored:"none"。 */
   function contentsSet(docId, blocks) {
+    var adding = Array.isArray(blocks) && blocks.length > 0;
     var all = contentsGet();
-    if (Array.isArray(blocks) && blocks.length) all[docId] = blocks;
-    else delete all[docId];
-    try { localStorage.setItem(K_CONTENTS, JSON.stringify(all)); } catch (e) {}
-    return all[docId] || [];
+    if (adding) all[docId] = blocks; else delete all[docId];
+    var str = JSON.stringify(all);
+    var why = str.length > LS_CEIL ? "quota" : lsWrite(K_CONTENTS, str);
+    if (why) { if (adding) memContents[docId] = blocks; return { ok: false, why: why, bytes: str.length }; }
+    delete memContents[docId];
+    return { ok: true, why: "", bytes: str.length };
   }
   function taskStoreGet() {
     try {
@@ -522,7 +542,9 @@
     } catch (e) { return {}; }
   }
   function taskStoreSet(all) {
-    try { localStorage.setItem(K_TASKS, JSON.stringify(all || {})); } catch (e) {}
+    var str = JSON.stringify(all || {});
+    if (str.length > LS_CEIL) return false;
+    return lsWrite(K_TASKS, str) === "";
   }
   /* mock 任务 + 本机覆盖 / 导入任务的合并视图。
      一律返回副本：覆盖只改副本的 assignee，导入任务按 mock 同款字段补齐，
@@ -679,6 +701,7 @@
     if (fmt === "docx") return { kind: "book", reason: "Word 文档默认按书籍归类", by: "rule" };
     if (fmt === "pdf") return { kind: "paper", reason: "PDF 文档默认按论文归类", by: "rule" };
     if (fmt === "image") return { kind: "comic", reason: "图片文件默认按漫画 / 图册归类", by: "rule" };
+    if (fmt === "epub") return { kind: "book", reason: "EPUB 是成书格式，按书籍归类", by: "rule" };
     var n = name.toLowerCase();
     if (/\.pdf$/.test(n)) return { kind: "paper", reason: "PDF 文档默认按论文归类", by: "rule" };
     if (/\.(png|jpe?g|webp|gif|bmp|avif)$/.test(n)) return { kind: "comic", reason: "图片文件默认按漫画 / 图册归类", by: "rule" };
@@ -1009,12 +1032,48 @@
     });
   } catch (e) {}
 
+  /* 书仓正文的内存缓存（v2.21 E5）：EPUB 整本落在 userData/ebooks，
+     绝不进 localStorage（4MB 快照墙装不下一本书）。阅读页要的是「同步取块」，
+     所以开书前先 await diskContent 预取进这里，localContent 命中即返回。
+     键用书架条目 id —— 同一本书分两次导入是两个条目、同一个 bookId，
+     各存一份引用即可，页面生命周期内不会泄漏。 */
+  var diskCache = {};
+  async function diskFetch(doc) {
+    var id = doc && doc.bookId;
+    if (!id) throw new Error("条目没有书仓编号");
+    var r = await fetch("/api/book/" + encodeURIComponent(id));
+    if (r.status === 404) throw new Error("本机书仓里没有这本书（可能是在别的设备上导入的）");
+    if (!r.ok) throw new Error("书仓读取失败（HTTP " + r.status + "）");
+    var blocks = await r.json();
+    if (!Array.isArray(blocks) || !blocks.length) throw new Error("书仓里的正文是空的");
+    diskCache[doc.id] = blocks;
+    return blocks;
+  }
+
   window.API = {
     /* 同步读取导入文档的本机正文块（阅读页打开即用，不该等桩层延迟）。
        拿不到返回 null，由调用方回退 DB.contents。 */
     localContent(docId) {
-      var local = contentsGet()[docId];
+      /* 落库成功读库；失败的书在本轮会话里仍可从 memContents 读到 ——
+         跨页面（导入页 → 阅读页）就没了，那由阅读页按 stored:"none" 如实说明。 */
+      var local = diskCache[docId] || memContents[docId] || contentsGet()[docId];
       return (Array.isArray(local) && local.length) ? local : null;
+    },
+
+    /* 落库失败的原因说人话：书架徽标的悬浮说明、阅读页空态、导入提示共用一份措辞，
+       免得三个地方三种说法。 */
+    storedNote(why) {
+      return why === "blocked" ? "本机不允许保存数据（无痕模式或站点数据被禁用）"
+        : why === "shelf" ? "书架没能写入本机存储"
+        : "本机存储空间已满";
+    },
+
+    /* 书仓书（EPUB）：开书前把正文取进内存，之后 localContent 同步可读。
+       失败如实抛出，由阅读页给出「回书架重新导入」的出口，不假装是一本空书。 */
+    async diskContent(doc) {
+      if (!doc || doc.src !== "disk" || !doc.bookId) return null;
+      if (diskCache[doc.id]) return diskCache[doc.id];
+      return diskFetch(doc);
     },
 
     /* 同步读取合并后的任务清单（任务页首屏用） */
@@ -1154,11 +1213,12 @@
         ["#e7e0cb", "#9e3b2b"], ["#dfe5dc", "#5d6b54"], ["#e3dccb", "#6b5a33"], ["#dde2e6", "#4a6472"]
       ];
       var words = Math.max(0, Number(o.words) || 0);
+      var disk = o.src === "disk";     /* 书仓书：正文与插图落在本机 ebooks，条目只留指针 */
       var entry = {
         id: "imp-" + Date.now().toString(36),
         type: kind, theme: themeMap[kind] || "novel",
         title: o.title || o.fileName || "未命名导入文档",
-        author: "本地导入", meta: "刚导入" + (o.group ? " · " + o.group : ""),
+        author: (disk && o.author) || "本地导入", meta: "刚导入" + (o.group ? " · " + o.group : ""),
         tone: tones[Math.floor(Math.random() * tones.length)],
         motif: motifMap[kind] || "seal",
         progress: 0,
@@ -1168,8 +1228,37 @@
         group: o.group || "",
         desc: o.fileName ? "导入文件：" + o.fileName : "本地导入文档。"
       };
+      /* 封面用服务端探明的那张图（/e/<id>/assets/…），不压成 dataURL 挤进 localStorage；
+         书仓端点随书落盘，离线也在。没有封面时 coverImg 留空 → 书架回退平涂纹样。 */
+      if (disk) {
+        entry.src = "disk";
+        entry.bookId = o.bookId || "";
+        entry.coverImg = o.cover || "";
+        entry.lang = o.lang || "";
+        entry.chapters = Number(o.chapters) || 0;
+        entry.desc = "EPUB 藏书" + (o.fileName ? " · 原文件 " + o.fileName : "") +
+          " · 正文与插图存在本机书仓，不占浏览器快照空间";
+      }
+      /* 正文落库赶在写书架之前：stored 是条目上的字段，晚一步就得再改一次库。
+         写不进去不再假装成功 —— 条目留在书架并打 stored:"none"，界面显示
+         「仅本机 · 正文未落库」，而不是让用户下次开书撞上一片空白。 */
+      var readable = disk ? !!entry.bookId : (Array.isArray(o.blocks) && o.blocks.length > 0);
+      var cSt = null;
+      if (readable && !disk) {
+        cSt = contentsSet(entry.id, o.blocks);
+        entry.stored = cSt.ok ? "local" : "none";
+        if (!cSt.ok) entry.storedWhy = cSt.why;
+      } else if (disk) {
+        entry.stored = "disk";      /* 正文在本机书仓，不占快照空间 */
+      }
       if (window.InkStore) {
         InkStore.setShelf([entry].concat(InkStore.getShelf()));
+        /* 书架这一键也可能撞同一堵墙：写完回读一次，库里查不到这条
+           就说明它只活在当前页面 —— 与其骗用户「已导入」，不如标成未落库让他看得见。 */
+        if (entry.stored !== "none" && !InkStore.getDoc(entry.id)) {
+          entry.stored = "none";
+          entry.storedWhy = "shelf";
+        }
       } else {
         DB.shelf.unshift(entry);
       }
@@ -1177,12 +1266,9 @@
          用户改过推荐也照存（按最终选的类别沉淀），下次同类命名优先按映射推荐。 */
       kindmapLearn(o.fileName || entry.title, kind);
 
-      var readable = Array.isArray(o.blocks) && o.blocks.length > 0;
-      if (readable) contentsSet(entry.id, o.blocks);
-
       /* 确认导入的任务：逐条落 inkread.tasks.v1（形状与 mock DB.tasks 对齐，缺省字段留空）。
          解析期 id（t-1、t-2…）只在弹窗内用 —— 落库时换成全局唯一 id，多次导入互不覆盖。 */
-      var nTasks = 0;
+      var nTasks = 0, tasksStored = true;
       if (Array.isArray(o.tasks)) {
         var all = taskStoreGet();
         o.tasks.forEach(function (t) {
@@ -1198,9 +1284,15 @@
             at: new Date().toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
           };
         });
-        taskStoreSet(all);
+        if (nTasks) tasksStored = taskStoreSet(all);
       }
-      return { code: 0, data: { docId: entry.id, tasks: nTasks, readable: readable } };
+      return {
+        code: 0,
+        data: {
+          docId: entry.id, tasks: nTasks, tasksStored: tasksStored,
+          readable: readable, stored: entry.stored || "", storedWhy: entry.storedWhy || ""
+        }
+      };
     },
 
     /* 主脑对话不在这里 —— 走 brain.js 的 Brain.ask()：

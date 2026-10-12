@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.20.1";
+window.InkVersion = "2.21.0";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -222,7 +222,25 @@ window.InkStore = {
   removeDocs(ids) {
     var set = {};
     ids.forEach(function (i) { set[i] = 1; });
-    return this.setShelf(this.getShelf().filter(function (d) { return !set[d.id]; }));
+    var all = this.getShelf();
+    var gone = all.filter(function (d) { return set[d.id]; });
+    var rest = all.filter(function (d) { return !set[d.id]; });
+    this.setShelf(rest);
+    this.releaseBookRepo(gone, rest);
+    return rest;
+  },
+  /* 书仓回收（v2.21 E5）：EPUB 的正文与插图落在本机 ebooks 目录，localStorage 里只留指针。
+     删书 / 清空数据时不回收，用户看到「已清空」而磁盘上仍压着几十 MB。
+     同一本书可以导入两次（两个条目、同一个 bookId）：还有条目引用的那本不能删。 */
+  releaseBookRepo(gone, keep) {
+    if (location.protocol === "file:") return;      /* file:// 直开没有书仓端点 */
+    var live = {}, fired = {};
+    (keep === undefined ? this.getShelf() : keep).forEach(function (d) { if (d && d.bookId) live[d.bookId] = 1; });
+    (gone || []).forEach(function (d) {
+      if (!d || d.src !== "disk" || !d.bookId || live[d.bookId] || fired[d.bookId]) return;
+      fired[d.bookId] = 1;
+      fetch("/api/book/" + encodeURIComponent(d.bookId), { method: "DELETE" }).catch(function () {});
+    });
   },
   moveDocs(ids, group) {
     var set = {};
@@ -362,7 +380,9 @@ window.toast = function (msg, iconName, action) {
   if (!root) return;
   var el = document.createElement("div");
   el.className = "toast";
-  el.innerHTML = icon(iconName || "circle-check", 16) + "<span>" + msg + "</span>";
+  /* msg 一律转义：提示里会出现文件名、书名，以及服务端从 EPUB 元数据 / encryption.xml
+     原样带出的字符串 —— 那是外部输入，不能当 HTML 解析（全库 toast 无一依赖标记语法）。 */
+  el.innerHTML = icon(iconName || "circle-check", 16) + "<span>" + esc(msg) + "</span>";
   var timer = 0;
   function out() { el.classList.add("out"); setTimeout(function () { el.remove(); }, 420); }
   if (typeof action === "function") {
@@ -473,8 +493,13 @@ window.coverStyle = function (doc) {
   var img = doc && doc.coverImg;
   /* v2.11 B1：旧数据/导入数据可能缺 tone —— 兜底回退纸底墨字，书架不再崩 */
   var t = (doc && doc.tone) || [];
+  /* 这段返回值是被拼进 style="…" 属性的，url() 里绝不能再出现双引号：
+     HTML 会在第二个双引号处提前结束属性值，整条 background-image 作废
+     （书架/继续阅读卡/编辑预览的图片封面一直不出图，根因在此）。
+     改用单引号包 URL，并把 URL 里可能出现的引号百分号编码，拼出来的一定是合法声明。 */
+  var u = img ? String(img).trim().replace(/'/g, "%27").replace(/"/g, "%22") : "";
   return "background-color:" + (t[0] || "#efe7d6") + ";color:" + (t[1] || "#2b2823") +
-    (img ? ';background-image:url("' + img + '");background-size:cover;background-position:center' : "");
+    (u ? ";background-image:url('" + u + "');background-size:cover;background-position:center" : "");
 };
 /* 封面的样式与状态挂在属性上，CSS 据此换排布；图片封面走 data-img 另作处理 */
 window.coverAttrs = function (doc) {
@@ -1451,6 +1476,8 @@ window.InkDate = (function () {
         /* v2.11 B2：先把「清空」广播给同步快照（墓碑），再清本机 ——
            否则重载后 boot 的 pull 会把远端旧值整体复活。墓碑发不出（离线）也照常清本机。 */
         var wiping = (window.InkSync && InkSync.wipeRemote) ? InkSync.wipeRemote() : Promise.resolve();
+        /* 书仓里的整本书也是「本机数据」：趁书架还在先把编号收走，清了键就无从得知了 */
+        try { InkStore.releaseBookRepo(InkStore.getShelf(), []); } catch (e) {}
         keys().forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
         /* 清空哨兵：故意不带「inkread.」前缀 —— 不进任何 keys() 统计/导出/清空清单，
            清空时留下来，恰好表达「用户主动清过，演示数据别再播」。 */
@@ -1544,15 +1571,38 @@ window.InkDate = (function () {
    ============================================================ */
 window.InkSync = (function () {
   var META = "inkread.syncmeta.v1";     /* { key: 本地最后写入时间戳 }（不参与同步） */
+  var SEEN = "inkread.syncseen.v1";     /* { key: 内容指纹 } 变更基线（不参与同步） */
   var LOG = "inkread.synclog.v1";       /* 真实同步日志（参与同步，两端可见） */
   var LOCAL_HOSTS = ["127.0.0.1", "localhost", "::1", ""];
   /* 设备本地配置：里面有明文 API Key。/api/store 对局域网开放（双端同步的前提），
      所以密钥不能上行 —— 服务端也有一层洗除，这里是第一道。 */
   var SKIP = { "inkread.ai.model.v1": 1, "inkread.tts.v1": 1 };
+  /* 单键体积闸门：服务端快照接收上限是 4MB（serve.js SYNC_MAX）。旧版不设闸门，
+     一颗 4.10MB 的键会把整批请求顶穿 —— 服务端直接掐断连接（ECONNRESET），
+     客户端 catch 里又不清 dirty，于是每 20 秒原地重试同一批，整库同步被一颗
+     老鼠屎坏掉。现在改成「这颗不进、其余照常」，并把这颗如实标给用户看。 */
+  var MAX_KEY = 3 * 1024 * 1024;
+  var MAX_BATCH = 3 * 1024 * 1024;
+  var KEY_NAME = {
+    "inkread.contents.v1": "导入正文", "inkread.notes.v1": "笔记", "inkread.shelf.v1": "书架",
+    "inkread.cards.v1": "闪卡", "inkread.decks.v1": "卡组", "inkread.tasks.v1": "任务",
+    "inkread.docs.edit.v1": "正文修改", "inkread.progress.v1": "阅读进度", "inkread.memory.v1": "主脑记忆",
+    "inkread.glossary.v1": "生词本", "inkread.stats.v1": "阅读统计", "inkread.checkins.v1": "打卡",
+    "inkread.milestones.v1": "里程碑", "inkread.kindmap.v1": "类别映射", "inkread.synclog.v1": "同步日志",
+    "inkread.themes.installed.v1": "已装主题", "inkread.covers.v1": "封面", "inkread.nav.v1": "导航",
+    "inkread.boot.v1": "启动记录"
+  };
+  function keyLabel(k) { return KEY_NAME[k] || String(k).replace(/^inkread\.|\.[vV]\d+$/g, ""); }
+  function mb(n) { return (n / 1024 / 1024).toFixed(1) + " MB"; }
   var pushing = false;
   /* 变更检测基线：key → 内容指纹。旧版直接存整段 JSON，等于在堆里再抄一份库；
-     现在只留长度 + 两个 32 位哈希。 */
-  var lastSeen = {};
+     现在只留长度 + 两个 32 位哈希。
+     这份基线必须落盘：它原先只在内存里，切页（MPA 的整页跳转）就清零，
+     新页把「上一页刚写进去的新值」当成已知基线收下、不盖章 —— 于是这一颗永远不上行，
+     直到下一次再改它。用户「记完笔记就点回书架」正是最短的触发路径。 */
+  function seenGet() { try { return JSON.parse(localStorage.getItem(SEEN)) || {}; } catch (e) { return {}; } }
+  function seenSet() { try { localStorage.setItem(SEEN, JSON.stringify(lastSeen)); } catch (e) {} }
+  var lastSeen = seenGet();
   var dirty = {};                       /* 自上次成功推送以来「变化 / 消失」的键（-1 = 待墓碑） */
 
   function fp(s) {
@@ -1575,7 +1625,7 @@ window.InkSync = (function () {
     var out = [];
     for (var i = 0; i < localStorage.length; i++) {
       var k = localStorage.key(i);
-      if (k && k.indexOf("inkread.") === 0 && k !== META && !SKIP[k]) out.push(k);
+      if (k && k.indexOf("inkread.") === 0 && k !== META && k !== SEEN && !SKIP[k]) out.push(k);
     }
     return out;
   }
@@ -1590,30 +1640,30 @@ window.InkSync = (function () {
   /* 变更检测：给「新增或变化」的键盖章 t=now（同步的新鲜度全靠它）。
      四种情形分开处理：
        ① 首次接入（!init）：全部存量键盖章 —— 本地已有数据优先的基线起点；
-       ② reload 后首扫（内存基线重置）：只重建 lastSeen，不盖章 ——
-          m 里已有各键时间戳，重盖会把本机旧数据「伪造成最新」压掉对端；
-       ③ 运行中已见过的键变化：盖章（正常变更路径）；
-       ④ 运行中首次出现的新键（如第一次打卡新建 inkread.checkins.v1）：
-          m 里没有 → 必是本地新写（远端拉来的键在 pull 里已同步写入 m 与基线）→ 盖章。
+       ② 基线里没有这一颗（老数据在基线落盘之前就在用 / 基线被清）：只建基线，
+          不盖章 —— m 里已有时间戳，重盖会把本机旧数据「伪造成最新」压掉对端；
+       ③ 已见过且指纹变了：盖章（正常变更路径，含「上一页刚写的」这一类）；
+       ④ 基线里没有、m 里也没有的键：必是本地新写（远端拉来的键在 pull 里已同步
+          写入 m 与基线）→ 盖章。
       —— 修复：旧版情形④漏盖章（t=0），新建的键永远传不到对端。 */
   function stampChanges() {
-    var m = metaGet(), now = Date.now(), changed = 0;
+    var m = metaGet(), now = Date.now(), changed = 0, fresh = 0;
     var firstEver = !initedOnce();
     keys().forEach(function (k) {
       var sig = fp(localStorage.getItem(k) || "");
       if (firstEver) {
         if (!m[k]) { m[k] = now; changed++; dirty[k] = 1; }
-        lastSeen[k] = sig;
+        lastSeen[k] = sig; fresh++;
         return;
       }
       if (!(k in lastSeen)) {
-        lastSeen[k] = sig;
-        if (!m[k]) { m[k] = now; changed++; dirty[k] = 1; }   /* 新键盖章；reload 后存量键 m 已有值，不动 */
+        lastSeen[k] = sig; fresh++;
+        if (!m[k]) { m[k] = now; changed++; dirty[k] = 1; }   /* 新键盖章；存量键 m 已有值，不动 */
         return;
       }
       if (lastSeen[k] !== sig) {
         m[k] = now; changed++; dirty[k] = 1;
-        lastSeen[k] = sig;
+        lastSeen[k] = sig; fresh++;
       }
     });
     /* 上一版曾把密钥类配置一起同步过：从时间戳表里摘掉，防止下面的墓碑循环
@@ -1621,6 +1671,10 @@ window.InkSync = (function () {
     Object.keys(m).forEach(function (k) { if (SKIP[k]) delete m[k]; });
     if (firstEver) { try { localStorage.setItem(INIT, "1"); } catch (e) {} }
     metaSet(m);
+    /* 基线落盘的条件是「基线本身动了」而不是「有键盖章」：情形②只建基线不盖章，
+       changed 为 0，若据 changed 决定写不写，这份基线就永远存不下去 ——
+       下一页又回到情形②，把上一页刚写的值再吞一次。 */
+    if (fresh) seenSet();
     return changed;
   }
   function addLog(entry) {
@@ -1669,6 +1723,9 @@ window.InkSync = (function () {
           pulled++;
         });
         metaSet(m);
+        /* 基线也要跟着落盘：这一颗的值来自对端，本页不记住它，下一页就分不清
+           「远端拉来的原样」和「用户在这之后改的」—— 那次改动会被情形②静静吞掉。 */
+        if (pulled) seenSet();
         return { pulled: pulled, client: (j && j.client) || null };
       })
       .catch(function () { return { pulled: 0, offline: true }; });
@@ -1696,15 +1753,25 @@ window.InkSync = (function () {
       dirty[k] = -1;                       /* 墓碑要重试，直到服务端收下 */
       delete m[k];
     });
+    var tooBig = {}, total = 0, oversize = [];
     Object.keys(dirty).forEach(function (k) {
       if (data[k]) return;                 /* 已是墓碑 */
       if (SKIP[k]) { delete dirty[k]; return; }
-      if (localStorage.getItem(k) === null) { dirty[k] = -1; data[k] = { t: Date.now(), deleted: true }; return; }
+      var raw = localStorage.getItem(k);
+      if (raw === null) { dirty[k] = -1; data[k] = { t: Date.now(), deleted: true }; return; }
+      if (raw.length > MAX_KEY) {          /* 这颗进了批次就会顶穿服务端：单独剔除并如实记账 */
+        oversize.push(k); delete dirty[k]; tooBig[k] = raw.length; return;
+      }
+      if (total + raw.length > MAX_BATCH) return;   /* 本批预算用完：留在 dirty，下一轮照常发 */
+      total += raw.length;
       data[k] = { t: m[k] || 0, v: valOf(k) };
     });
     metaSet(m);
     names = Object.keys(data);
-    if (!changed && !names.length && !force) return Promise.resolve({ pushed: 0, noop: true });
+    if (!changed && !names.length && !oversize.length && !force) {
+      return Promise.resolve({ pushed: 0, noop: true, oversize: oversizeKeys(tooBig) });
+    }
+    if (oversize.length) addLog({ action: "oversize", keys: oversize.length, names: oversize.slice(0, 3).map(keyLabel) });
     pushing = true;
     return fetch("/api/store", {
       method: "POST",
@@ -1714,13 +1781,29 @@ window.InkSync = (function () {
         client: { name: deviceName(), host: location.hostname, ua: (navigator.userAgent || "").slice(0, 120), at: Date.now() }
       })
     })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        /* 非 2xx（413 请求体过大 / 500 落盘失败）不能当成同步成功：
+           旧版照删 dirty，这批数据此后再没机会上行，除非用户再改一次。 */
+        if (!r.ok) { pushing = false; return { failed: true, status: r.status }; }
+        return r.json().then(function (j) { return { applied: (j && j.applied) || 0 }; }).catch(function () { return { applied: 0 }; });
+      })
       .then(function (j) {
         pushing = false;
+        if (j && j.failed) return { pushed: 0, failed: true, status: j.status, oversize: oversizeKeys(tooBig) };
         names.forEach(function (k) { delete dirty[k]; });   /* 失败不清基线：下次重试 */
-        return { pushed: (j && j.applied) || 0, at: Date.now() };
+        return { pushed: j.applied || 0, at: Date.now(), oversize: oversizeKeys(tooBig) };
       })
-      .catch(function () { pushing = false; return { pushed: 0, offline: true }; });
+      .catch(function () { pushing = false; return { pushed: 0, offline: true, oversize: oversizeKeys(tooBig) }; });
+  }
+  /* 超限键清单：谁大谁不重要，用户要看的是「哪一类数据没同步」，
+     所以把键名翻成中文名再交出去（书架 / 笔记 / 闪卡…）。 */
+  function oversizeKeys(sizes) {
+    var out = [];
+    (sizes ? Object.keys(sizes) : keys()).forEach(function (k) {
+      var n = sizes ? sizes[k] : (localStorage.getItem(k) || "").length;
+      if (n > MAX_KEY) out.push({ key: k, bytes: n, size: mb(n), label: keyLabel(k) });
+    });
+    return out;
   }
   /* v2.11 B2：清空全部数据时立即广播墓碑 ——
      不做这一步，重载后的 boot 会先 pull、把远端旧值整体复活（pull 先于 push，
@@ -1736,6 +1819,7 @@ window.InkSync = (function () {
     if (!Object.keys(data).length) return Promise.resolve({ wiped: 0, offline: false });
     metaSet({});
     lastSeen = {};
+    seenSet();   /* SEEN 不在 keys() 清单里，清空轮不到它：不留这一笔，旧基线会一路跟着已废的键 */
     dirty = {};
     return fetch("/api/store", {
       method: "POST",
@@ -1756,6 +1840,8 @@ window.InkSync = (function () {
         var res = {
           pulled: p.pulled || 0, pushed: pu.pushed || 0,
           offline: !!(p.offline || pu.offline),
+          failed: !!pu.failed, status: pu.status || 0,
+          oversize: pu.oversize || [],
           client: p.client || null, at: Date.now()
         };
         addLog({ action: "sync", pulled: res.pulled, pushed: res.pushed, offline: res.offline });
@@ -1785,5 +1871,9 @@ window.InkSync = (function () {
   setInterval(function () { if (!document.hidden) push(); }, 20000);
   document.addEventListener("visibilitychange", function () { if (document.hidden) push(); });
 
-  return { now: now, pull: pull, push: push, wipeRemote: wipeRemote, log: recentLog, device: deviceName, isLocal: function () { return LOCAL_HOSTS.indexOf(location.hostname) >= 0; } };
+  return {
+    now: now, pull: pull, push: push, wipeRemote: wipeRemote, log: recentLog, device: deviceName,
+    oversize: function () { return oversizeKeys(null); },
+    isLocal: function () { return LOCAL_HOSTS.indexOf(location.hostname) >= 0; }
+  };
 })();

@@ -264,6 +264,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
               <div><b>手机端 · 墨读 App</b><span>iOS · 镜像阅读与打卡</span></div>
               <span class="dev-state" id="phoneState"></span>
             </div>
+            <p class="sync-warn" id="syncWarn" hidden></p>
             <div class="sync-log">
               <div class="card-note mb-12">最近同步</div>
               <ul id="syncLog"></ul>
@@ -978,10 +979,21 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
       ? log.slice(0, 6).map(function (s) {
           var what = s.action === "pull" ? "拉取 " + (s.pulled || 0) + " 项"
             : s.action === "sync" ? "双向 · 拉 " + (s.pulled || 0) + " / 推 " + (s.pushed || 0) + " 项"
+            : s.action === "oversize" ? (s.keys || 0) + " 类数据过大 · 未参与同步" +
+              ((s.names || []).length ? "（" + s.names.join("、") + "）" : "")
             : "推送 " + (s.pushed || 0) + " 项";
           return "<li><b>" + esc(s.atText || "") + "</b>" + esc(s.device || "桌面") + " · " + esc(what) + "</li>";
         }).join("")
       : '<li><span class="card-note">还没有同步过 —— 点「立即同步」，或从手机访问电脑 IP:8765 接入</span></li>';
+    /* 超限键常驻提醒：这些键被留在本机、另一端看不到 —— 只写进日志一次不够看。 */
+    var big = (window.InkSync && InkSync.oversize) ? InkSync.oversize() : [];
+    var warn = qs("#syncWarn");
+    warn.hidden = !big.length;
+    if (big.length) {
+      warn.innerHTML = icon("alert-triangle", 13) + "<span>此数据集过大，未参与同步：" +
+        esc(big.map(function (b) { return b.label + " " + b.size; }).join("、")) +
+        " · 单键上限 3 MB，其余数据照常同步</span>";
+    }
     /* 桌面端 = 本窗口；手机端 = 日志里最近一条其他设备 */
     qs("#deskState").innerHTML = icon("circle-check", 13) + "本窗口";
     var other = log.filter(function (s) { return (s.device || "桌面") !== (window.InkSync ? InkSync.device() : "桌面"); })[0];
@@ -1006,11 +1018,15 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     renderSync();
     InkFX.flash();
     if (r.offline) { toast("同步服务不可达 · 本机数据仍即时保存", "wifi-off"); return; }
+    /* 服务端拒收（413 过大 / 500 落盘失败）不等于同步成功：变更留在队列里，下次重试 */
+    if (r.failed) { toast("同步服务拒收本次数据（HTTP " + r.status + "）· 变更已保留，稍后自动重试", "alert-triangle"); return; }
+    var extra = (r.oversize && r.oversize.length) ? " · " + r.oversize.length + " 类数据过大未参与同步" : "";
     if (r.pulled > 0) {
       toast("已从另一端同步 " + r.pulled + " 项 · 即将刷新", "refresh-cw");
       setTimeout(function () { location.reload(); }, 900);
     } else {
-      toast(r.pushed > 0 ? "已推送本机变更 " + r.pushed + " 项" : "两端已一致 · 无需同步", "circle-check");
+      toast((r.pushed > 0 ? "已推送本机变更 " + r.pushed + " 项" : "两端已一致 · 无需同步") + extra,
+        r.oversize && r.oversize.length ? "alert-triangle" : "circle-check");
     }
   });
 

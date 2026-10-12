@@ -1127,11 +1127,72 @@
     return html;
   }
 
+  /* ---------- 块 → 纸面 HTML（打印视图 print.html 与导出端点共用） ----------
+     阅读页的 renderBlock 是「舞台件」：data-bi 锚点、任务打卡按钮、代码块复制钮、
+     --ink-img-h 页高钳制，全靠分页器和交互活着。纸面要的是另一套：静态方框而不是按钮、
+     图不带页高上限、章节可另起一页。两处各写一遍必然分叉，所以纸面这一份收进库里，
+     print.html 与服务端导出都调它 —— 同一条正文，两种排法，一份实现。 */
+  function blocksHtml(blocks, opt) {
+    var o = opt || {};
+    var chapBreak = o.chapterBreak !== false;
+    function subList(sb) {
+      var tag = sb.type === "olist" ? "ol" : "ul";
+      var st = sb.start && sb.start !== 1 ? ' start="' + (Number(sb.start) || 1) + '"' : "";
+      return "<" + tag + st + ' class="p-list">' + sb.items.map(itemHtml).join("") + "</" + tag + ">";
+    }
+    function itemHtml(it) {
+      if (typeof it === "string") return "<li>" + inline(it) + "</li>";
+      if (it && it.td != null) {
+        /* 方框由 CSS 描边，勾用 U+2713：☐☑（U+2610/2611）在不少中文字体里没有字形，
+           纸上会印成豆腐块。勾选态走 .on 类，与阅读页 .md-task.on 同一个说法。 */
+        return '<li class="p-task' + (it.on ? " on" : "") + '"><span class="p-box"></span>' + inline(String(it.td || "")) +
+          (it.sub || []).map(subList).join("") + "</li>";
+      }
+      /* 书架任务引用（{id,x}）在屏幕上是带打卡钮的活物；纸上只剩一行文字。 */
+      if (it && it.id) return '<li class="p-taskref">' + esc(String(it.x || "")) + "</li>";
+      var tail = (it && it.sub || []).map(subList).join("");
+      return "<li>" + inline(String((it && it.x) || "")) + tail + "</li>";
+    }
+    function codeBody(text) {
+      return String(text == null ? "" : text).replace(/^\n+/, "").replace(/\n+$/, "");
+    }
+    return (blocks || []).map(function (b) {
+      if (!b || b.mdx) return "";      /* 存量表格救活留下的占位块：不产 DOM */
+      switch (b.type) {
+        case "h1": return '<h1 class="p-h1"' + (b.id ? ' id="' + esc(b.id) + '"' : "") + ">" + inline(String(b.x || "")) + "</h1>";
+        case "h2": return '<h2 class="p-h2' + (chapBreak ? " p-chap" : "") + '"' + (b.id ? ' id="' + esc(b.id) + '"' : "") + ">" + inline(String(b.x || "")) + "</h2>";
+        case "h3": return '<h3 class="p-h3"' + (b.id ? ' id="' + esc(b.id) + '"' : "") + ">" + inline(String(b.x || "")) + "</h3>";
+        case "meta": return '<div class="p-meta">' + esc(b.x) + "</div>";
+        case "p": return "<p>" + inline(String(b.x || "")).replace(/\n/g, "<br>") + "</p>";
+        case "quote": return "<blockquote>" + render(String(b.x || ""), true) + "</blockquote>";
+        case "list": return '<ul class="p-list">' + (b.items || []).map(itemHtml).join("") + "</ul>";
+        case "olist": return '<ol class="p-list"' + (b.start && b.start !== 1 ? ' start="' + (Number(b.start) || 1) + '"' : "") + ">" +
+          (b.items || []).map(itemHtml).join("") + "</ol>";
+        case "table": return tableHTML(b.head || [], b.rows || [], b.align || []);
+        case "code": return '<div class="p-code"' + (b.lang ? ' data-lang="' + esc(b.lang) + '"' : "") +
+          "><pre><code>" + hl(codeBody(b.x), b.lang) + "</code></pre></div>";
+        case "formula": return '<div class="p-math">' + new Tex(String(b.x || "")).parse() + "</div>";
+        case "abstract": return '<div class="p-abs"><b>' + esc(b.label || "摘要") + "　</b>" + esc(b.x) + "</div>";
+        case "kw": return '<div class="p-kw"><b>关键词：</b>' + (b.items || []).map(esc).join("　·　") + "</div>";
+        case "refs": return '<div class="p-refs"><ol>' + (b.items || []).map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ol></div>";
+        case "fig": return '<figure class="p-fig"><div class="p-figph" role="img" aria-label="' + esc(b.cap || "示意图") +
+          '">' + esc(b.cap || "示意图") + "</div>" + (b.note ? '<figcaption class="p-fignote">' + esc(b.note) + "</figcaption>" : "") + "</figure>";
+        /* 插图：宽高已知就一并写进属性（加载前后同尺寸，不跳版）；src 由书仓端点给出。 */
+        case "img": return '<figure class="p-img"><img src="' + esc(b.src || "") + '" alt="' + esc(b.alt || "") + '"' +
+          ((+b.w > 0 && +b.h > 0) ? ' width="' + (+b.w) + '" height="' + (+b.h) + '"' : "") + ">" +
+          (b.alt ? "<figcaption>" + esc(b.alt) + "</figcaption>" : "") + "</figure>";
+        case "note": return '<aside class="p-note"' + (b.id ? ' id="' + esc(b.id) + '"' : "") +
+          '><span class="p-notemark">注</span><span class="p-notetxt">' + esc(String(b.text || "")) + "</span></aside>";
+        default: return "<p>" + esc(b.x || "") + "</p>";
+      }
+    }).join("\n");
+  }
+
   window.MD = {
     render: renderCached, inline: inline, tex: function (s) { return new Tex(s).parse(); },
     plain: plain, esc: esc, blocks: parseBlocks,
     /* code / table 暴露给阅读器：块 JSON 走的是另一条渲染入口，
        外壳与表格构造必须和这里同一份，否则两处口径又会分叉。 */
-    code: codeHTML, table: tableHTML, fixTables: fixStoredTables
+    code: codeHTML, table: tableHTML, fixTables: fixStoredTables, blocksHtml: blocksHtml
   };
 })();
