@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.21.0";
+window.InkVersion = "2.22.0";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -200,7 +200,9 @@ window.InkStore = {
   K_CLEARED: "inkread-cleared.v1",
 
   _get(k, fb) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? fb : v; } catch (e) { return fb; } },
-  _set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  /* 写失败（配额满 / 禁写）如实回 false，由调用方决定怎么告诉用户（v2.22）——
+     批注与打卡过去把 catch 吞掉，toast 说「已保存」而存储里什么都没有。 */
+  _set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } },
   isCleared() { try { return localStorage.getItem(this.K_CLEARED) === "1"; } catch (e) { return false; } },
 
   /* ---------- 书架：用户导入的书籍 / 论文 / 漫画 / 计划都可编辑 ---------- */
@@ -209,7 +211,39 @@ window.InkStore = {
     var s = this._get(this.K_SHELF, null);
     /* v2.11 B2：用户主动清空后（哨兵在），键缺失也不再回播演示书架 */
     if (s === null && !this.isCleared()) { s = DB.shelf.map(function (d) { return Object.assign({}, d); }); this._set(this.K_SHELF, s); }
-    return s === null ? [] : s;
+    if (s === null) return [];
+    return this.migrateRetiredDemo(s);
+  },
+  /* 升级清账（v2.22.0）：演示书架从 7 本下架成 1 本公版样书，但 v2.11 起这里就把当时的
+     DB.shelf 整包播种进了 inkread.shelf.v1 —— 键已存在，新版本换不掉它。老用户升级后书架上
+     压着 7 本「正文不再随包发布」的死书，点开是「这本文档没有提取到正文」，翻书架一片空壳。
+     只摘名单里（我们随包发过）且本机确实取不到正文的条目：指到本机书仓（src=disk / bookId）的
+     一律算有正文，用户自己导入的 imp-* 天然不在名单内。摘完再补上当前随包那本样书 —— 
+     它没被用户删过（那时还不存在），空书架不该由我们的下架决定替用户做；但清空哨兵在就
+     不补，与 v2.11 B2「用户主动清过，演示数据别再播」同一条规矩。
+     幂等：摘干净后名单不再命中，自然不回写（不另设版本旗标，沿用 statsMigrate 那套自守卫）。 */
+  migrateRetiredDemo(s) {
+    var list = (window.DB && DB.retiredDemoDocs) || [];
+    if (!list.length) return s;
+    var body = null, dead = {};
+    for (var i = 0; i < s.length; i++) {
+      var d = s[i];
+      if (!d || list.indexOf(d.id) < 0 || dead[d.id]) continue;
+      if (d.src === "disk" || d.bookId) continue;
+      if (body === null) { try { body = JSON.parse(localStorage.getItem("inkread.contents.v1")) || {}; } catch (e) { body = {}; } }
+      var has = ((body[d.id] || []).length) || (((window.DB && DB.contents) || {})[d.id] || []).length;
+      if (!has) dead[d.id] = 1;
+    }
+    var ids = Object.keys(dead);
+    if (!ids.length) return s;
+    var rest = s.filter(function (d) { return d && !dead[d.id]; });
+    var have = {};
+    rest.forEach(function (d) { have[d.id] = 1; });
+    var seed = this.isCleared() ? [] : DB.shelf;
+    var add = seed.filter(function (b) { return !have[b.id]; }).map(function (b) { return Object.assign({}, b); });
+    rest = add.concat(rest);
+    this._set(this.K_SHELF, rest);
+    return rest;
   },
   setShelf(list) { this._set(this.K_SHELF, list); return list; },
   getDoc(id) { return this.getShelf().find(function (d) { return d.id === id; }) || null; },
@@ -262,30 +296,43 @@ window.InkStore = {
   resetShelf() { this._set(this.K_SHELF, null); return this.getShelf(); },
 
   getCheckins() { return this._get(this.K_CK, {}); },
-  setCheckin(id, time) { var c = this.getCheckins(); c[id] = time; this._set(this.K_CK, c); },
-  removeCheckin(id) { var c = this.getCheckins(); delete c[id]; this._set(this.K_CK, c); },
+  setCheckin(id, time) { var c = this.getCheckins(); c[id] = time; return this._set(this.K_CK, c); },
+  removeCheckin(id) { var c = this.getCheckins(); delete c[id]; return this._set(this.K_CK, c); },
 
   getNotes() {
-    /* v2.11 B3：批注/笔记 = 纯用户数据，不做演示播种 ——
-       QA 口径：全新数据打开文档时批注面板必须为空；首条标注入库不得夹带演示批注。
-       键缺失即空表（清空哨兵只管书架与主脑信号的演示播种）。 */
+    /* v2.22 首启：全新数据首次读取时种入四条示例批注（demo-gb-01 的高亮/随笔/笔记），
+       与真实批注同形、可删可改，让批注面板、笔记页开箱即有内容可看。
+       取代 v2.11 B3「笔记不播种」：B3 防的是「演示批注夹带进存储」，现在改为
+       显式播种 —— 只发生在 getNotes() 读路径且键从未写过时；清空哨兵在则不再回播。
+       写路径仍只碰 storedNotes()，不会把演示列表整份带进存储。 */
     var n = this._get(this.K_NOTES, null);
+    if (n === null && !this.isCleared() && DB.demoNotes && DB.demoNotes.length) {
+      var at = function (minAgo) {
+        return new Date(Date.now() - minAgo * 60000).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+      };
+      n = DB.demoNotes.map(function (d, i) {
+        var c = Object.assign({}, d);
+        if (c.sp) c.sp = { pre: c.sp.pre, suf: c.sp.suf };
+        c.at = at((i + 1) * 13);   /* 越靠前越新，与 upsertNote 的插队序一致 */
+        return c;
+      });
+      this.setNotes(n);
+    }
     return n === null ? [] : n;
   },
-  setNotes(list) { this._set(this.K_NOTES, list); },
+  setNotes(list) { return this._set(this.K_NOTES, list); },
   /* 已存储的笔记底表（null → 空表）—— 写路径专用：演示列表只读展示，
      绝不因某一次写操作把整份演示列表带进存储（v2.11 B3） */
   storedNotes() { var n = this._get(this.K_NOTES, null); return n === null ? [] : n.slice(); },
   getNote(id) { return this.getNotes().find(function (n) { return n.id === id; }) || null; },
-  /* 按 id 覆盖或插入一条笔记，返回该条 */
+  /* 按 id 覆盖或插入一条笔记；返回写库是否成功（false = 存储满/禁写，条目只活在内存里） */
   upsertNote(note) {
     var list = this.storedNotes();
     var i = -1;
     for (var k = 0; k < list.length; k++) if (list[k].id === note.id) { i = k; break; }
     if (i >= 0) list[i] = Object.assign({}, list[i], note);
     else list.unshift(note);
-    this.setNotes(list);
-    return note;
+    return this.setNotes(list);
   },
 
   getRead() {
@@ -1065,7 +1112,7 @@ window.InkDate = (function () {
 
   /* 顶栏原始状态图标（云同步 / Wi-Fi / 电量）沿用原 HTML 内联路径 */
   var topbar =
-    '<div class="device-topbar" id="inkTopbar">' +
+    '<div class="device-topbar" id="inkTopbar" role="banner">' +
       '<div class="brand">' +
         '<span class="brand-seal">墨</span>' +
         '<span class="brand-name">墨读 InkRead</span>' +
@@ -1131,7 +1178,7 @@ window.InkDate = (function () {
   /* v2.14：侧栏换新貌 —— 品牌位 + 六项导航 + 双细线界栏 + 状态足部（含日期）。
      ≤600 底栏档由 CSS 隐藏 nav-brand / nav-sec / nav-foot，导航以底栏 + 更多 sheet 呈现。 */
   var nav =
-    '<aside class="app-nav">' +
+    '<aside class="app-nav" aria-label="主导航">' +
       '<div class="nav-brand"><span class="brand-seal">墨</span><b>墨读</b></div>' +
       '<nav class="nav-list">' + navLinks + '</nav>' +
       '<div class="nav-sec rule-2line" aria-hidden="true"></div>' +

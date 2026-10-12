@@ -8,6 +8,7 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="fonts/local.css">
 <link rel="stylesheet" href="styles.css">
+<script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
 <script src="voices-data.js"></script>
 <script src="voices.js"></script>
@@ -51,7 +52,7 @@
           </div>
         </div>
 
-        <div class="th-groups" id="thGroups" role="tablist" aria-label="按分组筛选"></div>
+        <div class="th-groups" id="thGroups" role="group" aria-label="按分组筛选"></div>
 
         <div id="thBody"></div>
       </div>
@@ -115,7 +116,7 @@
 </div>
 
 <input type="file" id="thFile" accept="application/json,.json" style="display:none">
-<div class="toast-root" id="toastRoot"></div>
+<div class="toast-root" id="toastRoot" aria-live="polite" aria-atomic="false"></div>
 <script src="mock.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
@@ -371,8 +372,8 @@
     var list = state.ftab === "mine" ? mine : store;
 
     qs("#thGroups").innerHTML =
-      '<button class="chip chip-btn' + (state.ftab === "mine" ? " on" : "") + '" data-ftab="mine">我的字体 ' + mine.length + "</button>" +
-      '<button class="chip chip-btn' + (state.ftab === "store" ? " on" : "") + '" data-ftab="store">字体商城 ' + store.length + "</button>";
+      '<button class="chip chip-btn' + (state.ftab === "mine" ? " on" : "") + '" data-ftab="mine" aria-pressed="' + (state.ftab === "mine" ? "true" : "false") + '">我的字体 ' + mine.length + "</button>" +
+      '<button class="chip chip-btn' + (state.ftab === "store" ? " on" : "") + '" data-ftab="store" aria-pressed="' + (state.ftab === "store" ? "true" : "false") + '">字体商城 ' + store.length + "</button>";
 
     var body = qs("#thBody");
     if (!list.length) {
@@ -449,8 +450,8 @@
     var list = state.vtab === "mine" ? mine : store;
 
     qs("#thGroups").innerHTML =
-      '<button class="chip chip-btn' + (state.vtab === "mine" ? " on" : "") + '" data-vtab="mine">我的音色 ' + mine.length + "</button>" +
-      '<button class="chip chip-btn' + (state.vtab === "store" ? " on" : "") + '" data-vtab="store">音色商城 ' + store.length + "</button>";
+      '<button class="chip chip-btn' + (state.vtab === "mine" ? " on" : "") + '" data-vtab="mine" aria-pressed="' + (state.vtab === "mine" ? "true" : "false") + '">我的音色 ' + mine.length + "</button>" +
+      '<button class="chip chip-btn' + (state.vtab === "store" ? " on" : "") + '" data-vtab="store" aria-pressed="' + (state.vtab === "store" ? "true" : "false") + '">音色商城 ' + store.length + "</button>";
 
     var body = qs("#thBody");
     /* 云音色为空（未配置或拉取失败）= 用户面对的是「不知道有这功能」的隐性空态：
@@ -557,9 +558,9 @@
     qs("#thSub").textContent = T.THEMES.filter(function (t) { return t.scene; }).length + " / " +
       T.THEMES.length + " 套主题配场景 · 当前「" + nameOf(cur) + "」· " + (s.scene ? "场景已开启" : "场景已关闭");
 
-    qs("#thGroups").innerHTML = '<button class="chip chip-btn' + (state.sfam === "all" ? " on" : "") + '" data-sfam="all">全部族</button>' +
+    qs("#thGroups").innerHTML = '<button class="chip chip-btn' + (state.sfam === "all" ? " on" : "") + '" data-sfam="all" aria-pressed="' + (state.sfam === "all" ? "true" : "false") + '">全部族</button>' +
       SCENE_FAMS.map(function (f) {
-        return '<button class="chip chip-btn' + (state.sfam === f ? " on" : "") + '" data-sfam="' + f + '">' +
+        return '<button class="chip chip-btn' + (state.sfam === f ? " on" : "") + '" data-sfam="' + f + '" aria-pressed="' + (state.sfam === f ? "true" : "false") + '">' +
           esc(T.SCENE_META[f].name) + " " + T.THEMES.filter(function (t) { return t.scene === f; }).length + "</button>";
       }).join("");
   }
@@ -677,9 +678,9 @@
 
   function renderGroups() {
     var html = '<button class="chip chip-btn' + (state.group === "all" ? " on" : "") +
-      '" data-group="all">全部</button>' + T.GROUPS.map(function (g) {
+      '" data-group="all" aria-pressed="' + (state.group === "all" ? "true" : "false") + '">全部</button>' + T.GROUPS.map(function (g) {
         return '<button class="chip chip-btn' + (state.group === g.k ? " on" : "") +
-          '" data-group="' + g.k + '" title="' + g.note + '">' + g.name + "</button>";
+          '" data-group="' + g.k + '" aria-pressed="' + (state.group === g.k ? "true" : "false") + '" title="' + g.note + '">' + g.name + "</button>";
       }).join("");
     qs("#thGroups").innerHTML = html;
   }

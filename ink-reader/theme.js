@@ -1490,15 +1490,17 @@
       var aa = e.target.closest("[data-aa-toggle]");
       if (aa) { e.preventDefault(); aaToggle(); }
     });
-    /* 快捷键 A：阅读页随时调出排版面板 */
-    document.addEventListener("keydown", function (e) {
-      if (e.key !== "a" && e.key !== "A") return;
-      if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
-      if (document.body.dataset.page !== "reader") return;
-      if (mask && !mask.hidden) return;
-      e.preventDefault();
-      aaToggle();
-    });
+    /* 快捷键 A：阅读页调出排版面板（v2.22 S5：移入 InkKeys 注册表）。
+       when 表达「阅读页且外观面板未开」；page 标注同一件事给「总览」列表看
+       —— theme.js 是全局脚本，不标注就会在书架等页的总览里列出一条按不动的 A。
+       注册表字段守卫覆盖 INPUT/TEXTAREA/contenteditable，fn 内 typing(e) 补 SELECT ——
+       与原 typing() 守卫逐项等价（原实现：修饰键必须全空）。 */
+    if (window.InkKeys) {
+      InkKeys.on("a", function (e) { if (typing(e)) return; e.preventDefault(); aaToggle(); }, {
+        prevent: false, title: "Aa 排版面板", group: "阅读", page: "reader",
+        when: function () { return document.body.dataset.page === "reader" && !(mask && !mask.hidden); }
+      });
+    }
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);

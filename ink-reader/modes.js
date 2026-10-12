@@ -1294,6 +1294,7 @@
         });
       });
       var key = function (e) {
+        if (window.InkKeys && InkKeys.isOpen()) return;   /* 命令面板 / 总览置顶：按键先归它们 */
         if (panelKey !== "card" || S().fcPick !== true) return;
         var L = String(n.text || "").length, hit = true;
         if (e.key === "ArrowLeft") { S().fcAt = Math.max(0, (S().fcAt | 0) - 1); }

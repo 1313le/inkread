@@ -54,9 +54,9 @@
   color: var(--ink-2); font-size: 13px; letter-spacing: .03em; cursor: pointer; text-align: left;
 }
 .dc-mi:hover { background: var(--paper-2); color: var(--ink); }
-.dc-mi.danger { color: var(--amber); }
+.dc-mi.danger { color: var(--amber-ink); }
 /* 第二击确认：按钮改为醒目的警示态 */
-.dc-mi.confirm { background: var(--amber-wash); color: var(--amber); border: 1px solid var(--amber); }
+.dc-mi.confirm { background: var(--amber-wash); color: var(--amber-ink); border: 1px solid var(--amber); }
 .dc-warn { margin-top: 4px; padding: 7px 10px 4px; border-top: 1px solid var(--line-2); font-size: 11px; color: var(--ink-3); line-height: 1.7; }
 
 /* 行内重命名 */
@@ -134,7 +134,7 @@
 .q-err {
   flex: 1 1 100%; display: flex; align-items: center; gap: 8px; margin-top: 2px;
   padding: 8px 12px; border: 1px solid var(--amber); border-radius: var(--r-sm);
-  background: var(--amber-wash); color: var(--amber); font-size: 12.5px; letter-spacing: .02em;
+  background: var(--amber-wash); color: var(--amber-ink); font-size: 12.5px; letter-spacing: .02em;
 }
 .q-err[hidden] { display: none; }
 .view-seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
@@ -176,7 +176,7 @@
 .si-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .si-n { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
 .si-x { flex: none; display: flex; padding: 2px; border-radius: var(--r-xs); color: var(--ink-3); background: none; border: none; cursor: pointer; }
-.si-x:hover { color: var(--amber); background: var(--amber-wash); }
+.si-x:hover { color: var(--amber-ink); background: var(--amber-wash); }
 .side-empty { font-size: 12px; color: var(--ink-3); line-height: 1.7; padding: 2px 4px; }
 .side-filter {
   width: 100%; margin-bottom: 6px; padding: 6px 9px; font-size: 12.5px;
@@ -209,6 +209,7 @@
   .dr-cat, .dr-recent { display: none; }
 }
 </style>
+<script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
 <script src="theme.js"></script>
 </head>
@@ -246,7 +247,7 @@
             <button type="button" data-view="list" title="紧凑列表" aria-label="紧凑列表"></button>
           </div>
           <select class="q-sort" id="sortSel" aria-label="排序方式"></select>
-          <button class="btn btn-ghost btn-sm" id="saveQ" type="button" title="保存当前检索" aria-label="保存当前检索"></button>
+          <button class="btn btn-ghost btn-sm" id="saveQ" type="button" title="保存检索" aria-label="保存检索"></button>
           <span class="save-box" id="saveBox" hidden>
             <input class="field" id="saveName" type="text" placeholder="检索名称" aria-label="检索名称">
             <button class="btn btn-accent btn-sm" id="saveOk" type="button">保存</button>
@@ -275,7 +276,7 @@
   </div>
 </div>
 
-<div class="toast-root" id="toastRoot"></div>
+<div class="toast-root" id="toastRoot" aria-live="polite" aria-atomic="false"></div>
 <script src="srs.js"></script>
 <script src="mock.js"></script>
 <script src="api.js"></script>
@@ -1408,12 +1409,19 @@
     if (q) { rateCard(+q.dataset.q); return; }
     if (e.target.closest("#fcCard")) { flipReview(); }
   });
-  /* 键盘：空格翻面、1–4 评分、Esc 退出 */
+  /* 键盘：空格翻面、1–4 评分、Esc 退出（v2.22 S5：动作键入 InkKeys 注册表，
+     when 门控 = 原首行守卫；inInput:true 保持「复习层内无输入域豁免」原语义）。
+     Esc 留局部。 */
+  if (window.InkKeys) {
+    var rvOpen = function () { return !!state.rv && !qs("#fcStage").hidden; };
+    InkKeys.on("space", function () { flipReview(); }, { when: rvOpen, inInput: true, title: "翻面", group: "复习" });
+    ["1", "2", "3", "4"].forEach(function (d) {
+      InkKeys.on(d, function () { rateCard(+RATE[+d - 1][0]); }, { when: rvOpen, inInput: true, title: "评分 · " + RATE[+d - 1][1], group: "复习" });
+    });
+  }
   document.addEventListener("keydown", function (e) {
     if (!state.rv || qs("#fcStage").hidden) return;
     if (e.key === "Escape") { e.preventDefault(); exitReview(); return; }
-    if (e.key === " " || e.key === "Spacebar") { e.preventDefault(); flipReview(); return; }
-    if (e.key >= "1" && e.key <= "4") { e.preventDefault(); rateCard(+RATE[+e.key - 1][0]); }
   });
   qs("#icExit").innerHTML = icon("chevron-left", 14);
 

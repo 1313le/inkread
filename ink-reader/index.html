@@ -36,20 +36,21 @@
    类别配色全部取自既有 token（--green / --amber / --blue / --accent / --ink），
    四类复合色用 color-mix 由这些 token 现调，不新增一个色值。列表顺序与类别表一致：
    书籍 / 教材 / 论文 / 报告 / 计划 / 笔记 / 漫画 / 其他。 */
-[data-kind="book"]     { --kc: var(--green); }
-[data-kind="textbook"] { --kc: var(--amber); }
-[data-kind="paper"]    { --kc: var(--blue); }
-[data-kind="report"]   { --kc: color-mix(in oklab, var(--blue) 62%, var(--amber) 38%); }
-[data-kind="plan"]     { --kc: var(--accent); }
-[data-kind="note"]     { --kc: color-mix(in oklab, var(--amber) 62%, var(--ink) 38%); }
-[data-kind="comic"]    { --kc: color-mix(in oklab, var(--accent) 55%, var(--blue) 45%); }
-[data-kind="other"]    { --kc: color-mix(in oklab, var(--ink) 55%, transparent); }
+[data-kind="book"]     { --kc: var(--green); --kc-text: var(--green-ink); }
+[data-kind="textbook"] { --kc: var(--amber); --kc-text: var(--amber-ink); }
+[data-kind="paper"]    { --kc: var(--blue); --kc-text: var(--blue-ink); }
+[data-kind="report"]   { --kc: color-mix(in oklab, var(--blue) 62%, var(--amber) 38%); --kc-text: color-mix(in oklab, var(--kc) 66%, var(--ink)); }
+[data-kind="plan"]     { --kc: var(--accent); --kc-text: color-mix(in oklab, var(--accent-ink) 92%, var(--ink)); }
+[data-kind="note"]     { --kc: color-mix(in oklab, var(--amber) 62%, var(--ink) 38%); --kc-text: color-mix(in oklab, var(--kc) 75%, var(--ink)); }
+[data-kind="comic"]    { --kc: color-mix(in oklab, var(--accent) 55%, var(--blue) 45%); --kc-text: color-mix(in oklab, var(--kc) 68%, var(--ink)); }
+/* other 无彩色相可保留：--kc 直接取 ink-3（无透明，随主题自动明暗），文本再压一档 */
+[data-kind="other"]    { --kc: var(--ink-3); --kc-text: color-mix(in oklab, var(--kc) 84%, var(--ink)); }
 /* 类别徽标：书架卡片（标题下）、继续阅读卡（chip 内）共用同一份配方 */
 .kchip {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 10.5px; letter-spacing: .08em; line-height: 1;
   padding: 3px 8px; border-radius: 999px;
-  color: var(--kc, var(--ink-3));
+  color: var(--kc-text, var(--kc, var(--ink-3)));
   border: 1px solid color-mix(in srgb, var(--kc, var(--ink-3)) 42%, transparent);
   background: color-mix(in oklab, var(--kc, var(--ink-3)) 12%, transparent);
   white-space: nowrap;
@@ -57,9 +58,9 @@
 .kchip .ic { width: 12px; height: 12px; }
 /* 卡下徽标是 .book-meta 里的 span，styles.css 的 .book-meta span（颜色 / 字号）
    优先级更高，这里必须显式抬回来 —— 否则类徽标只剩底色、文字全是灰的。 */
-.book-meta span.kchip { color: var(--kc, var(--ink-3)); font-size: 10.5px; }
+.book-meta span.kchip { color: var(--kc-text, var(--kc, var(--ink-3))); font-size: 10.5px; }
 .book-meta span.kchip .ic { width: 11px; height: 11px; }
-.chip.kchip { color: var(--kc, var(--accent-ink)); font-size: 12px; gap: 6px; }   /* 继续阅读卡：与同排状态 chip 同号 */
+.chip.kchip { color: var(--kc-text, var(--kc, var(--accent-ink))); font-size: 12px; gap: 6px; }   /* 继续阅读卡：与同排状态 chip 同号 */
 
 /* 正文未落库徽标：书架卡窄，只写「未落库」，完整原因放悬浮说明；
    继续阅读卡与书架页头有地方，写全「仅本机 · 正文未落库」。 */
@@ -67,7 +68,7 @@
   display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;
   font-size: 10.5px; letter-spacing: .06em; line-height: 1; padding: 3px 8px;
   border-radius: 999px; white-space: nowrap;
-  color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
+  color: var(--amber-ink); border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
   background: color-mix(in oklab, var(--amber) 12%, transparent);
 }
 .book-meta span.bc-stored .ic { width: 11px; height: 11px; }
@@ -76,7 +77,7 @@
 .imp-kind-hint {
   display: flex; align-items: flex-start; gap: 6px; margin-top: 7px;
   font-size: 11.5px; line-height: 1.65; letter-spacing: .03em;
-  color: var(--kc, var(--accent-ink));
+  color: var(--kc-text, var(--kc, var(--accent-ink)));
 }
 .imp-kind-hint[hidden] { display: none; }
 .imp-kind-hint .ic { margin-top: 2px; }
@@ -144,12 +145,13 @@
   margin-top: 9px; display: flex; gap: 7px; align-items: flex-start;
   font-size: 12.5px; line-height: 1.7; color: var(--ink-2);
 }
-.bk-warn .ic { flex: none; margin-top: 3px; color: var(--amber); }
+.bk-warn .ic { flex: none; margin-top: 3px; color: var(--amber-ink); }
 @media (max-width: 520px) {
   .bk-stages > div { grid-template-columns: 1fr; gap: 1px; }
   .bk-head { gap: 11px; }
 }
 </style>
+<script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
 <script src="theme.js"></script>
 <script src="scene.js"></script>
@@ -334,7 +336,7 @@
           </div>
         </div>
       </div>
-      <div class="steps-panel" id="stepsPanel" style="display:none"></div>
+      <div class="steps-panel" id="stepsPanel" aria-live="polite" style="display:none"></div>
       <div id="parseResult" style="display:none">
         <div class="hr"></div>
         <div class="row-between mb-12">
@@ -351,7 +353,7 @@
   </div>
 </div>
 
-<div class="toast-root" id="toastRoot"></div>
+<div class="toast-root" id="toastRoot" aria-live="polite" aria-atomic="false"></div>
 <script src="mock.js"></script>
 <script src="md.js"></script>
 <script src="api.js"></script>
@@ -437,7 +439,7 @@
           '<span class="chip kchip" data-kind="' + (KINDS8.indexOf(d.type) >= 0 ? d.type : "book") + '">' + icon(typeIcon(d.type), 13) + '继续阅读 · ' + kindName(d.type) + '</span>' +
           '<span class="chip" title="' + esc(remainTip) + '">' + icon("clock", 13) + '已读 ' + p + '% · ' + esc(remainTxt) + '</span>' +
           storedBadge(d, true) + '</div>' +
-        '<h3>' + esc(d.title) + '</h3>' +
+        '<h2>' + esc(d.title) + '</h2>' +
         '<div class="cc-sub">' + esc(d.author) + ' · ' + esc(d.meta) + '</div>' +
         '<div class="bar bar-mark" style="max-width:420px"><i style="width:' + p + '%"></i></div>' +
         /* v2.17：这一行原本写「已读 62% · 共 14 页 · 已标注 15 项任务出处」——
@@ -550,9 +552,19 @@
       return true;
     });
     var readingN = list.filter(function (d) { var x = pctOf(d); return x > 0 && x < 100; }).length;
-    qs("#shelfCount").textContent = "共 " + list.length + " 本 · 在读 " + readingN + " 本";
+    var totalN = shelfList().length;
+    qs("#shelfCount").textContent = totalN ? "共 " + list.length + " 本 · 在读 " + readingN + " 本" : "还没有藏书";
     if (!list.length) {
-      qs("#coverGrid").innerHTML = '<div class="empty" style="grid-column:1/-1">' + icon("search", 30) + '<p>没有匹配的藏书<br>试试其它关键词或切换分类</p></div>';
+      /* v2.22 三态：0 本与「有书但筛无结果」是两回事 —— 前者给专属空态
+         （导入 / 用示例文档走一遍完整流程），后者才是搜索型文案。 */
+      qs("#coverGrid").innerHTML = totalN
+        ? '<div class="empty" style="grid-column:1/-1">' + icon("search", 30) + '<p>没有匹配的藏书<br>试试其它关键词或切换分类</p></div>'
+        : '<div class="empty" style="grid-column:1/-1">' + icon("library", 30) +
+          "<p>书架还是空的<br>导入一本书或一份文档；也可以先用示例文档看看完整流程</p>" +
+          '<div class="row" style="gap:10px;justify-content:center;margin-top:16px">' +
+            '<button type="button" class="btn btn-primary" id="emptyImport">' + icon("file-input", 15) + "导入文档</button>" +
+            '<button type="button" class="btn btn-ghost" id="emptyDemo">' + icon("sparkles", 15) + "试用示例文档</button>" +
+          "</div></div>";
       return;
     }
     qs("#coverGrid").innerHTML = list.map(function (d) {
@@ -581,6 +593,9 @@
   qs("#coverGrid").addEventListener("click", function (e) {
     var edit = e.target.closest("[data-edit]");
     if (edit) { openEdit(edit.dataset.edit); return; }
+    /* 0 本空态的两个出口：导入 / 示例文档 */
+    if (e.target.closest("#emptyImport")) { openImport(); return; }
+    if (e.target.closest("#emptyDemo")) { openImport(); startDemo(); return; }
     if (!state.manage) return;
     var card = e.target.closest(".book-card");
     if (!card) return;
@@ -954,11 +969,30 @@
       runParse(f.name, impText, data.kind, seq);
     }
   }
+  /* 解析失败：不再走「提示一句 + 按原样归档」的旧路 —— 归档的结果是书架上多出
+     一本点开即空的书，比直说读不了更糟（与 refuseDrm 同一原则）。改在原地给一次
+     明确选择：重试（同一文件重跑 takeFile）或换一个文件；原因是人话，就地摊开。 */
   function takeFail(f, msg, seq) {
     if (seq != null && seq !== impSeq) return;   /* 已被新文件取代：不该再弹上一轮的错 */
-    toast(msg + " · 文档将按原样归档", "info");
-    impText = null; impBlocks = null; impSniff = "";
-    runParse(f.name, "", "", seq);
+    impText = null; impBlocks = null; impSniff = ""; impBook = null; impExcerpt = "";
+    clearParseResult();
+    qs("#dropzone").style.display = "none";
+    var panel = qs("#stepsPanel");
+    panel.style.display = "block";
+    panel.innerHTML = '<div class="imp-fail">' + icon("alert-triangle", 20) +
+      "<div><b>「" + esc(f.name || "该文件") + "」没能解析</b>" +
+      '<p class="card-note">' + esc(msg) + "</p>" +
+      '<div class="row" style="gap:10px">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="failRetry">' + icon("rotate-ccw", 13) + "重试</button>" +
+        '<button type="button" class="btn btn-sm btn-ghost" id="failOther">换个文件</button>' +
+      "</div></div></div>";
+    qs("#failRetry").addEventListener("click", function () { panel.style.display = "none"; takeFile(f); });
+    qs("#failOther").addEventListener("click", function () {
+      panel.style.display = "none";
+      qs("#dropzone").style.display = "";
+      qs("#impFile").click();
+    });
+    toast("导入未完成 · 可在窗口内选择重试或换个文件", "info");
   }
 
   /* ---------- EPUB → 本机书仓（v2.21 E5）----------
@@ -1073,10 +1107,10 @@
     qs("#impConfirm").disabled = false;
   }
 
-  /* 示例文档的文本：从 mock 计划的正文块反拼（标题 + 列表 + 引文），保持演示完整 */
+  /* 示例文档的文本：从试用示例（DB.demoPlan）的正文块反拼（标题 + 列表 + 引文），保持演示完整 */
   function demoText() {
     var lines = [];
-    (DB.contents["plan-01"] || []).forEach(function (b) {
+    (DB.demoPlan || []).forEach(function (b) {
       if (b.type === "h1") lines.push("# " + b.x);
       else if (b.type === "h2") lines.push("## " + b.x);
       else if (b.type === "h3") lines.push("### " + b.x);
@@ -1084,6 +1118,14 @@
       else if (b.items) b.items.forEach(function (it) { lines.push("- " + (typeof it === "string" ? it : it.x)); });
     });
     return lines.join("\n");
+  }
+  /* 载入示例文档并直接跑一轮解析：空态「试用示例文档」与文件选择取消回退共用 */
+  function startDemo() {
+    impFile = null;
+    impText = demoText();
+    impBlocks = window.MD ? MD.blocks(impText) : [];
+    impSniff = "";
+    runParse(DEMO_FILE, impText, "");
   }
 
   /* 类别分段：只高亮某一档 */
@@ -1280,13 +1322,7 @@
     if (!f) return;
     takeFile(f);
   });
-  qs("#impFile").addEventListener("cancel", function () {
-    impFile = null;
-    impText = demoText();
-    impBlocks = window.MD ? MD.blocks(impText) : [];
-    impSniff = "";
-    runParse(DEMO_FILE, impText, "");
-  });
+  qs("#impFile").addEventListener("cancel", function () { startDemo(); });
   qs("#dropzone").addEventListener("dragover", function (e) {
     e.preventDefault();
     qs("#dropzone").classList.add("dragover");
@@ -1365,10 +1401,12 @@
     }
     qs("#resList").innerHTML = tasks.map(function (t) {
       var on = !!parsedToday[t.id];
+      /* 如实说明这条会落到哪儿：带月份的条目进「月度清单」，其余进日清单 */
+      var where = t.monthLabel ? "月度 · " + t.monthLabel + (t.phase ? " · " + t.phase : "") : "导入任务";
       return '<div class="parse-row">' +
         '<span class="pr-check">' + icon("circle-check", 17) + '</span>' +
         '<div class="pr-body"><div class="pr-title">' + esc(t.x) + '</div>' +
-          '<div class="pr-src">导入任务 ｜ ' + esc(d.fileName || "本地导入") + '</div></div>' +
+          '<div class="pr-src">' + esc(where) + ' ｜ ' + esc(d.fileName || "本地导入") + '</div></div>' +
         '<button type="button" class="chip chip-btn' + (on ? " on" : "") + '" data-today="' + t.id + '"' +
           ' aria-pressed="' + (on ? "true" : "false") + '" title="导入后直接出现在「今日聚焦」">' + icon("sun", 12) + '今日</button>' +
       '</div>';
@@ -1410,7 +1448,8 @@
     var blocks = book ? [] : (impBlocks || (impText && window.MD ? MD.blocks(impText) : []));
     var words = book ? (Number(book.words) || 0) : (impText ? impText.replace(/\s+/g, "").length : 0);
     var tasks = (parsed.tasks || []).map(function (t) {
-      return { x: t.x, today: !!parsedToday[t.id] };
+      return { x: t.x, today: !!parsedToday[t.id], kind: t.kind,
+               month: t.month, monthLabel: t.monthLabel, phase: t.phase };
     });
     var payload = { kind: kind, group: group, tags: tags, fileName: fileName, title: title, blocks: blocks, words: words, tasks: tasks };
     if (book) {

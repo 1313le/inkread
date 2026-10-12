@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dist-*/
+# 本机 360 会锁住 dist/win-unpacked/resources/app.asar（EBUSY），成品轮固定落 dist2
+dist2/
 backups/
 .work/
 *.log

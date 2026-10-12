@@ -8,6 +8,7 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="fonts/local.css">
 <link rel="stylesheet" href="styles.css">
+<script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
 <script src="theme.js"></script>
 </head>
@@ -26,15 +27,15 @@
             <h1 class="page-title">任务</h1>
             <span class="ph-sub" id="tasksSub"></span>
           </div>
-          <div class="ph-actions">
-            <a class="btn btn-ghost" href="reader.html?doc=plan-01"><span id="icSrc"></span>查看计划原文</a>
+          <div class="ph-actions" id="phActions">
+            <a class="btn btn-ghost" id="srcLink" href="#"><span id="icSrc"></span>查看原文</a>
             <button class="btn btn-mark" id="btnBatch"><span id="icBatch"></span>批量设今日</button>
           </div>
         </div>
         <div class="rule-2line" aria-hidden="true"></div>
 
-        <div class="card card-pad mb-18">
-          <div class="row" style="gap:26px;flex-wrap:wrap">
+        <div class="card card-pad mb-18" id="headCard">
+          <div class="row" style="gap:26px;flex-wrap:wrap" id="headRow">
             <div class="row" style="gap:16px">
               <div class="ring" id="dayRing"><i>0%</i></div>
               <div>
@@ -45,8 +46,8 @@
             <span class="spacer"></span>
             <div class="row wrap" style="gap:10px" id="dayStats"></div>
           </div>
-          <div class="hr"></div>
-          <div class="row-between mb-12">
+          <div class="hr" id="cardHr"></div>
+          <div class="row-between mb-12" id="toolRow">
             <div class="seg" id="scopeSeg">
               <button class="seg-btn on" data-scope="daily">今日清单</button>
               <button class="seg-btn" data-scope="monthly">月度清单</button>
@@ -58,6 +59,10 @@
           </div>
           <div id="dailyWrap"></div>
           <div id="monthlyWrap" style="display:none"></div>
+        </div>
+
+        <div class="card card-pad" id="zeroWrap" style="display:none">
+          <div class="empty" id="zeroBox"></div>
         </div>
       </div>
     </main>
@@ -96,7 +101,7 @@
   </div>
 </div>
 
-<div class="toast-root" id="toastRoot"></div>
+<div class="toast-root" id="toastRoot" aria-live="polite" aria-atomic="false"></div>
 <script src="mock.js"></script>
 <script src="md.js"></script>
 <script src="api.js"></script>
@@ -111,12 +116,20 @@
   Object.keys(IC).forEach(function (id) { var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16); });
   qs("#batchX").innerHTML = icon("x", 18);
 
-  /* 任务来源：mock 清单 + 本机导入任务 + 分配覆盖的合并视图（API.localTasks），
-     导入文档确认后生成的任务在这里立即可见；不直接改 mock 原对象。 */
+  /* 任务来源：本机导入任务 + 分配覆盖的合并视图（API.localTasks），
+     导入文档确认后生成的任务在这里立即可见。v2.22 起演示任务不再常驻。 */
   var TASKS = (window.API && API.localTasks) ? API.localTasks() : DB.tasks.slice();
-  var impN = Math.max(0, TASKS.length - DB.tasks.length);   /* 导入任务条数 */
   var daily = TASKS.filter(function (t) { return t.kind === "daily"; });
   var monthly = TASKS.filter(function (t) { return t.kind === "monthly"; });
+
+  /* 页头「查看原文」指向第一条任务的来源文档（v2.22 台账 5：原为死链 plan-01）；
+     没有来源文档（无任务 / 手记任务）时单独隐藏这颗钮 —— 留着就是指向 # 的死链，
+     整组页头操作在零任务时另由 renderZero 收起。 */
+  if (TASKS.length && TASKS[0].docId) {
+    qs("#srcLink").href = "reader.html?doc=" + encodeURIComponent(TASKS[0].docId);
+  } else {
+    qs("#srcLink").style.display = "none";
+  }
 
   /* 批量分配弹窗里的范围选项：条数按合并后的真实清单给出 */
   qsa("#batchScope option").forEach(function (o) {
@@ -128,9 +141,15 @@
 
   function taskCard(t, inTimeline) {
     var on = done(t.id);
+    /* 既无日期也无月份的条目（月度清单里的「未标注月份」组）不出徽标：
+       84px 描边盒子空着就是一道视觉噪声，正文自己会顶到左边。 */
+    var when = t.time || t.monthLabel || "", sub = t.week || t.phase || "";
+    var badge = (when || sub)
+      ? '<div class="task-time">' + esc(when) + '<br><span style="font-size:10.5px;color:var(--ink-3)">' + esc(sub) + "</span></div>"
+      : "";
     var card =
       '<div class="task-card' + (on ? " done" : "") + '" id="' + t.id + '">' +
-        '<div class="task-time">' + esc(t.time || t.monthLabel) + '<br><span style="font-size:10.5px;color:var(--ink-3)">' + esc(t.week || t.phase) + "</span></div>" +
+        badge +
         '<div class="task-body">' +
           '<div class="task-title">' + esc(t.title) + "</div>" +
           '<div class="task-quote">' + esc(t.quote) +
@@ -166,55 +185,80 @@
   }
 
   function renderMonthly() {
-    var out = DB.months.map(function (m) {
-      var list = monthly.filter(function (t) { return t.month === m.key; });
-      if (state.focus) list = list.filter(function (t) { return t.today; });
-      if (state.focus && !list.length) return "";   /* 非聚焦时保持原样：空月份也照常显示进度头 */
+    /* v2.22：月份分组从任务自身派生（此前读 DB.months 演示数据 —— 导入任务
+       即使带月份字段也永远不显示）。空月份不再预置。 */
+    var order = [], byKey = {};
+    monthly.forEach(function (t) {
+      var k = t.month || "misc";
+      /* 无月份字段的任务聚到内部键 misc —— 组头给人话，不把键名晾在界面上。 */
+      if (!byKey[k]) { byKey[k] = { key: k, label: t.monthLabel || (k === "misc" ? "未标注月份" : k), phase: t.phase || "", list: [] }; order.push(byKey[k]); }
+      byKey[k].list.push(t);
+    });
+    order.sort(function (a, b) { return String(a.key).localeCompare(String(b.key), "zh-Hans-CN"); });
+    var out = order.map(function (m) {
+      var list = state.focus ? m.list.filter(function (t) { return t.today; }) : m.list;
+      if (state.focus && !list.length) return "";
       var dn = list.filter(function (t) { return done(t.id); }).length;
       var pct = list.length ? Math.round(dn / list.length * 100) : 0;
       return '<div class="month-block">' +
-        '<div class="month-head"><h3>' + esc(m.label) + " · " + esc(m.phase) + "</h3>" +
+        '<div class="month-head"><h3>' + esc(m.label) + (m.phase ? " · " + esc(m.phase) : "") + "</h3>" +
           '<span class="bar mh-bar"><i style="width:' + pct + '%"></i></span>' +
           '<span class="mh-pct">' + dn + "/" + list.length + "</span></div>" +
         list.map(function (t) { return taskCard(t, false); }).join("") +
         "</div>";
     }).join("");
-    qs("#monthlyWrap").innerHTML = out || (state.focus ? focusEmpty() : "");
+    qs("#monthlyWrap").innerHTML = out || (state.focus ? focusEmpty()
+      : '<p class="card-note" style="padding:18px 4px">还没有月度任务 —— 导入带月度计划的文档后，任务会按月份分组出现在这里。</p>');
   }
 
   function renderHead() {
     var dn = daily.filter(function (t) { return done(t.id); }).length;
-    var pct = Math.round(dn / daily.length * 100);
     var ring = qs("#dayRing");
-    ring.style.setProperty("--p", pct);
+    ring.style.setProperty("--p", daily.length ? Math.round(dn / daily.length * 100) : 0);
     /* v2.17：环上原来写「0%」，与右侧「今日完成 0/5」和下面那句「已完成 0 / 5 项」
        是同一个数的三次表达。环的弧长本身就表示百分比，环心改写成 0/5 这个分数，
-       于是「今日」这一维只剩一处读数，另两处删掉。 */
-    ring.querySelector("i").textContent = dn + "/" + daily.length;
+       于是「今日」这一维只剩一处读数，另两处删掉。
+       v2.22：无每日任务时给「—」占位，不留 0/0。 */
+    ring.querySelector("i").textContent = daily.length ? dn + "/" + daily.length : "—";
     var d = new Date();
     var wk = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()];
     qs("#dayNote").innerHTML = d.getFullYear() + " 年 " + (d.getMonth() + 1) + " 月 " + d.getDate() + " 日 · 周" + wk +
-      (impN > 0 ? "<br>含导入任务 " + impN + " 项" : "<br>来自《2026 考研英语备考全程规划》第四章");
+      "<br>共 " + TASKS.length + " 项任务 · 由导入文档逐条解析";
     var mAll = monthly.length, mDone = monthly.filter(function (t) { return done(t.id); }).length;
     var total = TASKS.length, tDone = TASKS.filter(function (t) { return done(t.id); }).length;
     /* 连续打卡没有日期维度，按「今天有打卡 = 1 天，否则 0 天」的保守口径 */
     var hasCheckin = Object.keys(ck || {}).length > 0;
+    /* v2.22：分母为 0 的读数给「—」占位 —— 此前 0/0 会算出 NaN% 直接上屏 */
     qs("#dayStats").innerHTML = [
-      { k: "月度完成", v: mDone + "/" + mAll, i: "calendar-days" },
-      { k: "总完成率", v: Math.round(tDone / total * 100) + "%", i: "target" },
+      { k: "月度完成", v: mAll ? mDone + "/" + mAll : "—", i: "calendar-days" },
+      { k: "总完成率", v: total ? Math.round(tDone / total * 100) + "%" : "—", i: "target" },
       { k: "连续打卡", v: (hasCheckin ? 1 : 0) + " 天", i: "flame" }
     ].map(function (c) {
       return '<div class="chip" style="padding:7px 13px">' + icon(c.i, 14) + c.k + "　<b>" + c.v + "</b></div>";
     }).join("");
     qs("#scopeNote").textContent = (state.focus ? "今日聚焦 · 只显示标了「今日」的任务" :
-      state.scope === "daily" ? "每日例行任务 · 与文档第四章逐条对应"
-                              : "月度任务 · 与文档第三章逐条对应");
-    qs("#tasksSub").textContent = "从计划文档解析出 " + DB.tasks.length + " 项任务" +
-      (impN > 0 ? " · 另有导入任务 " + impN + " 项" : "") +
-      " · 打卡与今日标记本地保存";
+      state.scope === "daily" ? "每日任务 · 由导入文档逐条解析"
+                              : "月度任务 · 按计划月份分组");
+    qs("#tasksSub").textContent = TASKS.length
+      ? "共 " + TASKS.length + " 项任务 · 打卡与今日标记本地保存"
+      : "导入计划文档后，任务在这里自动生成";
   }
 
-  function renderAll() { renderHead(); renderDaily(); renderMonthly(); }
+  /* v2.22 三态：0 任务时整卡换成空态（环形 / 分段器 / 批量设置都没有可作用的对象），
+     页头操作一并收起；引导指向真实存在的两条路：导入解析、阅读页任务抽屉。 */
+  function renderZero() {
+    var zero = !TASKS.length;
+    qs("#headCard").style.display = zero ? "none" : "";
+    qs("#zeroWrap").style.display = zero ? "" : "none";
+    qs("#phActions").style.display = zero ? "none" : "";
+    if (zero && !qs("#zeroBox").innerHTML) {
+      qs("#zeroBox").innerHTML = icon("clipboard-check", 30) +
+        "<p>还没有任务<br>导入一份计划 / 备考文档，墨读会逐条解析成可打卡的任务；<br>打开文档后，阅读页右下角的任务抽屉可随时勾画</p>" +
+        '<a class="btn btn-primary" href="index.html" style="margin-top:14px">去导入文档</a>';
+    }
+  }
+
+  function renderAll() { renderZero(); renderHead(); renderDaily(); renderMonthly(); }
 
   /* 打卡 / 撤销 / 分配 */
   document.addEventListener("click", async function (e) {
@@ -230,7 +274,9 @@
       renderAll();
       var el = qs("#" + id);
       if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); }
-      toast("已打卡 " + r.data.time + " · 已本地保存", "stamp");
+      /* stored=false：打卡没落盘（配额满/禁写），重读后界面会回到未打卡态 —— 如实说明 */
+      if (r && r.data && r.data.stored === false) toast("打卡没能保存：本机存储写不进去（空间已满或被禁用）", "alert-triangle");
+      else toast("已打卡 " + r.data.time + " · 已本地保存", "stamp");
     } else if (u) {
       await API.undoCheckin(u.dataset.undo);
       ck = InkStore.getCheckins();

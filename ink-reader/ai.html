@@ -122,6 +122,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   body[data-page="ai"] #glList { max-height: 46dvh; }
 }
 </style>
+<script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
 <script src="theme.js"></script>
 </head>
@@ -241,7 +242,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
                 </div>
               </div>
 
-              <div id="glList"></div>
+              <div id="glList" tabindex="0" role="region" aria-label="词表"></div>
               <div class="gl-add">
                 <input class="field" id="glSrc" placeholder="原词，如「注意力」" aria-label="原词">
                 <input class="field" id="glDst" placeholder="译名，如 attention" aria-label="译名">
@@ -377,7 +378,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   </div>
 </div>
 
-<div class="toast-root" id="toastRoot"></div>
+<div class="toast-root" id="toastRoot" aria-live="polite" aria-atomic="false"></div>
 <script src="mock.js"></script>
 <script src="md.js"></script>
 <script src="voices-data.js"></script>
@@ -584,8 +585,11 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
           paintStreaming(holder, all);
         }
       });
-      if (holder) finalizeStreaming(holder, r.reply, r.refs, r);
-      else { typing(false); pushMsg("ai", r.reply, r.refs, r); }
+      /* r.note：模型请求失败、brain.js 已改用离线库作答 —— 原因必须让用户看见，
+         否则会把降级后的离线答案当成模型给的（v2.22 主脑错误态）。 */
+      var shown = r.note ? r.reply + "\n\n> " + r.note : r.reply;
+      if (holder) finalizeStreaming(holder, shown, r.refs, r);
+      else { typing(false); pushMsg("ai", shown, r.refs, r); }
     } catch (e) {
       typing(false);
       if (holder) holder.remove();
@@ -1075,7 +1079,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   }
 
   function blocks_p() {
-    var c = DB.contents["plan-01"] || [];
+    var c = DB.demoPlan || [];
     var li = c.filter(function (b) { return b.type === "list" && b.items && b.items.length && b.items[0].id && b.items[0].id.indexOf("d-t") === 0; })[0];
     return li ? "<p>" + li.items.map(function (i) { return esc(i.x); }).join("</p><p>") + "</p>" : "";
   }

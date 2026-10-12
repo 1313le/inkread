@@ -546,12 +546,15 @@
     if (str.length > LS_CEIL) return false;
     return lsWrite(K_TASKS, str) === "";
   }
-  /* mock 任务 + 本机覆盖 / 导入任务的合并视图。
+  /* 演示任务 + 本机覆盖 / 导入任务的合并视图。
      一律返回副本：覆盖只改副本的 assignee，导入任务按 mock 同款字段补齐，
-     DB.tasks 原对象从头到尾不被污染。 */
+     DB.tasks 原对象从头到尾不被污染。
+     v2.22：演示任务的合并同样问清空哨兵 —— 与 getShelf/getNotes 同一约定，
+     用户主动清空后（哨兵在）即使 DB.tasks 还有演示条目也不再回播。 */
   function mergedTasks() {
     var ov = taskStoreGet();
-    var out = DB.tasks.map(function (t) {
+    var demo = InkStore.isCleared() ? [] : DB.tasks;
+    var out = demo.map(function (t) {
       var c = Object.assign({}, t);
       if (ov[t.id] && ov[t.id].assignee) c.assignee = ov[t.id].assignee;
       if (ov[t.id] && ov[t.id].today) c.today = true;
@@ -561,33 +564,76 @@
       var r = ov[id];
       if (!r || !r.x) return;                       /* 无 x = 只是分配覆盖，不是独立任务 */
       if (out.some(function (t) { return t.id === id; })) return;
-      out.push({
-        id: id, kind: r.kind || "daily", week: r.week || "", time: r.time || "",
-        title: r.x, quote: r.x, anchor: "", docId: r.docId || "",
-        src: r.src || "本地导入", assignee: r.assignee || "", today: !!r.today
-      });
+      /* 整条记录铺底再补展示字段：白名单拷贝会把 month / monthLabel / phase
+         这类「任务页分组要用、DB.tasks 里有」的字段静默洗掉。 */
+      var c = Object.assign({ kind: "daily", week: "", time: "", anchor: "", docId: "",
+                              src: "本地导入", assignee: "", month: "", monthLabel: "", phase: "" }, r);
+      c.id = id; c.title = r.x; c.quote = r.x; c.today = !!r.today;
+      out.push(c);
     });
     return out;
   }
   /* 任务抽取规则（见 parseDocument 注释）：剥掉列表前缀后按长度 + 前缀 / 关键词判定 */
   var TASK_KW = /周|月|日|每天|每周|每月|完成|背|做|复习|提交|整理/;
+  /* 关键词命中不等于「这是待办」：报告 / 论文正文里「先整理…再…」这类叙述句同样带动词，
+     整段被抽成任务比漏抽更糟 —— 它直接进用户的清单。条目身份以显式结构为准（列表行无条件算），
+     非列表行再加两道散文判定：句末标点、或连着一串顿读子句。真条目一般一个逗号就到头，
+     像「背完词汇，做完真题，整理错题本」仍收；「本报告围绕…展开，先…，再…，最后…。」不收。 */
+  function isProseLine(s) {
+    if (/[。！？!?…]$/.test(s)) return true;
+    return (s.match(/[，,；;、]/g) || []).length >= 3;
+  }
   function stripTaskPrefix(s) {
     return String(s || "").replace(/^(?:\s*[-*+]\s+|\s*\d+[.、)]\s*)+/, "").trim();
   }
+  /* 月份只在标题行里认：条目正文的「近 12 月」「每月」是数量与频率，不是时点，
+     从条目猜日期会把计划读乱，宁缺毋滥。 */
+  var CN_MONTH = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
+  var CN_NUM = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二"];
+  function monthOf(head, defYear) {
+    var t = String(head || "").replace(/\s+/g, ""), m, n;
+    m = t.match(/(20\d{2})[年\-/.](\d{1,2})月/);
+    if (m) { n = +m[2]; if (n >= 1 && n <= 12) return { year: +m[1], num: n }; }
+    m = t.match(/(?:^|[^\d])(\d{1,2})月/);
+    if (m) { n = +m[1]; if (n >= 1 && n <= 12) return { year: defYear, num: n }; }
+    m = t.match(/(十[一二]|[一二三四五六七八九十])月/);
+    if (m && CN_MONTH[m[1]]) return { year: defYear, num: CN_MONTH[m[1]] };
+    return null;
+  }
+  function phaseOf(head) {
+    var m = String(head || "").match(/[一-龥]{2,4}阶段/);
+    return m ? m[0] : "";
+  }
   function extractTasks(text, fileName) {
     var lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
-    var out = [], inFence = false, n = 0;
+    var out = [], inFence = false, n = 0, defYear = new Date().getFullYear();
+    var ctx = { month: "", monthLabel: "", phase: "" };
     lines.forEach(function (raw) {
       var line = String(raw).trim();
       if (/^```/.test(line)) { inFence = !inFence; return; }   /* 围栏代码整体跳过 */
       if (inFence || !line) return;
-      if (/^#{1,6}\s/.test(line)) return;                      /* 标题是结构，不是任务 */
+      if (/^#{1,6}\s/.test(line)) {                             /* 标题不是任务，但带着分组依据 */
+        var lvl = line.match(/^#+/)[0].length, mo = monthOf(line, defYear), ph = phaseOf(line);
+        if (lvl === 1) ctx = { month: "", monthLabel: "", phase: "" };
+        if (mo) {
+          ctx.month = mo.year + "-" + (mo.num < 10 ? "0" + mo.num : mo.num);
+          /* 当年只写月份，跨年补年份 —— 分组键带年份，标题按墨读的语气用中文数字 */
+          ctx.monthLabel = (mo.year === defYear ? "" : mo.year + " · ") + CN_NUM[mo.num] + "月";
+          ctx.phase = ph;                                        /* 换月即重读阶段，不沿用上月 */
+        } else if (ph) {
+          ctx.phase = ph;
+        }
+        return;
+      }
       var body = stripTaskPrefix(line);
       if (body.length < 8 || body.length > 60) return;
       var isItem = /^([-*+]|\d+[.、)])\s+/.test(line);
       if (!isItem && !TASK_KW.test(body)) return;
+      if (!isItem && isProseLine(body)) return;
       n++;
-      out.push({ id: "t-" + n, x: body, docId: "", src: fileName || "" });
+      var t = { id: "t-" + n, x: body, docId: "", src: fileName || "" };
+      if (ctx.month) { t.kind = "monthly"; t.month = ctx.month; t.monthLabel = ctx.monthLabel; t.phase = ctx.phase; }
+      out.push(t);
     });
     return out;
   }
@@ -1068,6 +1114,21 @@
         : "本机存储空间已满";
     },
 
+    /* 模型请求异常里给用户看的那半句。浏览器抛的多是英文（Failed to fetch、
+       abort），直接拼进文案等于把堆栈碎片端到人话界面上。按错型归成人话：
+       abort 在本机只由超时计时器触发（见 chatRun/chatMsgs），与「测试连接」
+       的判定口径一致；HTTP 状态翻成能行动的措辞；已是中文的原样透传。 */
+    netErrPhrase(err) {
+      var m = String((err && err.message) || err || "");
+      if (!m) return "网络不通";
+      if (/abort|timed out|timeout/i.test(m)) return "响应超时";
+      if (/failed to fetch|networkerror|load failed|net::/i.test(m)) return "连不上模型服务（网络不通或被跨域拦截）";
+      var st = /\bHTTP\s*(\d{3})\b/i.exec(m);
+      if (st) return { "401": "接口密钥无效（HTTP 401）", "403": "接口拒绝访问（HTTP 403）", "429": "请求太频繁，稍后再试（HTTP 429）" }[st[1]]
+        || "模型服务返回 HTTP " + st[1];
+      return m;
+    },
+
     /* 书仓书（EPUB）：开书前把正文取进内存，之后 localContent 同步可读。
        失败如实抛出，由阅读页给出「回书架重新导入」的出口，不假装是一本空书。 */
     async diskContent(doc) {
@@ -1092,8 +1153,9 @@
       note.id = note.id || "n-" + Date.now();
       note.at = note.at || new Date().toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
       note.ntype = note.ntype || "md";
-      InkStore.upsertNote(note);
-      return { code: 0, data: note };
+      /* stored=false：存储满/禁写，条目只在本会话内存里 —— 展示层据此换掉「已保存」的说法 */
+      var stored = InkStore.upsertNote(note);
+      return { code: 0, data: note, stored: stored };
     },
 
     /* DELETE /api/notes/{id} —— 只在已存储底表上删，演示列表不整份入库（v2.11 B3） */
@@ -1106,7 +1168,8 @@
     async checkin(taskId) {
       await delay(380);
       var time = nowHM();
-      InkStore.setCheckin(taskId, time);
+      /* stored=false：打卡没写进存储（配额满/禁写）—— 展示层不许再说「已本地保存」 */
+      var stored = InkStore.setCheckin(taskId, time);
       /* v2.7 统计埋点：打卡成功即记当日 checks，并查里程碑 —— 新到节点广播
          ink:milestone 事件，由展示层（InkCheer 弹窗）监听；纯 API 环境（无组件 /
          无 document）下 dispatch 必须静默失败，绝不因没有弹窗而让打卡报错。 */
@@ -1117,7 +1180,7 @@
           try { document.dispatchEvent(new CustomEvent("ink:milestone", { detail: ms })); } catch (e2) {}
         }
       } catch (e) {}
-      return { code: 0, data: { taskId: taskId, time: time, synced: true } };
+      return { code: 0, data: { taskId: taskId, time: time, synced: true, stored: stored } };
     },
 
     /* DELETE /api/tasks/{id}/checkin
@@ -1175,6 +1238,8 @@
        ① 行首为列表前缀（- / * / 1.）；② 行内含时间词或任务动词
          （周 / 月 / 日 / 每天 / 每周 / 每月 / 完成 / 背 / 做 / 复习 / 提交 / 整理…）。
        长度限定 8–60 字；标题行（#）与围栏代码块只作结构、不算任务。
+       ② 只用于「一行一条」的清单文本：非列表行若带句末标点（。，！？…）或连着三个以上
+       顿读子句，按散文段落丢弃，避免报告 / 论文正文被整段抽成待办。
        无命中时返回空数组，由调用方提示「未识别到任务条目」。 */
     async parseDocument(fileName, text, onStep) {
       var steps = [
@@ -1196,7 +1261,7 @@
        入参 payload：{kind: book|textbook|paper|report|plan|note|comic|other, group, tags:[…], fileName, title,
                       blocks:[…可选，结构化正文块，形状与 mock DB.contents 一致],
                       words: 字数（可选）,
-                      tasks:[{x, owner}]（可选，解析确认后的任务条目）}
+                      tasks:[{x, today, kind, month, monthLabel, phase}]（可选，解析确认后的任务条目）}
        落一条真实书架记录（inkread.shelf.v1），书架与分组筛选即时可见；
        正文块落 inkread.contents.v1（阅读页直接可读，导入的不再是空书）；
        任务落 inkread.tasks.v1（任务页合并可见）；
@@ -1275,11 +1340,17 @@
           var x = String((t && t.x) || "").trim();
           if (!x) return;
           nTasks++;
+          /* 月度项按解析出的月份落库（kind/month/monthLabel/phase 一路带过来）；
+             时间位交给月份本身 —— taskCard 读 time || monthLabel、week || phase。 */
+          var isM = t.kind === "monthly" && !!t.month;
           all["t-" + entry.id.slice(4) + "-" + nTasks] = {
             assignee: "",
             today: (t && t.today) ? 1 : 0,
-            x: x, docId: entry.id, kind: "daily",
-            week: "导入", time: "—",
+            x: x, docId: entry.id, kind: isM ? "monthly" : "daily",
+            week: isM ? "" : "导入", time: isM ? "" : "—",
+            month: isM ? String(t.month) : "",
+            monthLabel: isM ? String(t.monthLabel || "") : "",
+            phase: isM ? String(t.phase || "") : "",
             src: o.fileName || "本地导入",
             at: new Date().toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
           };
@@ -1317,7 +1388,7 @@
           return { code: 0, data: d };
         } catch (e) {
           var st = explainStub(src, ctx);
-          st.note = "主脑解析失败（" + ((e && e.message) || "网络或跨域") + "），已改用本地词表解析。";
+          st.note = "主脑解析失败：" + window.API.netErrPhrase(e) + "，已改用本地词表解析。";
           return { code: 0, data: st };
         }
       }
@@ -1366,7 +1437,7 @@
       } catch (e) {
         await delay(120);
         return { code: 0, data: Object.assign({}, blank, local, {
-          note: "考据请求失败（" + ((e && e.message) || "网络或跨域") + "），已退回「在本文中的落点」。"
+          note: "考据请求失败：" + window.API.netErrPhrase(e) + "，已退回「在本文中的落点」。"
         }) };
       }
     },
@@ -1390,7 +1461,7 @@
           return { code: 0, data: d };
         } catch (e) {
           var loc = localSearch(q, list);
-          loc.note = "主脑检索失败（" + ((e && e.message) || "网络或跨域") + "），已改用本地字符检索。";
+          loc.note = "主脑检索失败：" + window.API.netErrPhrase(e) + "，已改用本地字符检索。";
           return { code: 0, data: loc };
         }
       }
@@ -1533,7 +1604,7 @@
         return { code: 0, data: { count: merged.length, voices: merged.map(function (x) {
           return { k: x.k, name: x.name, mood: x.mood, lang: x.lang, gender: x.gender, age: x.age, cat: x.cat };
         }) } };
-      } catch (e) { return { code: 1, msg: "拉取失败 · " + (e && e.message || "网络错误"), data: { count: 0, voices: [] } }; }
+      } catch (e) { return { code: 1, msg: "拉取失败 · " + window.API.netErrPhrase(e), data: { count: 0, voices: [] } }; }
     },
     /* POST /api/ai/classify —— 文档类别识别（8 类候选的「选择题」）
        入参：{fileName, text}
@@ -1614,7 +1685,7 @@
         await delay(120);
         var d1 = translateStub(src, o);
         d1.from = from; d1.to = to; d1.toName = langName(to) || to;
-        d1.note = "模型请求失败（" + ((e && e.message) || "网络或跨域") + "），已回退原型译文";
+        d1.note = "模型请求失败：" + window.API.netErrPhrase(e) + "，已回退原型译文";
         return { code: 0, data: d1 };
       }
     },

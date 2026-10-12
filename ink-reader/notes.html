@@ -403,6 +403,7 @@ body[data-page="notes"] .mm-stage {
   background-position: 0 0, 9px 9px;
 }
 </style>
+<script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
 <script src="theme.js"></script>
 </head>
@@ -455,14 +456,14 @@ body[data-page="notes"] .mm-stage {
                 <span class="theme-dot" data-color="blue" style="background:var(--blue)"></span>
               </span>
               <span class="spacer"></span>
-              <span class="card-note" id="listCount"></span>
+              <span class="card-note" id="listCount" aria-live="polite"></span>
             </div>
-            <select class="field mb-12" id="docFilter"></select>
+            <select class="field mb-12" id="docFilter" aria-label="按来源文档筛选"></select>
             <div class="search-box note-search mb-12">
               <span id="icNSearch"></span>
-              <input class="field" id="noteSearch" type="search" placeholder="搜索标题、正文、脑图、文档名…" aria-label="搜索笔记">
+              <input class="field" id="noteSearch" type="search" placeholder="搜索笔记…" aria-label="搜索笔记" title="可搜标题、正文、脑图与文档名">
             </div>
-            <div class="notes-list" id="notesList"></div>
+            <div class="notes-list" id="notesList" tabindex="0" role="region" aria-label="笔记列表"></div>
           </div>
 
           <!-- 右：同一份笔记 · 三视图工作台 -->
@@ -587,7 +588,7 @@ body[data-page="notes"] .mm-stage {
   <button class="tool-btn" id="nwExit" title="退出沉浸（Esc）" aria-label="退出沉浸写作"><span id="icNwExit"></span></button>
 </div>
 
-<div class="toast-root" id="toastRoot"></div>
+<div class="toast-root" id="toastRoot" aria-live="polite" aria-atomic="false"></div>
 <script src="mock.js"></script>
 <script src="md.js"></script>
 <script src="api.js"></script>
@@ -676,11 +677,14 @@ body[data-page="notes"] .mm-stage {
   var KIND_LABEL = { highlight: "高亮", note: "笔记", bookmark: "书签", margin: "随笔" };
   var NTYPE_ICON = { outline: "list-tree", mindmap: "network", md: "sigma" };
 
-  function docTitle(id) { var d = DB.shelf.find(function (x) { return x.id === id; }); return d ? d.title : "未知文档"; }
+  /* 文档名 / 筛选 / 归属与书架同源（含用户导入的文档，不再只看 mock 书架） */
+  function noteShelf() { return (window.shelfList ? shelfList() : DB.shelf) || []; }
+  function docTitle(id) { var d = noteShelf().find(function (x) { return x.id === id; }); return d ? d.title : "未知文档"; }
   function curDocId() {
     var n = state.notes.find(function (x) { return x.id === state.curId; });
     if (n) return n.docId;
-    return state.doc !== "all" ? state.doc : "paper-01";
+    var s = noteShelf();
+    return state.doc !== "all" ? state.doc : (s[0] ? s[0].id : "");
   }
   function titleText() { return qs("#titleInput").value.trim() || "中心主题"; }
   function mindNode(id) {
@@ -688,7 +692,7 @@ body[data-page="notes"] .mm-stage {
     return state.mind.nodes.find(function (n) { return n.id === id; }) || null;
   }
 
-  qs("#docFilter").innerHTML = '<option value="all">全部文档</option>' + DB.shelf.map(function (d) {
+  qs("#docFilter").innerHTML = '<option value="all">全部文档</option>' + noteShelf().map(function (d) {
     return '<option value="' + d.id + '">' + esc(d.title) + "</option>";
   }).join("");
 
@@ -818,7 +822,11 @@ body[data-page="notes"] .mm-stage {
         continue;
       }
 
-      attach(raw);
+      /* 开头没有前序行可挂的普通文字：起一行（lv 0）而不是 attach 到 null。
+         旧行为会把「第一个标题/列表之前」的文字整段蒸发 —— md 顶行手写的
+         文字保存后从编辑器和正文里同时消失（闸 n-err 实测到的静默丢字）。 */
+      if (!last) { last = parseInline(0, raw); tree.push(last); }
+      else attach(raw);
       i++;
     }
     return tree;
@@ -958,7 +966,8 @@ body[data-page="notes"] .mm-stage {
   }
 
   function subText(notes) {
-    var docs = DB.shelf.filter(function (d) { return notes.some(function (n) { return n.docId === d.id; }); }).length;
+    if (!notes.length) return "还没有批注 · 划选保存或新建后，都在这里统一管理";
+    var docs = noteShelf().filter(function (d) { return notes.some(function (n) { return n.docId === d.id; }); }).length;
     return notes.length + " 条批注 · 覆盖 " + docs + " 份文档 · 一棵笔记树，大纲 / 脑图 / Markdown 三视图同源";
   }
 
@@ -969,13 +978,21 @@ body[data-page="notes"] .mm-stage {
     qs("#listCount").textContent = query ? "命中 " + list.length + " / " + state.notes.length + " 条" : list.length + " 条";
     qs("#notesSub").textContent = subText(state.notes);
     if (!list.length) {
-      qs("#notesList").innerHTML = query
+      /* v2.22 三态：一条都没有 ≠ 筛选没筛到 —— 前者给专属空态（「还没有笔记」+ 真实两条
+         创建路径：阅读页划选 / 本页「新建笔记」），后者维持原「换个筛选条件」的说法。 */
+      qs("#notesList").innerHTML = !state.notes.length
+        ? '<div class="empty">' + icon("notebook-pen", 30) +
+          "<p>还没有笔记<br>在阅读页划选文字，保存高亮或随笔；也可以直接新建一条大纲 / 脑图</p>" +
+          '<button class="btn btn-primary" id="emptyNew" type="button">' + icon("plus", 15) + "新建笔记</button></div>"
+        : query
         ? '<div class="empty">' + icon("search-x", 28) +
           "<p>未找到与「" + esc(q) + "」匹配的笔记<br>试试更短的关键词，或去掉引号与负号</p>" +
           '<button class="btn btn-ghost" id="btnClearSearch" type="button">清除搜索</button></div>'
         : '<div class="empty">' + icon("notebook-pen", 28) + "<p>没有符合条件的笔记<br>换个筛选条件试试</p></div>";
       var cb = qs("#btnClearSearch");
       if (cb) cb.addEventListener("click", clearSearch);
+      var nb = qs("#emptyNew");
+      if (nb) nb.addEventListener("click", newNote);
       return;
     }
     qs("#notesList").innerHTML = list.map(function (n) {
@@ -1891,6 +1908,7 @@ body[data-page="notes"] .mm-stage {
   });
   /* Esc 退出专注（沉浸写作的 Esc 优先，不抢它的活） */
   document.addEventListener("keydown", function (e) {
+    if (window.InkKeys && InkKeys.isOpen()) return;   /* 命令面板 / 总览置顶：Esc 先归它们 */
     if (e.key !== "Escape" || !mdFocusOn() || imm.on) return;
     if (state.view !== "md") return;
     e.preventDefault(); e.stopPropagation();
@@ -2057,6 +2075,7 @@ body[data-page="notes"] .mm-stage {
   /* ---------- 保存：手动 / 自动共用 saveNow；2.5s 防抖自动保存 ---------- */
   var autoTimer = null;                          /* 自动保存防抖句柄 */
   var lastSave = { at: null, auto: false };      /* 最近一次成功保存（用于状态文字） */
+  var quotaWarned = false;                       /* 存储写不进去的提醒每会话只弹一次（自动档） */
   function pad2(x) { return ("0" + x).slice(-2); }
   function hmOf(d) { return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
 
@@ -2114,9 +2133,17 @@ body[data-page="notes"] .mm-stage {
       var r = await API.saveNote(note);
       if (existing) Object.assign(existing, r.data);
       else { state.notes.unshift(r.data); state.curId = r.data.id; }
-      lastSave = { at: new Date(), auto: !manual };
+      if (r.stored !== false) lastSave = { at: new Date(), auto: !manual };   /* 没落盘就不记「已保存」时刻 */
       renderList();
-      if (manual) {
+      if (r.stored === false) {
+        /* 存储写不进去（配额满 / 禁写）：内容只在本会话内存里 —— 不许说「已保存」，
+           手动档把实情摊开；自动档每会话只提醒一次，别等用户关页才发现丢稿。 */
+        openNote(state.curId);
+        if (manual || !quotaWarned) {
+          quotaWarned = true;
+          toast("笔记没能写入本机存储（空间已满或被禁用）· 本次会话内可继续编辑，关闭前请先导出", "alert-triangle");
+        }
+      } else if (manual) {
         openNote(state.curId);   /* 原逻辑：回读刷新三视图 */
         InkFX.flash();           /* 墨屏一闪只给手动保存，自动保存静默不打断书写 */
         toast("笔记已保存 · 三视图同源 · 双端已同步", "circle-check");
@@ -2259,15 +2286,16 @@ body[data-page="notes"] .mm-stage {
   });
   document.addEventListener("pointermove", wake, { passive: true });
   document.addEventListener("pointerdown", wake, { passive: true });
+  /* v2.22 S5：Ctrl/Cmd+S 与 F（沉浸写作）移入 InkKeys 注册表；
+     Ctrl+S inInput:true 保持「全页可用」原语义；F 用默认字段守卫
+     （INPUT/TEXTAREA/contenteditable 放行，与原实现逐项一致）。
+     Escape（退出沉浸）留局部。 */
+  if (window.InkKeys) {
+    InkKeys.on("mod+s", function () { saveNow(true); }, { inInput: true, title: "保存笔记", group: "笔记" });
+    InkKeys.on("f", function () { if (imm.on) immExit(); else immEnter(); }, { title: "沉浸写作", group: "笔记" });
+  }
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && imm.on) { e.preventDefault(); immExit(); return; }
-    if ((e.key === "s" || e.key === "S") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNow(true); return; }  /* Ctrl+S 全页可用 */
-    if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      var t = e.target, tag = (t.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || t.isContentEditable) return;
-      e.preventDefault();
-      if (imm.on) immExit(); else immEnter();
-    }
   });
 
   /* 任何落笔都算改动：输入框走 input，结构操作走一次委托点击 */

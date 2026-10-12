@@ -1151,7 +1151,7 @@
         };
       } catch (e) {
         var off = await offline(q, { docId: docId });
-        off.note = "模型请求失败（" + ((e && e.message) || "网络或跨域") + "），已改用离线库作答。";
+        off.note = "模型请求失败：" + API.netErrPhrase(e) + "，已改用离线库作答。";
         off.refs = off.refs || mems.map(function (m) { return m.id; });
         return off;
       }
