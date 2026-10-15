@@ -55,11 +55,11 @@
   background: color-mix(in oklab, var(--kc, var(--ink-3)) 12%, transparent);
   white-space: nowrap;
 }
-.kchip .ic { width: 12px; height: 12px; }
+.kchip .ic { width: var(--ic-xs); height: var(--ic-xs); }   /* v2.23 §W3 第六步：写死 px 会盖掉 svg 属性，收进五档 */
 /* 卡下徽标是 .book-meta 里的 span，styles.css 的 .book-meta span（颜色 / 字号）
    优先级更高，这里必须显式抬回来 —— 否则类徽标只剩底色、文字全是灰的。 */
 .book-meta span.kchip { color: var(--kc-text, var(--kc, var(--ink-3))); font-size: 10.5px; }
-.book-meta span.kchip .ic { width: 11px; height: 11px; }
+.book-meta span.kchip .ic { width: var(--ic-xs); height: var(--ic-xs); }
 .chip.kchip { color: var(--kc-text, var(--kc, var(--accent-ink))); font-size: 12px; gap: 6px; }   /* 继续阅读卡：与同排状态 chip 同号 */
 
 /* 正文未落库徽标：书架卡窄，只写「未落库」，完整原因放悬浮说明；
@@ -71,7 +71,7 @@
   color: var(--amber-ink); border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
   background: color-mix(in oklab, var(--amber) 12%, transparent);
 }
-.book-meta span.bc-stored .ic { width: 11px; height: 11px; }
+.book-meta span.bc-stored .ic { width: var(--ic-xs); height: var(--ic-xs); }
 
 /* 类别推荐行（分段下方）：识别中 → AI 推荐 / 按规则推荐；用户手改后整行变灰 */
 .imp-kind-hint {
@@ -79,7 +79,6 @@
   font-size: 11.5px; line-height: 1.65; letter-spacing: .03em;
   color: var(--kc-text, var(--kc, var(--accent-ink)));
 }
-.imp-kind-hint[hidden] { display: none; }
 .imp-kind-hint .ic { margin-top: 2px; }
 .imp-kind-hint.loading, .imp-kind-hint.off { color: var(--ink-3); }
 .imp-kind-hint.off { opacity: .58; }
@@ -174,7 +173,7 @@
             <span class="ph-sub" id="shelfCount"></span>
           </div>
           <div class="ph-actions">
-            <a class="btn btn-ghost" href="themes.html"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>主题商城</a>
+            <a class="btn btn-ghost" href="themes.html"><span id="themeMallIco"></span>主题商城</a>
             <button class="btn btn-ghost" id="btnSync"><span id="syncIco"></span>同步</button>
             <button class="btn btn-mark" id="btnImport"><span id="importIco"></span>导入</button>
           </div>
@@ -364,6 +363,9 @@
   var progress = InkStore.getProgress();
   var state = { kind: "all", group: "", q: "", manage: false, sel: {} };
 
+  /* v2.23 §W3 第五步收编：「主题商城」原来在 HTML 里手写一枚 palette，尺寸 15px
+     与同排「同步/导入」的 16px 不齐，也不走工厂契约。改走 icon()，与主表同源。 */
+  qs("#themeMallIco").innerHTML = icon("palette", 16);
   qs("#syncIco").innerHTML = icon("refresh-cw", 16);
   qs("#importIco").innerHTML = icon("file-input", 16);
   qs("#searchIco").innerHTML = icon("search", 16);

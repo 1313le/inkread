@@ -582,6 +582,10 @@
       document.head.appendChild(meta);
     }
     meta.content = getComputedStyle(el).getPropertyValue("--paper").trim() || "#f2eee2";
+    /* 桌面壳层跟着主题走：窗口底色（原生 resize 抖动时露出的就是它）与
+       nativeTheme.themeSource（原生右键菜单 / OS 通道控件）。网页侧的 color-scheme
+       由 styles.css 的 html[data-tone] 负责，这里只管壳层。 */
+    if (window.inkread && inkread.win && inkread.win.setTheme) inkread.win.setTheme(el.dataset.tone, meta.content);
   }
 
   /* 编辑器里的「边调边看」：把草稿主题临时套到全站，取消时还原已保存主题。
@@ -774,9 +778,12 @@
     var list = available();
     var has = list.filter(function (t) { return t.k === cur; })[0];
     if (!has && metaOf(cur)) list = list.concat([metaOf(cur)]);
-    return '<select class="ap-sel" data-sel="' + key + '">' + list.map(function (t) {
+    /* v2.23 §W3 第七步：外面套一层 .ap-sel-w —— 箭头从 data-URI 里的死色
+       （%238b8577，换主题不变色）改成遮罩 + currentColor，跟着主题走。
+       select 自身不能挂伪元素，形状只能落在宿主上；事件一律 closest，不受这层影响。 */
+    return '<span class="ap-sel-w"><select class="ap-sel" data-sel="' + key + '">' + list.map(function (t) {
       return '<option value="' + t.k + '"' + (t.k === cur ? " selected" : "") + ">" + esc(t.name) + "</option>";
-    }).join("") + "</select>";
+    }).join("") + "</select></span>";
   }
 
   /* 字体样张行：每个 chip 用自身字面渲染，等于就地看样。
@@ -878,12 +885,12 @@
 
   function citySelect(s) {
     var hit = matchCity(s);
-    return '<select class="ap-sel" data-city>' +
+    return '<span class="ap-sel-w"><select class="ap-sel" data-city>' +
       '<option value=""' + (hit ? "" : " selected") + ">自定义</option>" +
       CITIES.map(function (c) {
         return '<option value="' + c.lat + "," + c.lon + '"' +
           (hit && hit.n === c.n ? " selected" : "") + ">" + c.n + "</option>";
-      }).join("") + "</select>";
+      }).join("") + "</select></span>";
   }
 
   /* ============================================================
@@ -1141,6 +1148,9 @@
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && mask && !mask.hidden) close();
     });
+    /* 层栈让路（§W2.4）：这是 aria-modal 的设置抽屉，开着时 Esc 归它，
+       不然一次按键连身后停靠的窗一起收掉。mount() 只在首次挂载时跑一次。 */
+    if (window.InkWin) InkWin.yieldTo("ap-modal", function () { return !!mask && !mask.hidden; });
     return drawer;
   }
 
@@ -1380,7 +1390,10 @@
     });
 
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && aaPanel && !aaPanel.hidden) aaClose();
+      /* 层栈（dock.js）已经收掉最上面一层时，这次 Esc 就用完了 —— 一次只收一层。
+         Aa sheet 不入栈：它是钉在正文底部的临时调参盘，浮起来只会盖住正在调的正文。 */
+      if (e.key !== "Escape" || e.__inkEscHandled) return;
+      if (aaPanel && !aaPanel.hidden) aaClose();
     });
     return aaPanel;
   }

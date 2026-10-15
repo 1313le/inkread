@@ -32,6 +32,14 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #ttsBar .tts-frac { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+/* 引擎徽标：读者必须看得见「现在是谁在念」——旧版神经合成挂了照样界面走动，
+   只是悄悄换成系统机械音，用户完全不知道。降级与静默都用 warn 色标出来。 */
+#ttsBar .tts-eng {
+  flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; letter-spacing: .04em; color: var(--ink-3);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 1px 8px;
+}
+#ttsBar .tts-eng.warn { color: var(--amber-ink); border-color: var(--amber); }
 #ttsBar .bar { flex: 0 0 76px; min-width: 0; }
 #ttsBar .tts-ctl { font-family: var(--font-mono); font-size: 11.5px; min-width: 52px; }
 /* 播放键：主操作朱砂描边提示「正在听书」 */
@@ -46,7 +54,7 @@
 }
 .tts-mini-pop .tmp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .tts-mini-pop output { font-family: var(--font-mono); color: var(--accent-ink); }
-.tts-mini-pop input[type="range"] { width: 100%; accent-color: var(--accent); }
+.tts-mini-pop input[type="range"] { width: 100%; }
 .tts-mini-pop .tmp-presets { display: flex; gap: 6px; flex-wrap: wrap; justify-content: space-between; margin-bottom: 0; }
 .tts-mini-pop .tmp-presets button {
   flex: 1; padding: 5px 0; background: var(--paper); border: 1px solid var(--line);
@@ -55,8 +63,6 @@
 .tts-mini-pop .tmp-presets button:hover { border-color: var(--accent); color: var(--accent-ink); }
 .tts-mini-pop .tmp-presets button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 #ttsTimerPop { display: grid; gap: 6px; }
-/* hidden 修正：ID 选择器的 display 会盖过 UA 的 [hidden]{display:none}，必须显式补回 */
-#ttsTimerPop[hidden], #ttsSpeedPop[hidden], #ttsPop[hidden] { display: none !important; }
 #ttsTimerPop button {
   text-align: left; padding: 8px 10px; background: var(--paper); border: 1px solid var(--line);
   border-radius: var(--r-sm); font: inherit; font-size: 12.5px; color: var(--ink-2); cursor: pointer;
@@ -117,7 +123,6 @@ body.immersive .reader-notes {
   background-color: var(--paper); background-image: var(--grain);
   color: var(--ink); animation: nimIn .22s cubic-bezier(.2, .8, .3, 1);
 }
-.note-im[hidden] { display: none !important; }
 @keyframes nimIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 html[data-reduce="on"] .note-im { animation: none; }
 @media (prefers-reduced-motion: reduce) { .note-im { animation: none; } }
@@ -152,7 +157,6 @@ html[data-reduce="on"] .note-im { animation: none; }
   display: inline-block; max-width: 52%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   font-family: var(--font-kai); font-size: calc(var(--note-fs, 17px) * .84);
 }
-#noteImQuote[hidden] { display: none !important; }
 
 /* 浮动预览卡（v2.19.3）：全屏写作时随写随渲染，可拖可缩，位置尺寸记本机。
    原先要退出全屏回面板才看得到预览 —— 等于「写完才能核对」。 */
@@ -162,7 +166,6 @@ html[data-reduce="on"] .note-im { animation: none; }
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md);
   box-shadow: 0 12px 30px -14px var(--edge), 0 2px 6px -3px var(--edge);
 }
-.nim-pv[hidden] { display: none !important; }
 .nim-pv-bar {
   flex: none; height: 28px; display: flex; align-items: center; gap: 8px;
   padding: 0 6px 0 10px; border-bottom: 1px solid var(--line-2);
@@ -269,7 +272,8 @@ html[data-reduce="on"] body[data-page="reader"] .reader-notes { transition: none
 body.nw-drag .reader-notes .side-tabs { cursor: grabbing; }
 /* v2.10 专用拖动条 → v2.19.3 升级为 28px 标题条。
    8px 细线是「逻辑上能拖、视觉上不存在」：用户实测直接判为「浮窗拖不动」。
-   现在左端是抓握点阵、中间是窗名、停靠态整条下压并显出「拖出」提示。 */
+   现在左端是抓握点阵、中间是窗名、右端是 InkDock 注入的四枚形态钮
+   （v2.23 W2：这一条就是这扇窗的控制行，页签行只放页签）。 */
 .nw-dragbar {
   flex: none; height: 28px; position: relative; z-index: 5; display: flex; align-items: center; gap: 8px;
   padding: 0 10px; cursor: grab; touch-action: none;
@@ -283,11 +287,9 @@ body.nw-drag .reader-notes .side-tabs { cursor: grabbing; }
 }
 .nw-dragbar:hover::before, .nw-dragbar:focus-visible::before { opacity: 1; color: var(--accent); }
 .nw-dbar-name { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-2); }
-.nw-dbar-hint { margin-left: auto; font-size: 10.5px; letter-spacing: .06em; color: var(--ink-3); opacity: 0; }
 [data-dock-state="docked"] .nw-dragbar {
   background: var(--paper-3); box-shadow: inset 0 2px 5px -3px var(--edge); cursor: grab;
 }
-[data-dock-state="docked"] .nw-dragbar .nw-dbar-hint { opacity: .85; }
 body.dock-drag .nw-dragbar, body.nw-drag .nw-dragbar { cursor: grabbing; }
 /* 浮动态八方位缩放手柄（InkDock 生成）：贴内缘的细条，只在 float 态存在 */
 .dock-rz { position: absolute; z-index: 4; display: none; touch-action: none; }
@@ -318,9 +320,7 @@ body.dock-drag .sel-bar { display: none !important; }
 .reader-notes .side-tabs .tool-btn { padding: 0 7px; }
 body.nw-drag { user-select: none; -webkit-user-select: none; }
 body.nw-drag .sel-bar { display: none !important; }        /* 拖动中不弹划选工具条 */
-/* 最大化按钮：与关闭钮同排、同规格 */
 .reader-notes .side-tabs .tool-btn { flex: none; align-self: center; }
-#notesMax[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-ink); }
 
 /* ---------- ②b 停靠态（v2.10）：吸附成侧栏时不再是「卡片」，而是贴着正文的一块纸 ----------
    拖到左右边缘（或点标题栏的停靠钮）后进入：通高、直角、内侧一条分隔线，
@@ -335,7 +335,6 @@ body[data-page="reader"] .reader-notes[data-docked="left"] {
 }
 /* 停靠态用内侧竖边调宽（.dock-edge），右下抓角让位 */
 body[data-page="reader"] .reader-notes[data-dock-state="docked"] .nw-grip { display: none; }
-#notesDock[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-ink); }
 
 /* 右下抓角：24×24，斜纹示意可拖，最大化 / 窄屏时收起 */
 .nw-grip {
@@ -377,7 +376,7 @@ body[data-page="reader"] .reader-notes .side-body {
 .reader-notes [data-npanel="list"] #notesSummary { min-width: 0; }
 /* 空态：大虚线框是「拖放目标」的记号，这里没有拖放 —— 降成紧凑一行 */
 .reader-notes .empty { border: none; padding: 22px 8px; }
-.reader-notes .empty > .ic { width: 22px; height: 22px; margin-bottom: 8px; }
+.reader-notes .empty > .ic { width: var(--ic-lg); height: var(--ic-lg); margin-bottom: 8px; }   /* v2.23 §W3 第六步：22 → 档位 lg */
 /* 列表为空时把这一行居中到面板中部：原来它贴着筛选行往下沉，
    底下整片空白看着像「加载不出来」。:has 限定只在唯一子节点是空态时生效，
    有批注时列表仍从顶部正常排。 */
@@ -417,8 +416,7 @@ body[data-page="reader"] .reader-notes .side-body {
 /* ---------- ⓪ 单态按钮过滤（要求一）----------
    data-solo="plain"：只在非全屏有意义（如「全屏」入口）→ 沉浸态隐藏；
    data-solo="imm"  ：只在沉浸全屏才有意义 → 非全屏隐藏（现阶段为空集，留作挂载点）。
-   .tool-btn / .more-item 自带 display，压不过 UA 的 [hidden]{display:none}，故显式补回。 */
-[data-solo][hidden] { display: none !important; }
+   hide 侧回收由 styles.css 的全局 [hidden] 基线统一负责，此处不再逐组件打补丁。 */
 
 /* ---------- ① 悬浮球（#inkOrb）----------
    只在 body.immersive 出现；44px 圆形（触控最小命中区）。
@@ -455,7 +453,6 @@ html[data-reduce="on"] #inkOrb, html[data-reduce="on"] #inkOrb .tk-orb-tick { tr
    z-index 310：压过沉浸浮条 240 / 批注浮窗 258 / 划词条 260 / 模式抽屉 272 / 辅助卡 293，
    低于外观抽屉与全屏写作 400（那两个是真·模态）。 */
 #inkWheel { position: fixed; inset: 0; z-index: 310; touch-action: none; }
-#inkWheel[hidden] { display: none !important; }
 .tk-wheel {
   position: absolute; width: var(--tk-d); height: var(--tk-d);
   transform: translate(-50%, -50%);
@@ -527,7 +524,6 @@ html[data-reduce="on"] .tk-gear { transition: none; }
 
 /* 大小三档：齿轮右侧一排小签（贴着轮盘外缘，不挡扇区） */
 .tk-sizes { position: absolute; left: calc(2% + 36px); top: calc(2% + 2px); display: flex; gap: 5px; }
-.tk-sizes[hidden] { display: none !important; }
 .tk-chip {
   padding: 4px 9px; background: var(--paper); color: var(--ink-2);
   border: 1px solid var(--line); border-radius: 999px;
@@ -537,52 +533,105 @@ html[data-reduce="on"] .tk-gear { transition: none; }
 .tk-chip:hover { border-color: var(--accent); color: var(--accent-ink); }
 .tk-chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
-/* ---------- ③ AI 速问浮窗（#aiAsk）----------
-   复用 Brain.ask（v2.2 主脑对话）：小浮窗 + 可拖头部 + 简版对话流。
-   位置内联下发（left/top），只在有内容时出现；不遮挡正文版心之外的东西。 */
-.tk-ask {
-  position: fixed; z-index: 320; width: min(400px, calc(100vw - 24px));
-  height: min(420px, 60vh);
+/* ---------- ③ AI 阅读助手（#aiReader，v2.23 W1e）----------
+   取代原「AI 速问」浮窗：拖、停靠、铺满、位置记忆全部交回 InkWin（W2），
+   这里只写内容。高度不用 autoH —— 对话流要有一块定高的 Reading 区自己滚，
+   不然每来一条回答窗就长一截，读者永远看不见上面那句。 */
+.ar-card {
+  position: fixed; z-index: 320; width: min(396px, calc(100vw - 24px));
+  height: min(560px, calc(100vh - 132px)); min-height: 320px;
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--paper-2); border: 1px solid var(--line-2); border-radius: var(--r-md);
   box-shadow: 0 26px 64px -34px var(--edge), 0 3px 12px -8px var(--edge);
   color: var(--ink);
 }
-.tk-ask[hidden] { display: none !important; }
-.tkq-head {
+.ar-head {
   flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; min-height: 38px;
   border-bottom: 1px solid var(--line); background: var(--paper-3);
   cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
 }
-body.tkq-drag .tkq-head { cursor: grabbing; }
-body.tkq-drag { user-select: none; -webkit-user-select: none; }
-.tkq-k { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; letter-spacing: .1em; }
-.tkq-doc { font-style: normal; font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tkq-x {
+.ar-k { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; letter-spacing: .1em; }
+.ar-doc { font-style: normal; font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.ar-x {
   flex: none; width: 26px; height: 26px; display: grid; place-items: center;
   background: transparent; border: 1px solid var(--line); border-radius: var(--r-sm);
   color: var(--ink-3); cursor: pointer;
 }
-.tkq-x:hover { color: var(--accent-ink); border-color: var(--accent); }
-.tkq-stream { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.tkq-row { max-width: 88%; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
-.tkq-row.me {
+.ar-x:hover { color: var(--accent-ink); border-color: var(--accent); }
+/* 停靠 / 铺满时它是侧栏：吃满那一条高度、去掉圆角，滚动仍归 .ar-stream 自己。
+   高度不能用 autoH —— 那由 InkWin 按内容量，而对话流的内容是越长越高的。 */
+.ar-card[data-dock-state="docked"], .ar-card[data-dock-state="max"] { height: 100%; border-radius: 0; }
+.ar-card[data-docked="left"] { border-left: 0; }
+.ar-card[data-docked="right"] { border-right: 0; }
+.ar-head .inkw-st { align-self: center; }
+
+/* 携带条：这一问到底带上了什么 —— 书名 / 章 / 选中文本，看不见就会怀疑没带 */
+.ar-ctx {
+  flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 6px 12px; font-size: 11px; color: var(--ink-3);
+  border-bottom: 1px solid var(--line); background: var(--paper);
+}
+.ar-ctx .ar-c { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; }
+.ar-ctx .ar-c.on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-wash); }
+.ar-ctx .ar-hint { color: var(--ink-3); }
+
+.ar-stream { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.ar-row { max-width: 90%; font-size: 13px; line-height: 1.72; white-space: pre-wrap; word-break: break-word; }
+.ar-row.me {
   align-self: flex-end; padding: 6px 10px; color: var(--ink);
   background: var(--accent-wash); border-radius: var(--r-md) var(--r-md) 2px var(--r-md);
 }
-.tkq-row.bot {
-  align-self: flex-start; padding: 6px 10px; color: var(--ink-2);
+.ar-row.bot {
+  align-self: flex-start; padding: 7px 10px; color: var(--ink-2);
   background: var(--paper); border: 1px solid var(--line-2);
   border-radius: var(--r-md) var(--r-md) var(--r-md) 2px;
 }
-.tkq-row.sys { align-self: center; font-size: 11.5px; color: var(--ink-3); text-align: center; }
-.tkq-tag {
+.ar-row.sys { align-self: center; font-size: 11.5px; color: var(--ink-3); text-align: center; }
+.ar-row.err { align-self: flex-start; font-size: 12px; color: var(--accent-ink); border: 1px dashed var(--accent); border-radius: var(--r-sm); padding: 5px 9px; }
+.ar-tag {
   display: inline-block; margin-right: 5px; padding: 0 5px; font-size: 10.5px;
   color: var(--accent-ink); border: 1px solid var(--accent); border-radius: 999px;
 }
-.tkq-foot { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
-.tkq-foot .field { flex: 1; min-width: 0; }
-.tkq-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); }
+.ar-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); }
+/* 答案里的 [3]：点它跳回原文。做成按钮而不是 <a>，因为它不换页。 */
+.ar-ref {
+  display: inline-block; margin: 0 1px; padding: 0 3px; font: inherit; font-size: 11px;
+  color: var(--accent-ink); background: var(--accent-wash);
+  border: 1px solid var(--accent); border-radius: 3px; cursor: pointer; line-height: 1.5;
+}
+.ar-ref:hover { background: var(--accent); color: var(--on-accent); }
+/* 动作流水：工具层做了什么，一行字说清（读了哪章 / 将建几张卡） */
+.ar-act { align-self: flex-start; font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 5px; }
+
+/* 预置六问：首屏就给方向，不把读者丢进一个空输入框 */
+.ar-preset { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.ar-p {
+  padding: 4px 9px; font: inherit; font-size: 11.5px; color: var(--ink-2);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+  transition: color .16s, border-color .16s, background .16s;
+}
+.ar-p:hover { border-color: var(--accent); color: var(--accent-ink); }
+.ar-p[disabled] { opacity: .45; cursor: not-allowed; }
+html[data-reduce="on"] .ar-p { transition: none; }
+
+/* 落地三钮：答案 → 笔记 / 闪卡 / 任务，全走工具层（统一确认与撤销） */
+.ar-land { flex: none; display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-top: 1px solid var(--line); background: var(--paper-3); }
+.ar-land .btn { font-size: 11.5px; padding: 4px 9px; }
+.ar-land .btn[disabled] { opacity: .45; cursor: not-allowed; }
+
+/* 确认卡：写操作前把「将落地什么」摊开列出来，逐条可看，不是参数 JSON */
+.ar-cft {
+  flex: none; margin: 0 12px 8px; padding: 9px 10px;
+  background: var(--paper); border: 1px solid var(--accent); border-radius: var(--r-sm);
+}
+.ar-cft b { display: block; font-size: 12px; margin-bottom: 6px; }
+.ar-cft ul { margin: 0 0 7px; padding-left: 16px; font-size: 11.5px; color: var(--ink-2); line-height: 1.7; max-height: 116px; overflow-y: auto; }
+.ar-cft .ar-cf-bad { color: var(--accent-ink); list-style: none; margin-left: -16px; }
+.ar-cft .ar-cf-row { display: flex; align-items: center; gap: 6px; }
+
+.ar-foot { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
+.ar-foot .field { flex: 1; min-width: 0; }
+
 </style>
 <script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
@@ -741,6 +790,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
             <div class="tts-mid">
               <span class="tts-now" id="ttsNow">正在朗读…</span>
               <span class="tts-frac" id="ttsFrac"></span>
+              <span class="tts-eng" id="ttsEng" hidden></span>
               <span class="bar"><i id="ttsBarFill" style="width:0"></i></span>
             </div>
             <label class="tts-voice" title="朗读音色 —— 可在「主题商城 · 音色」里增减">
@@ -776,14 +826,11 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
           <div class="nw-dragbar" id="notesDragBar" role="button" tabindex="0"
                title="拖动浮窗 · 拖到左右边缘吸附成侧栏（双击切换停靠 ⟷ 浮动，拖动时按 Ctrl 不吸附）">
             <span class="nw-dbar-name">批注与笔记</span>
-            <span class="nw-dbar-hint">按住可拖出浮动</span>
           </div>
           <div class="side-tabs" id="notesTabs">
             <button class="side-tab active" data-ntab="list">批注</button>
             <button class="side-tab" data-ntab="new">写笔记</button>
             <button class="side-tab" data-ntab="embed">完整笔记</button>
-            <button class="tool-btn" id="notesMax" title="最大化浮窗" aria-pressed="false" aria-label="最大化或还原批注浮窗"><span id="icNotesMax"></span></button>
-            <button class="tool-btn" id="notesDock" title="停靠到侧栏（拖到左右边缘也可吸附）" aria-pressed="false" aria-label="停靠或解除停靠批注浮窗"><span id="icNotesDock"></span></button>
             <button class="tool-btn" id="notesClose" title="收起浮窗 (Esc)" aria-label="收起批注浮窗"><span id="icNotesClose"></span></button>
           </div>
           <div class="side-body" id="notesBody">
@@ -854,15 +901,10 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
              浮窗：可拖 / 可缩放 / 可最大化；拖到左右边缘即吸附成停靠侧栏（InkDock 统一实现）。
              内容由 modes.js 的 renderPad 画进 #padBody（工具条 / 调色板 / 画布 / 草稿本）。 -->
         <aside class="pad-win" id="padWin" data-open="off" aria-label="草稿纸" aria-hidden="true">
-          <div class="nw-dragbar" id="padDragBar" role="button" tabindex="0"
-               title="拖动草稿纸 · 拖到左右边缘吸附成侧栏（双击切换停靠 ⟷ 浮动，拖动时按 Ctrl 不吸附）">
-            <span class="nw-dbar-hint">按住可拖出浮动</span>
-          </div>
-          <header class="pad-head" id="padHead">
+          <header class="pad-head" id="padHead"
+                  title="拖动草稿纸 · 拖到左右边缘吸附成侧栏（双击切换停靠 ⟷ 浮动，拖动时按 Ctrl 不吸附）">
             <span class="pad-title" id="padTitle">草稿纸</span>
             <span class="spacer"></span>
-            <button class="tool-btn" id="padDock" aria-pressed="false" title="停靠到侧栏（拖到左右边缘吸附）" aria-label="停靠或解除停靠草稿纸"><span id="icPadDock"></span></button>
-            <button class="tool-btn" id="padMax" aria-pressed="false" title="最大化（铺满正文区）" aria-label="最大化或还原草稿纸"><span id="icPadMax"></span></button>
             <button class="tool-btn" id="padClose" title="收起草稿纸 (Esc)" aria-label="收起草稿纸"><span id="icPadClose"></span></button>
           </header>
           <div class="pad-body" id="padBody"></div>
@@ -1011,6 +1053,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   <span class="sel-sep"></span>
   <button class="sel-btn" id="selExplain" title="解析这段（讲什么 / 关键点 / 术语）" aria-label="解析这段"><span id="icSelExplain"></span></button>
   <button class="sel-btn" id="selTrace" title="溯源（溯清来处：一切事物皆可溯 —— 事件 · 典故 · 节日 · 引文……只是举例，凡「它从哪来、谁先说、原话是什么」皆可考）" aria-label="溯源"><span id="icSelTrace"></span></button>
+  <button class="sel-btn" id="selAsk" title="带着这段问助手（选中即问）" aria-label="问 AI"><span id="icSelAsk"></span></button>
   <span class="sel-sep"></span>
   <button class="sel-btn" id="selNote" title="写笔记" aria-label="写笔记"><span id="icSelNote"></span></button>
   <button class="sel-btn" id="selMark" title="加书签" aria-label="加书签"><span id="icSelMark"></span></button>
@@ -1020,8 +1063,17 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 
 <!-- 辅助阅读浮层：解析 / 溯源。只对选中文字作答 ——
      解析给结构（讲什么 / 关键点 / 术语）；溯源给考据（类别 / 出处 / 原始表述 / 含义本末 / 存疑），
-     并把「在本文中的落点」作为附赠一并给出 -->
-<div class="aux-card" id="auxCard" role="dialog" aria-label="辅助阅读" hidden></div>
+     并把「在本文中的落点」作为附赠一并给出。
+     v2.23 W2：头部（徽标 + 标题 + 形态钮 + ✕）钉成静态节点，正文只换 #auxBody ——
+     整张卡重写 innerHTML 会把 InkWin 注入的把手与形态钮一起抹掉。 -->
+<div class="aux-card" id="auxCard" role="dialog" aria-label="辅助阅读" hidden>
+  <div class="aux-head" id="auxHead">
+    <span class="aux-k" id="auxKind"></span><b id="auxLabel"></b>
+    <span class="spacer"></span>
+    <button class="aux-x" id="auxX" aria-label="收起"><span id="icAuxX"></span></button>
+  </div>
+  <div class="aux-body" id="auxBody"></div>
+</div>
 
 <!-- 翻译浮层：划词翻译 / 存为生词；段落对照走正文行内 .tr-para -->
 <div class="tr-pop" id="trPop" role="dialog" aria-label="翻译结果" hidden></div>
@@ -1084,8 +1136,10 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
      ② #inkWheel —— 全屏透明遮罩 + 圆盘：一级为阅读模式入口（学习/文献/漫画/书籍/通用）
         + 中心「全部」+ 左上角齿轮（轮盘大小三档，记 inkread.wheel.v1）；
         二级为同心外环（该模式的专属工具），父环节点半透明、中心显示悬停工具名与提示；
-     ③ #aiAsk —— 「AI 主脑」项打开的速问浮窗（复用 Brain.ask，可拖头部，一次一答）。
-     结构与类名一律 tk- / tkq- 前缀，与既有 UI 不冲突。 -->
+     ③ #aiReader —— v2.23 W1e 阅读页 AI 助手（取代原「AI 速问」浮窗）：
+        自动带上当前书 + 当前章 + 选中文本，六枚预置问题、流式作答、答案里的 [N] 可点跳原文，
+        底部三枚落地按钮把答案变成笔记 / 闪卡 / 任务。窗体（拖、停靠、铺满、位置记忆）归 InkWin。
+     结构与类名一律 tk- / ar- 前缀，与既有 UI 不冲突。 -->
 <button class="tk-orb" id="inkOrb" type="button" title="工具包 · 单击展开轮盘（可拖动）" aria-label="工具包：展开工具轮盘">
   <!-- 转轮排字盘（王祯活字轮）：外圈是轮盘，六根辐条随悬停转过一格，中心一粒朱砂作轴心 -->
   <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
@@ -1099,17 +1153,31 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 
 <div id="inkWheel" hidden></div>
 
-<div class="tk-ask" id="aiAsk" role="dialog" aria-modal="false" aria-label="AI 速问" hidden>
-  <header class="tkq-head" id="tkqHead">
-    <span class="tkq-k" id="tkqK"></span>
-    <em class="tkq-doc" id="tkqDoc"></em>
+<!-- 头部（.ar-head）是窗体 chrome：InkWin 把形态钮插进这条栏、把手绑在它身上，
+     #arX 作为 x 锚点（形态钮排在它前面）。故 JS 只重写 #arStream / #arCft，
+     绝不动整张卡的 innerHTML —— 一换就把窗体注入的把手抹了。 -->
+<div class="ar-card" id="aiReader" role="dialog" aria-modal="false" aria-label="AI 阅读助手" hidden>
+  <header class="ar-head" id="arHead">
+    <span class="ar-k" id="arK"></span>
+    <em class="ar-doc" id="arDoc"></em>
     <span class="spacer"></span>
-    <button class="tkq-x" id="tkqClose" type="button" aria-label="收起速问（Esc）"></button>
+    <button class="ar-x" id="arX" type="button" aria-label="收起助手（Esc）"></button>
   </header>
-  <div class="tkq-stream" id="tkqStream" aria-live="polite"></div>
-  <form class="tkq-foot" id="tkqForm">
-    <input class="field" id="tkqInput" type="text" autocomplete="off" placeholder="问这本书的任何事…（回车发送）" aria-label="向主脑提问">
-    <button class="btn btn-accent btn-sm" id="tkqSend" type="submit">发送</button>
+  <div class="ar-ctx" id="arCtx" aria-live="polite"></div>
+  <div class="ar-stream" id="arStream" aria-live="polite"></div>
+  <div class="ar-preset" id="arPreset" role="group" aria-label="预置问题"></div>
+  <div class="ar-cft" id="arCft" role="group" aria-label="确认这次操作" hidden></div>
+  <div class="ar-land" id="arLand">
+    <button class="btn btn-ghost btn-sm" id="arToNote" type="button" title="把上一条回答存成笔记">存为笔记</button>
+    <button class="btn btn-ghost btn-sm" id="arToCard" type="button" title="把选中的原文做成闪卡（需先划一段）">加入闪卡</button>
+    <button class="btn btn-ghost btn-sm" id="arToTask" type="button" title="把上一条回答变成一条任务">变成任务</button>
+    <span class="spacer"></span>
+    <button class="btn btn-ghost btn-sm" id="arUndo" type="button" hidden>撤销</button>
+  </div>
+  <form class="ar-foot" id="arForm">
+    <input class="field" id="arInput" type="text" autocomplete="off" placeholder="问这本书的任何事…（回车发送）" aria-label="向助手提问">
+    <button class="btn btn-accent btn-sm" id="arSend" type="submit">发送</button>
+    <button class="btn btn-ghost btn-sm" id="arStop" type="button" hidden>停止</button>
   </form>
 </div>
 
@@ -1125,6 +1193,10 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 <script src="api.js"></script>
 <script src="app.js"></script>
 <script src="brain.js"></script>
+<!-- ink-agent.js：v2.23 W1d′ 工具层首刀（7 枚 doc.read / notes.create / cards.create /
+     tasks.create / reader.goto / ui.navigate / shelf.list）。必须排在 brain.js 之后
+     （要用 Brain.currentDoc / docTitle / corpus），modes.js 之前无妨。 -->
+<script src="ink-agent.js"></script>
 <script src="modes.js"></script>
 <script>
 (async function () {
@@ -1153,6 +1225,8 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     icSide: "panel-left",
     /* v13 新增：辅助阅读（解析 / 溯源） */
     icSelExplain: "scan-text", icSelTrace: "trace-back", icAuxX: "x",
+    /* v2.23 W1e：划词「问 AI」—— 选中即问，和解析/溯源同一族，故同排 */
+    icSelAsk: "brain",
     /* v2.14 新增：顶栏书签钮 + 阅读底栏六钮 */
     icBm2: "bookmark", icDir2: "toc", icAa2: "type",
     icNotes2: "notebook-pen", icSpeak2: "volume-2", icMore2: "ellipsis",
@@ -1160,21 +1234,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     icEditOn: "lock-open", icRestore: "rotate-ccw", icDone: "circle-check",
     /* v2.20 新增：自动翻页（更多入口 / 控制条；播放位由 autoPaint 随态改写） */
     icAuto: "chevrons-right", icAutoPlay: "pause", icAutoDown: "minus", icAutoUp: "plus", icAutoStop: "x",
-    /* v2.5 新增：批注浮窗最大化 / 还原（状态由 paintNoteWin 改写） */
-    icNotesMax: "maximize-2",
     /* v2.21 新增：出纸两个入口（文案随能力改写，图标不用改 —— 打印机就是打印机） */
     icExport: "download", icPrint: "printer"
   };
-  /* 图标补充：ICONS 表里只有 minimize（四角内折），浮窗「还原」要的是双斜角的 minimize-2，
-     此处按 Lucide 原形补一条 —— 只补本页要用的，不动 app.js 的全局图标表。 */
-  if (window.ICONS && !ICONS["minimize-2"]) {
-    ICONS["minimize-2"] = '<path d="m14 10 7-7"/><path d="M20 10h-6V4"/><path d="m3 21 7-7"/><path d="M4 14h6v6"/>';
-  }
-  /* 「打印」没有专属图标（ICONS 里有 download 却漏了 printer）：按纸面视图工具条上那颗
-     同一形制补上，两处共用一个画法，别长成两种零件。 */
-  if (window.ICONS && !ICONS["printer"]) {
-    ICONS["printer"] = '<path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><path d="M7 16h10v4H7z"/>';
-  }
   Object.keys(IC).forEach(function (id) {
     var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16);
   });
@@ -2473,9 +2535,13 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     if (!tocPanel || tocOpen) return;
     tocOpen = true;
     qs("#tpcDoc").textContent = doc.title || "";
+    /* 先建窗再显形：落位没定就掀开，首帧会闪一下 CSS 里那条钉右的默认位 */
+    panelWin("toc", { el: tocPanel, id: "toc", label: "目录", handle: ".tpc-head", bar: ".tpc-head",
+      x: "#tpcClose", width: 344, wmin: 300, side: "right", shown: function () { return tocOpen; }, close: closeToc });
     tocPanel.hidden = false;
     void tocPanel.offsetWidth;            /* 强制回流，保证首帧就走过渡 */
     tocPanel.classList.add("on");
+    pwApply("toc");
     tocPanel.setAttribute("aria-hidden", "false");
     qs("#tDir").setAttribute("aria-expanded", "true");
     qs("#tDir2").setAttribute("aria-expanded", "true");     /* 三入口同开合同步（v2.22 S5 修） */
@@ -2488,6 +2554,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     if (!tocPanel || !tocOpen) return;
     tocOpen = false;
     tocPanel.classList.remove("on");
+    pwApply("toc");                       /* 状态位已翻：立刻撤掉这一侧的让位账 */
     tocPanel.setAttribute("aria-hidden", "true");
     qs("#tDir").setAttribute("aria-expanded", "false");
     qs("#tDir2").setAttribute("aria-expanded", "false");
@@ -2497,6 +2564,39 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   }
 
   function toggleToc() { if (tocOpen) closeToc(); else openToc(); }
+
+  /* ---------- v2.23 W2 · 三块侧栏入窗（目录 / 任务 / 书签侧栏） ----------
+     v2.19.6 曾按「看一眼就走的临时弹层」豁免这三块（理由见 modes.js:431 注释），
+     本轮判据改成「所有侧栏一律可拆可合」，那道豁免作废（进方案 §W2 台账）。
+     几何交 InkWin；开合仍由各自的 tocOpen / tOpen / #reader[data-side] 说话。
+     shown 一律读**状态位**而不是 DOM：抽屉带 .34s 的 visibility 过渡，
+     过渡中读到的计算样式还是旧值，会让停靠边的占用与释放两头都慢一拍
+     （modes.js:471 那段「补一次 apply」的旧坑，这里从判据上绕开）。 */
+  var PW = { toc: null, task: null, side: null };
+  function panelWin(key, cfg) {
+    if (!PW || !window.InkWin) return null;
+    if (PW[key]) return PW[key];
+    var boot = true;                      /* 补出厂停靠态那一次不算读者动作，别弹提示 */
+    /* 最小宽度按「头部一行装得下 标题 + 四枚形态钮 + ✕」来定，不是拍脑袋的 232：
+       目录/任务的头部是宿主自己的（既有标题又有一格说明），压到 232 就只能牺牲标题；
+       书签侧栏的标题走 InkWin 自造细栏，那一条 .inkw-t 会自己省略号，232 够用。 */
+    var wmin = cfg.wmin || 232;
+    PW[key] = InkWin.create(cfg.el, {
+      id: cfg.id, host: "#reader", handle: cfg.handle, bar: cfg.bar, x: cfg.x,
+      title: cfg.label, min: { w: wmin, h: 300 },
+      dock: { min: wmin, max: 560, width: cfg.width }, snap: 24,
+      maxTop: nwMaxTop, narrow: nwNarrow, shown: cfg.shown, onClose: cfg.close,
+      onState: function (l) {
+        if (boot) return;
+        if (l.state === "docked") toast(cfg.label + "已合并回" + (l.side === "right" ? "右" : "左") + "侧栏 · 拖标题栏可再拆出", "panel-right");
+        else if (l.state === "max") toast(cfg.label + "已铺满正文区", "maximize-2");
+      }
+    });
+    if (!InkWin.read()[cfg.id]) PW[key].setState("docked", { side: cfg.side });
+    boot = false;
+    return PW[key];
+  }
+  function pwApply(key) { var w = PW && PW[key]; if (w) w.apply(); }
 
   /* ---------- 跳转 ---------- */
   function gotoBlock(bi) {
@@ -2768,7 +2868,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   qs("#findGo").addEventListener("click", function () { runFind(findMode, qs("#findInput").value); });
   qs("#findInput").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { e.preventDefault(); runFind(findMode, this.value); }
-    else if (e.key === "Escape") { e.preventDefault(); clearFind(); }
+    else if (e.key === "Escape" && !e.__inkEscHandled) { e.preventDefault(); clearFind(); }
   });
   qs("#frClear").addEventListener("click", clearFind);
   qs("#frRefine").addEventListener("click", function (e) {
@@ -2791,7 +2891,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   qs("#jumpInput").addEventListener("input", jumpPreview);
   qs("#jumpInput").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { e.preventDefault(); jumpTo(resolveJump(this.value)); }
-    else if (e.key === "Escape") { e.preventDefault(); pvClear(); closeToc(); }
+    else if (e.key === "Escape" && !e.__inkEscHandled) { e.preventDefault(); pvClear(); closeToc(); }
   });
   qs("#jumpGo").addEventListener("click", function () { jumpTo(resolveJump(qs("#jumpInput").value)); });
 
@@ -2809,7 +2909,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = 1;
     else if (e.key === "Enter") { e.preventDefault(); tpCommit(r); return; }
-    else if (e.key === "Escape") { e.preventDefault(); tpKb = null; tpPaint(tocRatio()); pvClear(); return; }
+    else if (e.key === "Escape" && !e.__inkEscHandled) { e.preventDefault(); tpKb = null; tpPaint(tocRatio()); pvClear(); return; }
     else return;
     e.preventDefault();
     tpKb = next;
@@ -2894,7 +2994,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       var body = n.body ? MD.render(n.body) : "";
       return '<div class="note-card" data-note="' + n.id + '">' +
         '<div class="nc-head"><span class="dot" style="background:' + (COLOR_HEX[n.color] || COLOR_HEX.accent) + '"></span>' +
-        KIND_LABEL[n.kind] + "<span class=\"spacer\"></span><span>" + esc(n.at || "") + "</span>" +
+        (KIND_LABEL[n.kind] || "批注") + "<span class=\"spacer\"></span><span>" + esc(n.at || "") + "</span>" +
         '<button class="nc-del" data-del="' + n.id + '" aria-label="删除这条批注" title="删除">' + icon("trash-2", 14) + "</button></div>" +
         (n.text ? '<div class="nc-text">' + esc(n.text) + "</div>" : "") +
         (body ? '<div class="nc-body">' + body + "</div>" : "") +
@@ -2959,6 +3059,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
         sp: selContext(range, head, tail > 0 ? tail : 0)
       };
       selBar.style.display = "flex";
+      /* 助手开着时划了新的一段，携带条要当场跟上 —— 它是「这一问带了什么」的唯一凭据，
+         划完不换就成了一句读者无法核对的承诺（W1e 的「自动携带选中段」）。 */
+      arPaintCtx();
       var w = selBar.offsetWidth || 220;
       selBar.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, rect.left + rect.width / 2 - w / 2)) + "px";
       selBar.style.top = Math.max(12, rect.top - 46) + "px";
@@ -3109,33 +3212,78 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
      ④ 浮层不遮正文版心，Esc / 点空白 / 翻页即收。
      ============================================================ */
   var auxCard = qs("#auxCard");
+  var auxBody = qs("#auxBody");
+  /* 收起时必须让窗重画一次：停靠态在 #reader 上挂着 data-dock-* 与 --dock-w-*，
+     卡片一藏、那份让位就成了正文旁边一条关不掉的空栏（v2.18 在批注窗上踩过）。 */
+  function hideAux() {
+    auxCard.hidden = true;
+    if (auxWin) auxWin.apply(false);
+  }
 
-  function hideAux() { auxCard.hidden = true; }
+  /* v2.23 W2 · 解析/溯源卡入 InkWin：可拖、可停靠（正文让位）、可铺满、位置尺寸记忆。
+     旧行为是每次呼出都按选区重摆一次、尺寸按 CSS 固定 —— 它想看多久就看多久、
+     想挪就挪不动，于是「读完这一段接着查下一段」时只能反复遮住正文。
+     落点规则改成：**本机第一次用它**时才贴着选区放（第一次总得出现在眼前），
+     之后位置归窗，由读者拖出来的那个位置说了算。 */
+  var auxWin = window.InkWin && InkWin.create(auxCard, {
+    id: "aux", host: "viewport", claim: "#reader", autoH: true,
+    handle: "#auxHead", bar: "#auxHead", x: "#auxX",
+    title: "辅助阅读", f: { w: 344, h: 300 },
+    min: { w: 288, h: 168 }, dock: { min: 288, max: 560, width: 344 }, snap: 20,
+    shown: function () { return !auxCard.hidden; },
+    onClose: hideAux
+  });
+  qs("#auxX").addEventListener("click", hideAux);
+
+  /* 选区落在第几块：上下文包按它定「当前章」。
+     页首块只作回退 —— 跨页选区、或一页里有多章时，用页首块会挑错章。 */
+  function selBi() {
+    try {
+      var s = window.getSelection();
+      if (!s || !s.rangeCount) return -1;
+      var n = s.getRangeAt(0).startContainer;
+      var el = n && (n.nodeType === 1 ? n : n.parentElement);
+      var b = el && el.closest ? el.closest("#doc [data-bi]") : null;
+      return b ? biOf(b, -1) : -1;
+    } catch (e) { return -1; }
+  }
 
   function auxCtx() {
     var s = state.sel || {};
     var idx = state.pageIdx.length ? state.pageIdx : measuredPages();
-    var bi = (idx[state.cur] && idx[state.cur].length) ? idx[state.cur][0] : -1;
-    return { doc: doc, chapter: bi >= 0 ? chapterOf(bi) : (doc.title || ""), page: s.page, anchor: s.anchor };
+    var pbi = (idx[state.cur] && idx[state.cur].length) ? idx[state.cur][0] : -1;
+    var bi = selBi() >= 0 ? selBi() : pbi;
+    return {
+      doc: doc, docId: doc.id, bi: bi >= 0 ? bi : null, anchor: s.anchor,
+      chapter: bi >= 0 ? chapterOf(bi) : (doc.title || ""), page: s.page
+    };
   }
 
   function showAux(html) {
-    var r = selBar.getBoundingClientRect();
-    auxCard.innerHTML = html;
+    auxBody.innerHTML = html;
     auxCard.hidden = false;
-    var w = auxCard.offsetWidth || 320, h = auxCard.offsetHeight || 200;
+    if (!auxWin) return;
+    auxWin.open();
+    /* 本机第一次用它：贴着选区放一次，之后位置归读者拖出来的那个 */
+    if (!InkWin.read()["aux"]) auxAtSel();
+  }
+
+  function auxAtSel() {
+    var r = selBar.getBoundingClientRect();
+    var w = auxWin.state().f.w;
+    var h = auxCard.offsetHeight || 240;
     var left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left + r.width / 2 - w / 2));
     var top = r.bottom + 10;
     if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - h - 10);
-    auxCard.style.left = left + "px";
-    auxCard.style.top = top + "px";
-    var x = auxCard.querySelector("#auxX");
-    if (x) x.addEventListener("click", hideAux);
+    auxWin.place(left, top);
   }
 
+  /* 头部是窗口的 chrome（徽标 / 标题 / 形态钮 / ✕），正文才是内容：
+     两者分开重写，否则整张卡 innerHTML 一换，InkWin 注入的把手就没了。 */
   function auxHead(kind, label) {
-    return '<div class="aux-head"><span class="aux-k">' + esc(kind) + "</span><b>" + esc(label) + "</b>" +
-      '<span class="spacer"></span><button class="aux-x" id="auxX" aria-label="收起">' + icon("x", 14) + "</button></div>";
+    qs("#auxKind").textContent = kind;
+    qs("#auxLabel").textContent = label;
+    return "";
   }
 
   function renderExplain(d) {
@@ -3147,10 +3295,12 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     var items = (d.items || []).map(function (it) {
       return '<div class="aux-item"><span class="ai-k">' + esc(it.k) + '</span><span class="ai-v">' + esc(it.v) + "</span></div>";
     }).join("");
-    showAux(auxHead("解析", d.title) +
+    showAux(auxHead("解析", d.unstructured ? "模型未按格式回复" : d.title) +
       '<p class="aux-lead">' + esc(d.lead) + "</p>" +
       items + terms +
+      (d.unstructured ? auxRaw(d) + auxExits(false) : "") +
       (d.note ? '<p class="aux-note">' + icon("info", 12) + esc(d.note) + "</p>" : ""));
+    bindAuxActs();
   }
 
   /* 溯源卡片：三层自上而下 —— 定性 / 考据 / 存疑；本地落点垫底作附赠。
@@ -3174,8 +3324,51 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     });
   }
 
+  /* 「模型没守格式」不该是死路：原话如实给出，再配三条出口 —— 重试 / 换模型 / 只看本地落点。
+     旧行为是一句「模型未返回可解析的结构」把模型说过的话全丢了，读者对着空卡片什么也做不了。 */
+  function auxRaw(d) {
+    return d.raw
+      ? '<div class="tr-sec un-raw-sec"><span class="tr-h">模型原话 · 未结构化</span>' +
+        '<p class="tr-p un-raw">' + esc(d.raw) + "</p></div>"
+      : "";
+  }
+  function auxExits(withLocal) {
+    return '<div class="aux-exits">' +
+      '<button class="chip chip-btn" data-ax="retry">' + icon("refresh-cw", 12) + "重试</button>" +
+      '<button class="chip chip-btn" data-ax="cfg">换模型 / 查配置</button>' +
+      (withLocal ? '<button class="chip chip-btn" data-ax="local">只看本地落点</button>' : "") +
+      "</div>";
+  }
+  function bindAuxActs() {
+    qsa("[data-ax]", auxCard).forEach(function (b) {
+      b.addEventListener("click", function () {
+        var k = b.dataset.ax;
+        if (k === "retry") { if (lastAux) runAux(lastAux.kind, lastAux.txt, lastAux.ctx); return; }
+        if (k === "cfg") { location.href = "ai.html"; return; }
+        var s = qs(".un-raw-sec", auxCard);
+        if (s) s.remove();
+        b.remove();
+      });
+    });
+  }
+
   function renderTrace(d) {
     var has = !!(d.title || d.meaning || (d.facts || []).length);
+
+    /* 回了话、没成结构：原话 + 三条出口 + 落点，一样给全 */
+    if (d.unstructured) {
+      showAux(auxHead("溯源", "模型未按格式回复") +
+        '<p class="aux-lead">' + icon("info", 13) +
+          "它确实回了话，只是没有按约定的字段返回 —— 内容没有丢，原话照抄在下面，" +
+          "只是没能拆成「出处 · 年代 · 原始表述」的分栏卡片。</p>" +
+        auxRaw(d) + auxExits((d.hits || []).length > 0) +
+        ((d.hits || []).length
+          ? '<div class="tr-sec"><span class="tr-h">在本文中的落点</span>' + traceHits(d) + "</div>"
+          : "") +
+        (d.note ? '<p class="aux-note">' + icon("info", 12) + esc(d.note) + "</p>" : ""));
+      bindHits(); bindAuxActs();
+      return;
+    }
 
     /* 未接模型 / 考据失败：明说能力边界（并讲清溯源能考什么），落点照常给出 */
     if (!has) {
@@ -3222,7 +3415,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       : "";
 
     var meta = (d.cached ? "取自缓存" : "") +
-      (d.engine ? (d.cached ? " · " : "") + "考据：" + d.engine : "");
+      (d.engine ? (d.cached ? " · " : "") + "考据：" + d.engine : "") +
+      (d.via === "fields" ? " · 部分字段未能分栏" : "") +
+      (d.via === "repaired" ? " · 回复超长被截断，已在可续处补全" : "");
     var note = [meta, d.note].filter(Boolean).join(" · ");
 
     showAux(auxHead("溯源 · " + (d.kind || "出处"), d.title || d.query || "出处考证") +
@@ -3237,31 +3432,50 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     bindHits();
   }
 
-  qs("#selExplain").addEventListener("click", async function () {
+  /* 划词 AI 两问共用一条路：记下来料，「未结构化」卡上的重试才能原样再问一次。
+     ctx 必须在 hideSel 之前取 —— 选区一清，selBi() 就退回页首块，章定位跟着错。 */
+  var lastAux = null;
+
+  async function runAux(kind, txt, ctx) {
+    lastAux = { kind: kind, txt: txt, ctx: ctx };
+    if (kind === "trace") {
+      showAux(auxHead("溯源", "正在考据…") +
+        '<p class="aux-lead">' + icon("loader-circle", 13) + " 正在追它的来处：出处 · 年代 · 原始表述…</p>");
+      var rt = await API.aiTrace(txt, buildCorpus(), ctx);
+      renderTrace(rt.data);
+      return;
+    }
+    showAux(auxHead("解析", "正在读…") +
+      '<p class="aux-lead">' + icon("loader-circle", 13) + " 正在解析这段…</p>");
+    var re = await API.aiExplain(txt, ctx);
+    renderExplain(re.data);
+  }
+
+  qs("#selExplain").addEventListener("click", function () {
     if (!state.sel) return;
-    var txt = state.sel.text;
+    var txt = state.sel.text, ctx = auxCtx();
     hideSel();
-    showAux(auxHead("解析", "正在读…") + '<p class="aux-lead">' + icon("loader-circle", 13) + " 正在解析这段…</p>");
-    var r = await API.aiExplain(txt, auxCtx());
-    renderExplain(r.data);
+    runAux("explain", txt, ctx);
   });
 
-  qs("#selTrace").addEventListener("click", async function () {
+  qs("#selTrace").addEventListener("click", function () {
     if (!state.sel) return;
-    var txt = state.sel.text;
+    var txt = state.sel.text, ctx = auxCtx();
     hideSel();
-    showAux(auxHead("溯源", "正在考据…") +
-      '<p class="aux-lead">' + icon("loader-circle", 13) + " 正在追它的来处：出处 · 年代 · 原始表述…</p>");
-    var r = await API.aiTrace(txt, buildCorpus(), auxCtx());
-    renderTrace(r.data);
+    runAux("trace", txt, ctx);
   });
 
   document.addEventListener("mousedown", function (e) {
     if (auxCard.hidden) return;
     if (auxCard.contains(e.target) || e.target.closest("#selExplain, #selTrace")) return;
+    /* 停靠 / 铺满 = 读者明确要它常驻在一侧，点正文不该把它赶走；
+       「点外即收」只在浮动态保留（原有的随手一放随手收的手感不变）。 */
+    var m = auxWin && auxWin.mode();
+    if (m === "docked-left" || m === "docked-right" || m === "maximized") return;
     hideAux();
   });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !auxCard.hidden) hideAux(); });
+  /* 解析卡的 Escape 归层栈（dock.js）：它领了 onClose: hideAux，
+     所以这里不再自建文档级链 —— 两条链并存时一次按键收两层。 */
 
 
   /* 更多菜单：低频入口收在一处（v2.14 换底部 sheet：hidden 之外再同步 .open 播放滑入/滑出，开关逻辑不变）；
@@ -3419,7 +3633,10 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     var mp = qs("#modePop");
     if (mp && !mp.hidden && !mp.contains(e.target) && !isModeTrigger(e.target)) InkModes.closePop();
     var tp = qs("#trPop");
-    if (tp && !tp.hidden && !tp.contains(e.target) && !(e.target.closest && e.target.closest("#selTrans"))) tp.hidden = true;
+    /* 与解析卡同规则：浮着才「点外即收」，停靠 / 铺满 = 读者要它常驻，点正文不该赶走 */
+    var tms = (tp && tp.dataset.inwState) || "floating";
+    if (tp && !tp.hidden && tms === "floating" && !tp.contains(e.target) &&
+        !(e.target.closest && e.target.closest("#selTrans"))) tp.hidden = true;
   });
 
   /* 沉浸态补入口：全屏里也要能呼出目录与切模式（用户明确要求） */
@@ -3809,6 +4026,17 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     var r = qs("#reader");
     r.dataset.side = open ? "open" : "closed";
     if (open) r.dataset.notes = "closed";
+    /* 书签侧栏同样入窗：可拖成浮窗、可换边停靠（出厂仍钉左）。
+       「设置」那一格本来就是常驻面板，浮起来才谈得上边看设置边翻页。
+       形态钮不塞进 .side-tabs：那是 238px 里两个页签（各 flex:1），再叠五枚钮（四形态 + ✕）
+       就把页签挤成两三个字宽；更糟的是同一行两种手感 —— 点空白处拖窗、点页签切页签。
+       这里让 InkWin 自建一条 .inkw-bar 当把手：那一条只有「标题 + 钮」，标题自己会省略号，
+       实测 232px（出厂宽 238 再拖窄一点）不溢出、也不折行。 */
+    panelWin("side", { el: qs("#sidePanel"), id: "side", label: "书签侧栏", handle: ".inkw-bar",
+      width: 238, side: "left",
+      shown: function () { return r.dataset.side === "open"; },
+      close: function () { setSide(false); } });
+    pwApply("side");
     var b = qs("#tSide");
     if (b) b.setAttribute("aria-expanded", open ? "true" : "false");
   }
@@ -4112,10 +4340,10 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 
   document.addEventListener("keydown", function (e) {
     if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
-    if (e.key !== "Escape") return;
-    /* 浮层优先级：越靠上越先收，避免一次 Esc 收掉两层 */
+    if (e.key !== "Escape" || e.__inkEscHandled) return;
+    /* 浮层优先级：越靠上越先收，避免一次 Esc 收掉两层。
+       翻译卡已入层栈（dock.js 的 InkWin.closeTop 收），此链不再自建分支。 */
     if (!morePop.hidden) closeMore();
-    else if (qs("#trPop") && !qs("#trPop").hidden) qs("#trPop").hidden = true;
     else if (qs("#modePop") && !qs("#modePop").hidden) InkModes.closePop();
     else if (InkModes.panelKey()) InkModes.closePanel();
     else if (tOpen) closeTasks();
@@ -4147,6 +4375,8 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     InkKeys.on("c", function () { toggleToc(); }, { title: "目录", group: "阅读" });
     InkKeys.on("m", function () { InkModes.openPicker(); }, { title: "模式切换", group: "阅读" });
     InkKeys.on("r", function () { autoToggle(); }, { title: "自动翻页", group: "阅读" });
+    /* 助手在输入框里也认 Ctrl/⌘+J：正敲着问题要收起，不该先点出去夺焦点 */
+    InkKeys.on("mod+j", function () { arToggle(); }, { inInput: true, title: "AI 阅读助手", group: "阅读" });
   }
 
   var drag = null;
@@ -4271,6 +4501,8 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   }
   function ttsCleanup() {
     closeTTSBar();
+    var b = qs("#ttsEng");
+    if (b) { b.hidden = true; b.textContent = ""; b.classList.remove("warn"); }
     if (TTS.liveEl) { TTS.liveEl.classList.remove("tts-live"); TTS.liveEl = null; }
     paintPlayBtn(false);
   }
@@ -4285,6 +4517,25 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       ttsFollow(bi);
     });
     e.on("onTick", function (f) { qs("#ttsBarFill").style.width = Math.round(f * 100) + "%"; });
+    /* 引擎徽标：现在真正在出声的是哪条链路，一眼看得见。
+       降级（神经合成未响应）与静默（一句都没读出来）都用琥珀色标出来 ——
+       旧版这里什么都不显示，机械音顶替神经音读者毫无察觉。 */
+    e.on("onMode", function (m) {
+      var b = qs("#ttsEng");
+      if (!b || !m) return;
+      var base = m.mode === "neural" ? "神经语音 · " + (m.voice || "")
+        : m.mode === "cloud" ? "云音色 · " + (m.voice || "")
+        : m.mode === "speech" ? "本机声线 · " + (m.voice || "")
+        : m.mode === "none" ? "未出声 · " + (m.note || "本机没有可用声线")
+        : "计时模拟";
+      /* 降级原因直接写进徽标：只放 title 的话读者看得见「换了条声线」却看不见「为什么换」，
+         神经合成挂了必须当场说清，不能让人去猜是不是自己没配好。 */
+      var txt = (m.mode === "none" || !m.note) ? base : base + " · " + m.note;
+      b.textContent = txt;
+      b.title = txt;
+      b.hidden = false;
+      b.classList.toggle("warn", m.mode === "none" || m.mode === "sim" || !!m.note);
+    });
     e.on("onState", function (s, why) {
       if (s === "done") { ttsCleanup(); toast(why || "朗读结束", "volume-2"); }
       else if (s === "stopped") ttsCleanup();
@@ -4513,8 +4764,11 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   function openTasks(focusId) {
     if (!tOpen) {
       tOpen = true;
+      panelWin("task", { el: tDrawer, id: "task", label: "任务清单", handle: ".td-head", bar: ".td-head",
+        x: "#tdClose", width: 344, wmin: 300, side: "right", shown: function () { return tOpen; }, close: closeTasks });
       tDrawer.dataset.open = "on";
       tDrawer.setAttribute("aria-hidden", "false");
+      pwApply("task");
     }
     paintTaskDrawer();
     if (focusId) {
@@ -4537,6 +4791,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     if (!tOpen) return;
     tOpen = false;
     tDrawer.dataset.open = "off";
+    pwApply("task");
     tDrawer.setAttribute("aria-hidden", "true");
     paintTaskDrawer();
   }
@@ -4664,7 +4919,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   qs("#notesClose").addEventListener("click", function () { closeNotesPanel(); immWake(); });
   document.addEventListener("keydown", function (e) {
     if (window.InkKeys && InkKeys.isOpen()) return;   /* 命令面板 / 总览置顶：Esc 先归它们 */
-    if (e.key !== "Escape") return;
+    if (e.key !== "Escape" || e.__inkEscHandled) return;   /* 层栈已收过最上面一层：本链让路 */
     /* 草稿纸浮窗在最上层：先收它（v2.10）。注意必须走 InkModes.closePanel ——
        它负责清 panelKey 与工具条高亮，否则下次点「草稿纸」会被当成「再点一次＝收起」。 */
     if (window.InkPadWin && InkPadWin.isOpen()) {
@@ -4688,10 +4943,10 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
        ① 定位容器（#reader）与最大化上界（正文台顶，撑满正文区但不遮顶栏）；
        ② 窄屏策略（≤700px 一律最大化 —— 8px 的拖拽靶子在触屏上没有意义）；
        ③ 开合 / 缩放 / 沉浸进出后的重算；
-       ④ 按钮文案、图标与 toast。
+       ④ 开合 / 缩放 / 沉浸进出后的重算与 toast。
      开合机制一行没动（仍是 #reader[data-notes]），旧键 inkread.notewin.v1 读一次即迁移。
      ============================================================ */
-  var nwEl = qs("#notesWin"), nwMaxBtn = qs("#notesMax"), nwDockBtn = qs("#notesDock");
+  var nwEl = qs("#notesWin");
   var ndReady = false;
   function nwNarrow() { return window.innerWidth <= 700; }
   /* 最大化上界＝正文台顶（顶栏 + 模式条 + 场景带的高度） */
@@ -4701,6 +4956,9 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   }
   var ndWin = InkDock.create(nwEl, {
     id: "notes", host: "#reader", handle: ["#notesDragBar", "#notesTabs"], grip: "#notesGrip",
+    /* W2 头部统一：形态钮插进宿主已有的拖动条尾端，不再另起一条窗控行；
+       ✕ 沿用页签条尾部原有的 #notesClose，不造第二只关闭钮。 */
+    bar: "#notesDragBar", x: "#notesClose",
     min: { w: 300, h: 320 }, dock: { min: 280, max: 560, width: 340 }, snap: 24,
     maxTop: nwMaxTop, narrow: nwNarrow,
     /* 旧键迁移：v2.5 的 {x,y,w,h,max} → 本组件的 float 形态（旧键不删） */
@@ -4708,25 +4966,11 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
       try { return JSON.parse(localStorage.getItem("inkread.notewin.v1")); } catch (e) { return null; }
     },
     onState: function (l) {
-      nwPaint(l);
       if (!ndReady) return;
       if (l.state === "docked") toast("已停靠到" + (l.side === "right" ? "右" : "左") + "侧栏 · 拖标题栏可直接拖出", "panel-right");
       else if (l.state === "max") toast("浮窗已最大化 · 铺满正文区", "maximize-2");
     }
   });
-  function nwPaint(l) {
-    var max = l.state === "max", docked = l.state === "docked";
-    nwMaxBtn.title = max ? "还原浮窗" : "最大化浮窗";
-    nwMaxBtn.setAttribute("aria-pressed", max ? "true" : "false");
-    var ic = qs("#icNotesMax");
-    if (ic) ic.innerHTML = icon(max ? "minimize-2" : "maximize-2", 15);
-    if (nwDockBtn) {
-      nwDockBtn.title = docked ? "解除停靠（拖标题栏也能拖出）" : "停靠到侧栏（拖到左右边缘吸附）";
-      nwDockBtn.setAttribute("aria-pressed", docked ? "true" : "false");
-      var dic = qs("#icNotesDock");
-      if (dic) dic.innerHTML = icon(docked ? "panel-left-close" : "panel-right", 15);
-    }
-  }
   ndWin.apply();
   ndReady = true;
 
@@ -4738,20 +4982,6 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
 
   /* 窗口变化：窄屏一律全屏；其余只重算边界（记忆值不动，回来时还是原样） */
   window.addEventListener("resize", function () { ndWin.apply(); });
-
-  /* ---------- 最大化 / 还原 ---------- */
-  nwMaxBtn.addEventListener("click", function () {
-    if (nwNarrow()) { toast("窄屏下浮窗就是全屏 —— 拖不动，也不必拖", "maximize-2"); return; }
-    var on = ndWin.toggleMax();
-    toast(on ? "浮窗已最大化 · 铺满正文区" : "浮窗已还原", on ? "maximize-2" : "minimize-2");
-  });
-
-  /* ---------- 停靠 / 解除停靠（等同双击标题栏 / 拖到边缘） ---------- */
-  if (nwDockBtn) nwDockBtn.addEventListener("click", function () {
-    if (nwNarrow()) { toast("窄屏下浮窗就是全屏 —— 无需停靠", "panel-right"); return; }
-    var on = ndWin.toggleDock();
-    if (!on) toast("已解除停靠 · 回到浮动窗", "move-horizontal");
-  });
 
   /* 拖完那一下的 click 不算「点页签」—— 否则拖窗会顺带换页签。
      只管页签：最大化 / 停靠 / 关闭钮本来就起不了拖拽，不必陪着一起被吞。 */
@@ -4769,27 +4999,18 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
      内容（工具条 / 调色板 / 画布 / 草稿本）由 modes.js 的 renderPad 负责，
      本块只管「窗」：几何、开合、按钮与 Esc。
      ============================================================ */
-  var padEl = qs("#padWin"), padMaxBtn = qs("#padMax"), padDockBtn = qs("#padDock"), padCloseBtn = qs("#padClose");
+  var padEl = qs("#padWin"), padCloseBtn = qs("#padClose");
   var pdReady = false;
   var pdWin = InkDock.create(padEl, {
-    id: "pad", host: "#reader", handle: ["#padDragBar", "#padHead"],
+    id: "pad", host: "#reader", handle: "#padHead",
+    bar: "#padHead", x: "#padClose",
     min: { w: 380, h: 420 }, dock: { min: 320, max: 640, width: 400 }, snap: 24,
     maxTop: nwMaxTop, narrow: nwNarrow,
     onState: function (l) {
-      pdPaint(l);
       if (!pdReady) return;
       if (l.state === "docked") toast("草稿纸已停靠到" + (l.side === "right" ? "右" : "左") + "侧栏 · 拖标题栏可直接拖出", "panel-right");
     }
   });
-  function pdPaint(l) {
-    var max = l.state === "max", docked = l.state === "docked";
-    padMaxBtn.title = max ? "还原浮窗" : "最大化（铺满正文区）";
-    padMaxBtn.setAttribute("aria-pressed", max ? "true" : "false");
-    qs("#icPadMax").innerHTML = icon(max ? "minimize-2" : "maximize-2", 15);
-    padDockBtn.title = docked ? "解除停靠（拖标题栏也能拖出）" : "停靠到侧栏（拖到左右边缘吸附）";
-    padDockBtn.setAttribute("aria-pressed", docked ? "true" : "false");
-    qs("#icPadDock").innerHTML = icon(docked ? "panel-left-close" : "panel-right", 15);
-  }
   qs("#icPadClose").innerHTML = icon("x", 14);
   pdWin.apply();
   pdReady = true;
@@ -4816,15 +5037,6 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   };
   padCloseBtn.addEventListener("click", function () {
     if (window.InkModes && InkModes.closePanel) InkModes.closePanel(); else InkPadWin.close();
-  });
-  padMaxBtn.addEventListener("click", function () {
-    if (nwNarrow()) { toast("窄屏下浮窗就是全屏 —— 拖不动，也不必拖", "maximize-2"); return; }
-    var on = pdWin.toggleMax();
-    toast(on ? "草稿纸已最大化 · 铺满正文区" : "草稿纸已还原", on ? "maximize-2" : "minimize-2");
-  });
-  padDockBtn.addEventListener("click", function () {
-    if (nwNarrow()) return;
-    if (!pdWin.toggleDock()) toast("已解除停靠 · 回到浮动窗", "move-horizontal");
   });
   window.addEventListener("resize", function () { if (window.InkPadWin.isOpen()) pdWin.apply(); });
   /* ---------- 完整笔记（第三页签）：懒加载 notes.html?embed=1 ----------
@@ -5110,7 +5322,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
   });
   /* 修改中按 Esc 先退出修改（就近优先，与退出沉浸同一逻辑） */
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && EDIT.on) exitEdit();
+    if (e.key === "Escape" && EDIT.on && !e.__inkEscHandled) exitEdit();
   });
 
   /* 空书空态：正文区给出 .empty（icon + 说明 + 回书架），不渲染空书；
@@ -5195,7 +5407,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     notes:   { label: "笔记面板", icon: "notebook-pen", hint: "批注与完整笔记",   run: function () { tkNotes("list"); } },
     annot:   { label: "批注",     icon: "highlighter",  hint: "就当前页写批注",   run: function () { tkNotes("new", null, true); } },
     embed:   { label: "完整笔记", icon: "panel-right",  hint: "全屏写长笔记",     run: function () { tkNotes("embed"); } },
-    brain:   { label: "AI 主脑",  icon: "brain",        hint: "问这本书的任何事", run: tkAskOpen },
+    brain:   { label: "AI 助手",  icon: "brain",        hint: "带着这一页问助手", run: arOpen },
     trans:   { label: "AI 翻译",  icon: "languages",    hint: "译选中的词句",     run: function () { tkSel("trans"); } },
     explain: { label: "AI 解析",  icon: "scan-text",    hint: "关键点与术语",     run: function () { tkSel("explain"); } },
     trace:   { label: "AI 溯源",  icon: "trace-back",   hint: "溯清来处与原文",   run: function () { tkSel("trace"); } }
@@ -5325,7 +5537,7 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     });
     if (sub) {
       sub.forEach(function (key, i) {
-        var it = tkItemOf(key) || { icon: "circle" };
+        var it = tkItemOf(key) || { icon: "ellipsis" };
         svg += tkWedge(R, R * TK_B.l2i, R * TK_B.l2o, i, sub.length, "sub", "l2", key);
         labs += tkLab(R, R * TK_B.l2m, i, sub.length, "l2", icon(it.icon, Math.round(18 * k)));
       });
@@ -5560,13 +5772,12 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     tkRoot.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
   }
 
-  /* Esc：先收轮盘，再收速问窗（都不留给下面的沉浸退出逻辑 —— 一次 Esc 只收一层） */
+  /* Esc：只收轮盘这一层。助手（#aiReader）是 InkWin，收起归 dock.js 的全局
+     层栈（传了 onClose 就登记 dismiss），这里再拦一次会一次按键收两层。 */
   window.addEventListener("keydown", function (e) {
     if (window.InkKeys && InkKeys.isOpen()) return;   /* 命令面板 / 总览置顶：Esc 先归它们 */
     if (e.key !== "Escape") return;
-    var ask = qs("#aiAsk");
-    if (tk.open) { e.stopPropagation(); e.preventDefault(); tkClose(); return; }
-    if (ask && !ask.hidden) { e.stopPropagation(); e.preventDefault(); tkAskClose(); }
+    if (tk.open) { e.stopPropagation(); e.preventDefault(); tkClose(); }
   }, true);
 
   /* 视口变化 / 进出沉浸：没拖过的球重算默认位，拖过的只夹回视口内；
@@ -5584,94 +5795,442 @@ body.tkq-drag { user-select: none; -webkit-user-select: none; }
     }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
   }
 
-  /* ---------- 8.10 AI 速问浮窗（#aiAsk）----------
-     复用 Brain.ask —— 文档上下文由页面启动时的 Brain.setDoc(docId) 带上，
-     这里只负责界面：对话流 / 输入 / 拖动。流式按方案简化为一次性返回。 */
-  var tkq = qs("#aiAsk"), tkqStream = qs("#tkqStream"), tkqInput = qs("#tkqInput");
-  var tkqDrag = null, tkqBusy = false, tkqOfflineNoted = false;
-  function tkqRow(cls, html) {
+  /* ---------- 8.10 AI 阅读助手（#aiReader · v2.23 W1e）----------
+     取代原「AI 速问」。速问的病不在「问」，在问完就断：一句答案留在浮窗里 ——
+     引用是死的（点不回原文）、答案落不了地（变不成笔记 / 闪卡 / 任务）、
+     上下文是空的（它不知道读者站在哪一章）。助手补的正是这三条：
+       ① 每次提问现建上下文包（W1b）：书 + 当前章 + 选中段一起进 prompt，
+          并把「相关段落」编号成 [1]…[N] 交给模型，要求它按编号引；
+       ② 答案里的 [N] 渲染成按钮，点了走 reader.goto 跳回那一块；
+       ③ 落地三钮与两条工具型预置问题全走 InkAgent（W1d′）：
+          写之前摊开确认卡，写完能当场撤销。
+     窗体（拖 / 靠边 / 铺满 / 位置记忆）和解析卡同一条路走 InkWin —— 不再自写
+     pointermove；Esc 归 dock.js 那条层栈，一次只收一层。 */
+  var ar = qs("#aiReader"), arStream = qs("#arStream"), arInput = qs("#arInput"), arCtxBar = qs("#arCtx");
+  var arPreset = qs("#arPreset"), arCft = qs("#arCft"), arUndoBtn = qs("#arUndo");
+  var arSendBtn = qs("#arSend"), arStopBtn = qs("#arStop");
+  var arToNote = qs("#arToNote"), arToCard = qs("#arToCard"), arToTask = qs("#arToTask");
+  var arBusy = false, arCtl = null, arSeq = 0, arRefs = [], arLast = null, arPend = null, arNoted = false;
+
+  var arWin = window.InkWin && ar && InkWin.create(ar, {
+    id: "aireader", host: "viewport", claim: "#reader",
+    handle: "#arHead", bar: "#arHead", x: "#arX",
+    title: "AI 助手", f: { w: 396, h: 560 }, min: { w: 300, h: 320 },
+    dock: { min: 300, max: 620, width: 396 }, snap: 20,
+    shown: function () { return !ar.hidden; }, onClose: arClose
+  });
+
+  function arBi() {
+    var b = selBi();
+    if (b >= 0) return b;
+    var idx = state.pageIdx.length ? state.pageIdx : measuredPages();
+    return (idx[state.cur] && idx[state.cur].length) ? idx[state.cur][0] : 0;
+  }
+  function arSel() { return String((state.sel && state.sel.text) || "").trim(); }
+
+  function arRow(cls, html) {
     var el = document.createElement("div");
-    el.className = "tkq-row " + cls;
+    el.className = "ar-row " + cls;
     el.innerHTML = html;
-    tkqStream.appendChild(el);
-    tkqStream.scrollTop = tkqStream.scrollHeight;
+    arStream.appendChild(el);
+    arStream.scrollTop = arStream.scrollHeight;
     return el;
   }
-  function tkqPlace() {
-    if (!tkq) return;
-    var w = tkq.offsetWidth || 400, h = tkq.offsetHeight || 420;
-    /* 默认落在悬浮球那一侧的上方（右下），整窗收在视口内 */
-    var left = Math.max(12, Math.min(window.innerWidth - w - 12, tkOrbPos.x + TK_ORB_SIZE - w));
-    var top = Math.max(12, Math.min(window.innerHeight - h - 12, tkOrbPos.y - h - 12));
-    tkq.style.left = Math.round(left) + "px";
-    tkq.style.top = Math.round(top) + "px";
+  /* 工具层做了什么，用一行灰字说清（读了哪章 / 将建几张卡）—— 与 InkAgent 的动作流水同源 */
+  function arAct(txt) {
+    var el = document.createElement("div");
+    el.className = "ar-act";
+    el.innerHTML = icon("wand-2", 12) + esc(txt);
+    arStream.appendChild(el);
+    arStream.scrollTop = arStream.scrollHeight;
+    return el;
   }
-  function tkAskClose() { if (tkq) { tkq.hidden = true; document.body.classList.remove("tkq-drag"); } }
-  function tkAskOpen() {
-    if (!tkq) return;
-    tkAskClose();
-    qs("#tkqK", tkq).innerHTML = icon("brain", 15) + "AI 速问";
-    qs("#tkqClose", tkq).innerHTML = icon("x", 14);
-    qs("#tkqDoc", tkq).textContent = "《" + (doc.title || "本文") + "》";
-    tkq.hidden = false;
-    tkqPlace();
-    if (!tkqStream.childElementCount) {
-      tkqRow("sys", "问这本书的任何事：引用、术语、背景，都行。");
+  /* [3] 只有在这轮真的把第 3 段交给模型时才做成按钮；编号越界就原样留着，
+     不做点了没反应的假链接 —— 读者点一次没动静，以后所有编号他都不信了。 */
+  function arRich(txt, refs) {
+    var s = esc(String(txt || ""));
+    if (refs && refs.length) {
+      s = s.replace(/\[(\d{1,2})\]/g, function (all, n) {
+        var i = Number(n) - 1;
+        if (i < 0 || i >= refs.length) return all;
+        return '<button class="ar-ref" type="button" data-ref="' + i + '" title="跳回原文 · ' + esc(refs[i].label) + '">' + all + "</button>";
+      });
     }
-    if (!Brain.online() && !tkqOfflineNoted) {
-      tkqOfflineNoted = true;
-      tkqRow("sys", "未接模型，用离线库作答（在「主脑」页接上模型即可在线问答）");
-    }
-    if (tkqInput) { tkqInput.value = ""; tkqInput.focus(); }
+    return s.replace(/\n/g, "<br>");
   }
-  async function tkAskSend(text) {
-    var q = String(text || "").trim();
-    if (!q || tkqBusy) return;
-    tkqBusy = true;
-    tkqRow("me", esc(q));
-    var holder = tkqRow("bot", '<span class="tkq-busy">' + icon("loader-circle", 13) + "主脑正在翻书…</span>");
-    if (tkqInput) tkqInput.value = "";
+  /* 流式重画：每来一片都重建整条回答的 HTML 会把主线程占满（翻页动画当场掉帧），
+     用 rAF 合帧 —— 一帧最多画一次。 */
+  function arTick(el, txt) {
+    el._t = txt;
+    if (el._raf) return;
+    el._raf = requestAnimationFrame(function () {
+      el._raf = null;
+      el.innerHTML = arRich(el._t, arRefs);
+      arStream.scrollTop = arStream.scrollHeight;
+    });
+  }
+
+  /* 携带条：这一问到底带上了什么。看不见就会怀疑没带，所以逐条摆出来。 */
+  function arPaintCtx() {
+    if (!arCtxBar) return;
+    var sel = arSel(), bi = arBi(), ch = bi >= 0 ? chapterOf(bi) : (doc.title || "");
+    arCtxBar.innerHTML =
+      '<span class="ar-c" title="整本书的书目都带着">' + icon("book-open", 12) + esc(String(doc.title || "本文").slice(0, 12)) + "</span>" +
+      '<span class="ar-c" title="这一章的正文带着">' + icon("toc", 12) + esc(String(ch || "本书").slice(0, 10)) + "</span>" +
+      (sel ? '<span class="ar-c on" title="带着你划的这段：' + esc(sel.slice(0, 120)) + '">' + icon("highlighter", 12) +
+             esc(sel.length > 14 ? sel.slice(0, 14) + "…" : sel) + "</span>"
+           : '<span class="ar-hint">划一段再问更准</span>');
+    qsa(".ar-p", arPreset).forEach(function (b) {
+      var need = b.dataset.sel === "1" && !b.dataset.tool;
+      b.disabled = arBusy || (need && !sel);
+      if (need) b.title = sel ? "带着选中的这段问" : "先划一段，再问这一句";
+    });
+    arPaintLand();
+  }
+
+  function arPaintLand() {
+    var hasA = !!(arLast && arLast.a), hasQ = !!(arLast && arLast.q), hasSel = !!arSel();
+    if (arToNote) {
+      arToNote.disabled = arBusy || !hasA;
+      arToNote.title = hasA ? "把上一条回答存成这本书的笔记" : "先问一句，答完了才有东西可存";
+    }
+    if (arToCard) {
+      arToCard.disabled = arBusy || !hasSel;
+      arToCard.title = hasSel ? "把选中的这段原文做成闪卡（回原文查证才落）"
+                              : "先划一段 —— 闪卡要的是原文里的话，不是模型的话";
+    }
+    if (arToTask) {
+      arToTask.disabled = arBusy || !hasQ;
+      arToTask.title = hasQ ? "把上一次提问变成一条待办" : "先问一句 —— 没问过就没什么可待办";
+    }
+    if (arUndoBtn) arUndoBtn.hidden = !!(window.InkAgent && InkAgent.pending().length === 0);
+  }
+
+  /* 材料包：把 W1b 的上下文包摊成带编号的 prompt。编号只给「相关段落」那一层 ——
+     同章正文是背景，读者要跳的是「答案引到了全书的哪一处」。 */
+  function arMaterial(pack, sel) {
+    if (!pack) return sel ? "【读者选中的那段】\n" + sel : "";
+    var m = pack.meta || {}, sec = [];
+    sec.push("【读者正在读】《" + (m.title || "本文") + "》" + (m.author ? " · " + m.author : "") +
+      "，站在「" + (pack.chapter.title || "") + "」");
+    if (sel) sec.push("【读者选中的那段】\n" + sel);
+    if (pack.related && pack.related.length) {
+      sec.push("【可引用的原文 · 句末标 [编号] 出处，编号只能用下面给出来的，不许自造】\n" +
+        pack.related.map(function (r, i) {
+          return "[" + (i + 1) + "] " + (r.chapter || "") + " · 第 " + (r.page || "?") + " 页：" + r.text;
+        }).join("\n"));
+    }
+    sec.push("【" + (pack.chapter.title || "本章") + " 正文" +
+      (pack.chapter.whole ? "" : " · 节选（围绕读者所站的位置取，本章未全文附上）") + "】\n" + pack.chapter.text);
+    if (pack.notes && pack.notes.length) {
+      sec.push("【读者自己在书上的批注】\n" + pack.notes.map(function (n) {
+        return "· " + (n.text ? "「" + n.text + "」" : "") + (n.body ? " —— " + n.body : "") + (n.page ? "（第 " + n.page + " 页）" : "");
+      }).join("\n"));
+    }
+    return sec.join("\n\n");
+  }
+
+  /* 为什么不用 Brain.ask：它把 messages 组装包在自己手里，没有往 system 塞
+     「带编号的原文 + 引用规则」这个口子。这里要的正是那个口子，所以自己拼、自己发，
+     只把离线那半条路（Brain.offline）借回来 —— 兜底实现不留两份。 */
+  async function arAsk(q, onPiece) {
+    var sel = arSel().slice(0, 600);
+    var pack = null;
+    try { if (window.Brain && Brain.buildContextPack) pack = Brain.buildContextPack({ docId: docId, bi: arBi(), query: q, budget: 5200 }); } catch (e) {}
+    arRefs = ((pack && pack.related) || []).map(function (r) {
+      return { bi: r.bi, label: (r.chapter || "") + " · 第 " + (r.page || "?") + " 页" };
+    });
+    if (!(window.API && API.hasModel && API.hasModel())) {
+      var o1 = await Brain.offline(q, { docId: docId });
+      return { reply: o1.reply, mode: "offline", miss: o1.miss };
+    }
+    var sys = "你是墨读里的阅读助手，正陪着读者读这一本书。回答贴着下面给出的原文，别泛泛而谈；"
+      + "原文里没有的就直说没有，不要编。" + (arRefs.length ? "引到某段时在该句末尾标它的编号，例如「[2]」；只给结论也要标出处。" : "")
+      + "\n\n" + arMaterial(pack, sel);
+    try { if (window.Brain && Brain.preamble) sys += "\n\n" + Brain.preamble("chat"); } catch (e) {}
+    arCtl = window.AbortController ? new AbortController() : null;
+    var out = "";
     try {
-      var r = await Brain.ask(q, { docId: docId });
-      var body = esc((r && r.reply) || "（主脑没有给出内容）");
-      var tag = r && r.mode === "offline" ? '<span class="tkq-tag">离线库</span>'
-        : r && r.mode === "online" ? "" : '<span class="tkq-tag">本机记忆</span>';
-      holder.innerHTML = tag + body.replace(/\n/g, "<br>");
+      await API.llmMsgs([{ role: "system", content: sys }, { role: "user", content: q }], {
+        temp: 0.6, timeout: 60000, signal: arCtl && arCtl.signal,
+        onDelta: function (p, all) { out = all != null ? all : out + p; onPiece(out); }
+      });
+      return { reply: out, mode: "online" };
     } catch (e) {
-      holder.innerHTML = '<span class="tkq-tag">出错</span>' + esc("主脑暂时答不上来：" + API.netErrPhrase(e));
-    }
-    holder.scrollIntoView({ block: "nearest" });
-    tkqBusy = false;
+      /* 停止 ≠ 失败：半截话照原样交回去，不去兜离线库（同 brain.js ask 的判据） */
+      if (e && (e.aborted || (arCtl && arCtl.signal && arCtl.signal.aborted))) return { reply: out, mode: "stopped" };
+      var o2 = await Brain.offline(q, { docId: docId });
+      return { reply: o2.reply, mode: "offline", note: "模型请求失败：" + API.netErrPhrase(e) + "，已改用本机库作答。" };
+    } finally { arCtl = null; }
   }
-  if (tkq) {
-    qs("#tkqForm", tkq).addEventListener("submit", function (e) {
-      e.preventDefault();
-      tkAskSend(tkqInput && tkqInput.value);
-    });
-    qs("#tkqClose", tkq).addEventListener("click", tkAskClose);
-    var tkqHead = qs("#tkqHead", tkq);
-    tkqHead.addEventListener("pointerdown", function (e) {
-      if (e.target.closest(".tkq-x")) return;
-      e.preventDefault();
-      tkqDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: tkq.offsetLeft, oy: tkq.offsetTop };
-      try { tkqHead.setPointerCapture(e.pointerId); } catch (err) {}
-      document.body.classList.add("tkq-drag");
-    });
-    tkqHead.addEventListener("pointermove", function (e) {
-      if (!tkqDrag || e.pointerId !== tkqDrag.id) return;
-      var w = tkq.offsetWidth, h = tkq.offsetHeight;
-      tkq.style.left = Math.round(Math.max(6, Math.min(window.innerWidth - w - 6, tkqDrag.ox + e.clientX - tkqDrag.x))) + "px";
-      tkq.style.top = Math.round(Math.max(6, Math.min(window.innerHeight - h - 6, tkqDrag.oy + e.clientY - tkqDrag.y))) + "px";
-    });
-    function tkqHeadUp(e) {
-      if (!tkqDrag || e.pointerId !== tkqDrag.id) return;
-      try { tkqHead.releasePointerCapture(e.pointerId); } catch (err) {}
-      tkqDrag = null;
-      document.body.classList.remove("tkq-drag");
+
+  async function arSend(text) {
+    var q = String(text || "").trim();
+    if (!q || arBusy) return;
+    arBusy = true; arSeq++;
+    var my = arSeq;
+    arPend = null; arCft.hidden = true;
+    if (arStopBtn) arStopBtn.hidden = false;
+    if (arSendBtn) arSendBtn.disabled = true;
+    arPaintCtx();
+    arRow("me", esc(q));
+    if (arInput) arInput.value = "";
+    var holder = arRow("bot", '<span class="ar-busy">' + icon("loader-circle", 13) + "助手正在翻这本书…</span>");
+    var r;
+    try { r = await arAsk(q, function (t) { arTick(holder, t); }); }
+    catch (e) { r = { mode: "error", reply: "", why: API.netErrPhrase(e) }; }
+    if (my !== arSeq) return;                 /* 期间又发了新一轮：这轮的收尾别去踩新的状态 */
+    if (holder._raf) { cancelAnimationFrame(holder._raf); holder._raf = null; }
+    if (r.note) arRow("sys", esc(r.note));
+    var tag = r.mode === "offline" ? '<span class="ar-tag">本机库</span>'
+      : r.mode === "stopped" ? '<span class="ar-tag">已停止</span>'
+      : r.mode === "error" ? '<span class="ar-tag">出错</span>' : "";
+    var body = r.reply || (r.mode === "error" ? "助手暂时答不上来：" + (r.why || "")
+      : r.mode === "stopped" ? "（按下了停止，这句没答完）" : "（没有给出内容）");
+    holder.innerHTML = tag + arRich(body, r.mode === "offline" ? [] : arRefs);
+    if (r.mode === "stopped" || r.mode === "error") {
+      var retry = document.createElement("button");
+      retry.className = "ar-p"; retry.type = "button"; retry.textContent = "重试这一问";
+      retry.addEventListener("click", function () { arSend(q); });
+      holder.appendChild(document.createElement("br"));
+      holder.appendChild(retry);
     }
-    tkqHead.addEventListener("pointerup", tkqHeadUp);
-    tkqHead.addEventListener("pointercancel", tkqHeadUp);
-    window.addEventListener("resize", function () { if (!tkq.hidden) tkqPlace(); });
+    if (r.mode !== "stopped" && r.reply) arLast = { q: q, a: r.reply };
+    arBusy = false;
+    if (arStopBtn) arStopBtn.hidden = true;
+    if (arSendBtn) arSendBtn.disabled = false;
+    arPaintCtx();
+    holder.scrollIntoView({ block: "nearest" });
+  }
+
+  /* 预置六问：前两问是「读懂」，中间两问是「查清」，后两问直接落地成卡与任务。 */
+  var AR_PRE = [
+    { t: "讲什么", hint: "三句话说清这一章，再点出一处最值得停下来的地方",
+      q: "这一章在讲什么？用三句话说清，再点出最值得停下来看的一处，并标出它在哪一段。" },
+    { t: "这段看不懂", sel: 1, hint: "先划一段 —— 逐句拆给它看",
+      q: "帮我读懂选中的这一段：先说它在讲什么，再解释其中的关键词，最后一句说清它和上下文的关系。" },
+    { t: "人物关系", hint: "按原文列人物与关系，附引用编号",
+      q: "列出这一章出现的人物及其关系，每人一行：人物 — 身份或与谁的关系 — 依据（标引用编号）。原文里没出现的人物不要编。" },
+    { t: "术语表", hint: "术语与专名逐条解释，附出处",
+      q: "汇总这一章的术语与专名，每条一行：术语 — 一句话解释 — 出处编号。" },
+    { t: "出 5 张闪卡", tool: "cards.create", key: "quotes", hint: "模型从原文逐字挑 5 句 → 逐条回原文查证 → 确认卡上点头才落",
+      sys: "从下面给出的原文里挑 5 句最值得记住的话。要求：逐字照抄原文，不改写、不拼接、不加引号、不缩略，"
+        + "长短以 8-60 字为宜；只能从给的原文里挑，原文不够 5 句就少给几条。只回 JSON，不要解释。",
+      usr: "挑 5 句原文。格式：{\"quotes\":[\"原文句子1\",\"原文句子2\"]}" },
+    { t: "生成本章任务", tool: "tasks.create", key: "titles", hint: "模型按本章拟 4-6 条可执行任务 → 确认卡上点头才落",
+      sys: "针对读者正在读的这一章，拟 4-6 条可执行的学习任务。要求：每条不超过 20 字、动词开头"
+        + "（如「复述…」「整理…」「对照…」），彼此不重复，不要写「阅读本章」这类空话。只回 JSON，不要解释。",
+      usr: "生成本章任务。格式：{\"titles\":[\"任务1\",\"任务2\"]}" }
+  ];
+  if (arPreset) {
+    AR_PRE.forEach(function (p) {
+      var b = document.createElement("button");
+      b.className = "ar-p"; b.type = "button"; b.textContent = p.t;
+      if (p.sel) b.dataset.sel = "1";
+      if (p.tool) { b.dataset.tool = p.tool; b.dataset.sel = "1"; }
+      b.title = p.hint || p.t;
+      b.addEventListener("click", function () { if (p.tool) arRunTool(p); else arSend(p.q); });
+      arPreset.appendChild(b);
+    });
+  }
+
+  /* 工具型预置问题：走 §W1d′ 的「JSON 指令白名单」那条通道 —— 本版不请求原生
+     tool_calls，只让模型交回一个固定形状的对象，字段名对着工具参数表核一遍才执行。 */
+  async function arRunTool(p) {
+    if (arBusy) return;
+    if (!(window.API && API.hasModel && API.hasModel())) {
+      var row = arRow("err", esc("「" + p.t + "」要由模型从原文挑句 / 拟任务，没接模型时助手不猜。"));
+      var go = document.createElement("button");
+      go.className = "ar-p"; go.type = "button"; go.textContent = "去主脑页配置模型";
+      go.addEventListener("click", function () { arConfirm("ui.navigate", { to: "ai" }); });
+      row.appendChild(document.createElement("br")); row.appendChild(go);
+      return;
+    }
+    arBusy = true;
+    if (arStopBtn) arStopBtn.hidden = false;
+    if (arSendBtn) arSendBtn.disabled = true;
+    arPaintCtx();
+    var holder = arRow("bot", '<span class="ar-busy">' + icon("loader-circle", 13) + esc("正在" + p.t + "…") + "</span>");
+    var pack = null, sel = arSel().slice(0, 600);
+    try { if (window.Brain && Brain.buildContextPack) pack = Brain.buildContextPack({ docId: docId, bi: arBi(), query: p.t, budget: 5200 }); } catch (e) {}
+    var got = null, bad = "";
+    try {
+      got = await API.aiJson(p.sys + "\n\n" + arMaterial(pack, sel), p.usr, { timeout: 40000 });
+    } catch (e) {
+      if (e && e.name === "UnstructuredError") bad = "模型没有按格式回话，所以这一条没有落地（不硬拆它的话，拆出来的多半是假的）。";
+      else bad = "请求失败：" + API.netErrPhrase(e);
+    }
+    arBusy = false;
+    if (arStopBtn) arStopBtn.hidden = true;
+    if (arSendBtn) arSendBtn.disabled = false;
+    if (!got) { holder.innerHTML = '<span class="ar-tag">没成</span>' + esc(bad); arPaintCtx(); return; }
+    var arr = got.j && Array.isArray(got.j[p.key]) ? got.j[p.key] : [];
+    var args = { docId: docId };
+    args[p.key] = arr;
+    if (p.tool === "tasks.create") args.today = false;
+    if (!arr.length) { holder.innerHTML = '<span class="ar-tag">空</span>模型这回没有交出可用条目，所以什么都没落。'; arPaintCtx(); return; }
+    arLast = { q: p.t, a: arr.map(function (x) { return typeof x === "string" ? x : JSON.stringify(x); }).join("\n") };
+    holder.innerHTML = '<span class="ar-tag">' + esc(got.via === "direct" ? "JSON" : "已解析") + "</span>" +
+      esc("挑出了 " + arr.length + " 条，摊在下面这张确认卡上 —— 点「确认落地」才写进应用。");
+    arPaintCtx();
+    arConfirm(p.tool, args);
+  }
+
+  /* ---------------- 确认卡与落地 ---------------- */
+  async function arConfirm(tool, args) {
+    if (!window.InkAgent) { arRow("err", "工具层没有加载，落地按钮暂时用不了。"); return; }
+    var r = await InkAgent.invoke(tool, args);
+    if (r && r.needConfirm) { arShowConfirm(r); return; }
+    arReport(r, tool);
+  }
+  function arShowConfirm(res) {
+    arPend = { tool: res.tool, args: res.args };
+    var pv = res.preview || {};
+    var li = (pv.lines || []).map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("");
+    arCft.innerHTML = "<b>" + esc(pv.title || "确认这次操作") + "</b>" + (li ? "<ul>" + li + "</ul>" : "") +
+      '<div class="ar-cf-row"><button class="btn btn-accent btn-sm" id="arCfYes" type="button">确认落地</button>' +
+      '<button class="btn btn-ghost btn-sm" id="arCfNo" type="button">先不</button>' +
+      '<span class="spacer"></span><span class="card-note">落错了可以在右边撤销</span></div>';
+    arCft.hidden = false;
+    qs("#arCfYes", arCft).addEventListener("click", async function () {
+      var job = arPend; arPend = null; arCft.hidden = true;
+      if (!job) return;
+      var r = await InkAgent.invoke(job.tool, job.args, { confirm: true });
+      arReport(r, job.tool);
+    });
+    qs("#arCfNo", arCft).addEventListener("click", function () {
+      arPend = null; arCft.hidden = true;
+      arAct("先不落地，什么都没写");
+    });
+    qs("#arCfYes", arCft).focus();
+  }
+  var AR_WHY = {
+    "unknown-tool": "这条指令不在白名单里", "missing-param": "缺了必要参数", "bad-type": "参数类型不对",
+    "no-host": "这一页没有接入该能力", "not-found": "没找到那个位置", "no-doc": "没有当前书籍",
+    "empty-text": "没有可写的文字", "empty-quotes": "没有可做的条目", "empty-titles": "没有可建的任务",
+    "save-failed": "本机没能存下这条", "not-in-text": "这些句子在原文里查不到", "not-object": "指令形状不对",
+    "error": "执行时出了错", "failed": "没有成功"
+  };
+  function arWhy(w) { return AR_WHY[w] || String(w || "failed"); }
+  function arReport(r, tool) {
+    if (!r) return;
+    if (r.rejected) { arRow("err", '<span class="ar-tag">挡下</span>' + esc(arWhy(r.why) + (r.detail && r.detail.tool ? "：" + r.detail.tool : ""))); return; }
+    if (r.needConfirm) { arShowConfirm(r); return; }
+    if (r.ok === false) { arRow("err", '<span class="ar-tag">没成</span>' + esc(arWhy(r.why))); return; }
+    if (r.same) { arAct("已经在这一页了"); return; }
+    var t = InkAgent.trace(), last = t[t.length - 1];
+    arAct(last ? last.text : "办好了");
+    if (tool === "cards.create") {
+      if (r.missed && r.missed.length) {
+        arRow("sys", esc(r.missed.length + " 条在原文里查无此句，没有做成卡（助手的原话：「" + String(r.missed[0]).slice(0, 40) + "」）—— 不做成卡是对的，编出来的句子背了也白背。"));
+      }
+      if (r.made) toast("已加入 " + r.made + " 张闪卡", "layers");
+    }
+    if (tool === "tasks.create" && r.made) toast("已建 " + r.made + " 条任务", "list-checks");
+    if (tool === "notes.create") {
+      toast("已存为笔记", "notebook-pen");
+      if (r.stored === false) arRow("sys", "本机存储没收下这条，只在本次会话里可见");
+    }
+    arPaintLand();
+  }
+
+  /* ---------------- 开合与接线 ---------------- */
+  function arHome() {
+    if (!arWin) return;
+    var f = arWin.state().f || { w: 396, h: 560 };
+    arWin.place(Math.max(12, window.innerWidth - f.w - 24), Math.max(12, Math.round((window.innerHeight - f.h) / 2) - 20));
+  }
+  function arOpen() {
+    if (!ar) return;
+    ar.hidden = false;
+    qs("#arK").innerHTML = icon("brain", 15) + "AI 助手";
+    qs("#arX").innerHTML = icon("x", 14);
+    qs("#arDoc").textContent = "《" + (doc.title || "本文") + "》";
+    if (arWin) {
+      arWin.open();
+      /* 本机第一次用它才自己挑个落点，之后位置归读者拖出来的那个 */
+      if (!InkWin.read()["aireader"]) arHome();
+    }
+    if (!arStream.childElementCount) {
+      arRow("sys", "带着「这本书 + 这一章" + (arSel() ? " + 你划的这段" : "") + "」问。下面六枚是常问的，也可以自己写。");
+    }
+    if (!(window.API && API.hasModel && API.hasModel()) && !arNoted) {
+      arNoted = true;
+      arRow("sys", "未接模型：常识问答用本机库，「出 5 张闪卡 / 生成本章任务」这类要模型从原文挑的办不了。");
+    }
+    arPaintCtx();
+    setTimeout(function () { if (arInput) arInput.focus(); }, 40);
+  }
+  function arClose() {
+    if (!ar) return;
+    /* 收起必须让窗重画一次：停靠态在 #reader 上挂着 data-dock-* 与 --dock-w-*，
+       卡片一藏、那份让位就成了正文旁边一条关不掉的空栏（同 auxWin，见 6.5）。 */
+    ar.hidden = true;
+    if (arWin) arWin.apply(false);
+    if (arCtl) { try { arCtl.abort(); } catch (e) {} arCtl = null; }
+    arSeq++; arBusy = false;
+    if (arStopBtn) arStopBtn.hidden = true;
+    if (arSendBtn) arSendBtn.disabled = false;
+  }
+  function arToggle() { if (ar && !ar.hidden) arClose(); else arOpen(); }
+
+  if (ar) {
+    qs("#arX").addEventListener("click", arClose);
+    qs("#arForm").addEventListener("submit", function (e) { e.preventDefault(); arSend(arInput && arInput.value); });
+    arStopBtn.addEventListener("click", function () { if (arCtl) { try { arCtl.abort(); } catch (e) {} } });
+    /* 引用按钮是 arRich 现生成的，监听挂在流容器上按 data-ref 分发 —— 免得每片 delta 重绑一遍 */
+    arStream.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest(".ar-ref") : null;
+      if (!b) return;
+      var ref = arRefs[Number(b.dataset.ref)];
+      if (!ref) return;
+      if (window.InkAgent) InkAgent.invoke("reader.goto", { bi: ref.bi });
+      arAct("跳回了 " + ref.label);
+    });
+    arToNote.addEventListener("click", function () {
+      if (!arLast || !arLast.a) return;
+      arConfirm("notes.create", {
+        docId: docId, text: arLast.a.replace(/\s+/g, " ").slice(0, 380), body: arLast.a,
+        anchor: (state.sel && state.sel.anchor) || "", page: (state.sel && state.sel.page) || 0
+      });
+    });
+    arToCard.addEventListener("click", function () {
+      var s = arSel();
+      if (!s) return;
+      arConfirm("cards.create", { docId: docId, quotes: [s] });
+    });
+    arToTask.addEventListener("click", function () {
+      if (!arLast || !arLast.q) return;
+      arConfirm("tasks.create", { docId: docId, titles: [arLast.q.slice(0, 120)], today: false });
+    });
+    arUndoBtn.addEventListener("click", async function () {
+      var r = await InkAgent.undo();
+      arAct(r.ok ? "撤回了 1 条" + r.kind : "这轮没有可撤销的操作了");
+      if (r.ok) toast("已撤回", "rotate-ccw");
+      arPaintLand();
+    });
+    /* 划词条上的「问 AI」：选中即问 —— 速问退役后，它就是那个入口（方案 §四 判定） */
+    qs("#selAsk").addEventListener("click", function () {
+      if (!state.sel) return;
+      hideSel();
+      arOpen();
+    });
+  }
+
+  /* 工具层的宿主桥：只有阅读页才有的三样 —— 当前书、页内跳转、批注重画 */
+  if (window.InkAgent) {
+    InkAgent.host({
+      docId: function () { return docId; },
+      selBi: arBi,
+      selection: arSel,
+      goto: jumpTo,
+      refresh: function () {
+        return API.fetchNotes(docId).then(function (r) {
+          state.notes = ((r && r.data) || []).slice();
+          renderNotes(); renderBookmarks(); renderPage(0, false);
+        });
+      }
+    });
   }
 
   /* ---------- 8.11 按钮清理（要求一）：单态过滤 ----------

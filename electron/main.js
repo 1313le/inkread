@@ -8,7 +8,7 @@
    ============================================================ */
 "use strict";
 
-const { app, BrowserWindow, Menu, session, shell, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, Menu, session, shell, ipcMain, dialog, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { start, ROOT } = require("../scripts/serve.js");
@@ -98,6 +98,13 @@ function bindWindowIPC() {
   });
   ipcMain.handle("ink:win-close", () => { if (win) win.close(); });
   ipcMain.handle("ink:win-is-max", () => !!win && win.isMaximized());
+  /* 主题 → 壳层：窗口底色与 nativeTheme 跟随应用主题（页面自己管 CSS 侧的 color-scheme）。
+     参数一律校验：tone 只认两个值，底色只认 #rrggbb —— 不接受任意字符串进 setBackgroundColor。 */
+  ipcMain.handle("ink:win-theme", (_e, arg) => {
+    const a = arg || {};
+    if (a.tone === "dark" || a.tone === "light") nativeTheme.themeSource = a.tone;
+    if (win && typeof a.paper === "string" && /^#[0-9a-fA-F]{6}$/.test(a.paper)) win.setBackgroundColor(a.paper);
+  });
 }
 
 /* ============================================================

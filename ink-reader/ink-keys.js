@@ -153,7 +153,9 @@
     palEl.innerHTML =
       '<div class="ikp" role="dialog" aria-modal="true" aria-label="命令面板">' +
         '<div class="ikp-head">' +
-          '<svg class="ikp-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>' +
+          /* v2.23 §W3 第五步收编：原来这里手写一枚 search，与主表同形却走不到契约
+             （stroke-width 2、不进唯一性闸）。面板是全局浮层，app.js 必然已就位。 */
+          window.icon("search", 16, "ikp-glyph") +
           '<input class="ikp-input" id="ikpInput" type="text" role="combobox" aria-expanded="true" aria-controls="ikpList" aria-autocomplete="list" aria-label="搜索命令" placeholder="搜索命令 · 输入名称筛选" autocomplete="off" spellcheck="false">' +
           '<kbd class="ikp-esc">Esc</kbd>' +
         '</div>' +
@@ -483,6 +485,16 @@
     on: on, off: off, run: run, list: list, ime: ime,
     openPalette: openPalette, closePalette: closePalette,
     openHelp: openHelp, closeHelp: closeHelp,
-    isOpen: isOpen
+    isOpen: isOpen,
+    /* 带转场约定的换页：命令面板与工具层（ink-agent.js）走同一条 —— 
+       各处自己写 location.href 会漏掉 inkread.nav.v1，新页首启动画就与这次导航打架。 */
+    navGo: navGo
   };
+
+  /* 层栈让路（方案 §W2.4）：命令面板与快捷键总览是盖在窗上面的模态，
+     Esc 先归它们 —— 否则一次按键会连身后的窗一起收掉。
+     本脚本在 dock.js 之前加载，所以登记排在 DOMContentLoaded。 */
+  document.addEventListener("DOMContentLoaded", function () {
+    if (window.InkWin) InkWin.yieldTo("keys", isOpen);
+  });
 })();

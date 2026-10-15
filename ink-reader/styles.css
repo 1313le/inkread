@@ -7,6 +7,14 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* 全局基线：带 hidden 属性一律不显示。作者层只要给类/ID 写过 display，就会压过 UA 的
+   [hidden]{display:none}（作者层特异度更高），历史上为此逐组件补了 30 条 —— 补一处漏一处，
+   正是「排版屡教不改」的病根。一条收口后，页面里不再允许出现 `.foo[hidden]` 这类 hide 侧补丁。
+   保留：show 侧的 `.foo:not([hidden])`（如 .more-pop）不是补丁。
+   注意：本条是 !important，与「同类 !important 且写得更晚」的组件样式比顺序会输 —— 真要那样，
+   改组件的显隐机制（换类名），别把逐组件补丁加回来。 */
+[hidden] { display: none !important; }
+
 /* ============================================================
    Token 三层结构
    L1 primitive：基础主题声明 4 个原色（paper / ink / accent / lift）；
@@ -84,6 +92,10 @@
   --ink-3: color-mix(in oklab, var(--ink) 78%, var(--paper));
   --line: color-mix(in oklab, var(--ink) 20%, var(--paper));
   --line-2: color-mix(in oklab, var(--ink) 11%, var(--paper));
+  /* 滚动条滑块：实测 29 套用 --line（20%）只有 1.39~1.84 对比，等于看不见；
+     38% 让全 29 套 >=2.2、56% 让全 29 套 >=3.0（WCAG 1.4.11 UI 组件线）。见 v2.23 方案 §7.2.3 */
+  --scroll: color-mix(in oklab, var(--ink) 38%, var(--paper));
+  --scroll-hover: color-mix(in oklab, var(--ink) 56%, var(--paper));
   --accent-deep: color-mix(in oklab, var(--accent) 86%, var(--lift));
   --accent-wash: color-mix(in oklab, var(--accent) 12%, transparent);
   /* 印刷发丝线：替代重描边 */
@@ -230,6 +242,12 @@ html[data-theme="contrastNight"] { --mark: #ff725c; --on-mark: #1a0e0a; }
 /* 纸纹可关（追求最干净字形时） */
 html[data-grain="off"] .screen { background-image: none; }
 
+/* 原生控件随主题的总开关。实测缺它时 night/abyss 的下拉弹层仍画 #ffffff、
+   复选框与原生滑杆仍是 Windows 系统蓝（v2.23 方案 §7.2.1）。
+   走 data-tone 而不是 JS 内联：apply() 与 previewCustom() 两条路径都写这个属性。 */
+html { color-scheme: light; }
+html[data-tone="dark"] { color-scheme: dark; }
+
 /* v2.14：暗底颗粒降密度（0.035 → 0.02），夜色下噪点不可喧宾 */
 html[data-tone="dark"] { --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.02 0'/></filter><rect width='180' height='180' filter='url(%23n)'/></svg>"); }
 
@@ -250,14 +268,23 @@ body {
 ::selection { background: var(--mark-wash); }
 a { color: inherit; }
 button, input, select, textarea { font-family: inherit; color: inherit; }
+/* 原生控件的填充强调色统一走 --accent-ink（强调色的可读版本）：
+   --accent 是给「字压在实底上」用的粗色，直接给复选框/滑杆在浅底上过跳。 */
+input, select, textarea, progress { accent-color: var(--accent-ink); }
 :focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
 
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: content-box; }
+::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
 
-.ic { flex: none; vertical-align: -3px; }
+/* v2.23 §W3 第六步：图标尺寸只许走这五档。值必须与 app.js 的 window.ICON_SIZES 一致
+   （闸 K9 逐档比对），任何 .ic 的 width/height 都引用这里的变量，不许再写死 px（闸 K8 扫源码）。 */
+.ic {
+  --ic-xs: 12px; --ic-sm: 14px; --ic-md: 16px; --ic-lg: 20px; --ic-xl: 28px;
+  flex: none; vertical-align: -3px;
+}
 
 /* ============ 一体化外壳 ============
    v15：去掉「设备 bezel」黑边外壳（--desk 桌面底 / 圆角 / 阴影全部移除），
@@ -478,7 +505,7 @@ html[data-tone="dark"] .eink-flash { background: var(--paper); }
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper-2);
   font-size: 12px; color: var(--ink-2); letter-spacing: .02em; white-space: nowrap;
 }
-.chip .ic { width: 13px; height: 13px; }
+.chip .ic { width: var(--ic-xs); height: var(--ic-xs); }
 .chip-accent { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-wash); }
 .chip-green { color: var(--green-ink); border-color: color-mix(in srgb, var(--green) 45%, transparent); background: var(--green-wash); }
 .chip-amber { color: var(--amber-ink); border-color: color-mix(in srgb, var(--amber) 45%, transparent); background: var(--amber-wash); }
@@ -514,18 +541,14 @@ select.field {
 .switch.on { background: var(--accent); border-color: var(--accent-ink); }
 .switch.on::after { left: 18px; background: var(--on-accent); }
 
-.tabs { display: flex; border-bottom: 1px solid var(--line); gap: 2px; }
-.tab {
-  padding: 9px 20px; background: none; border: none; border-bottom: 2px solid transparent;
-  font-size: 14.5px; letter-spacing: .05em; color: var(--ink-3); cursor: pointer; transition: color .18s, border-color .18s;
-}
-.tab:hover { color: var(--ink-2); }
-.tab.active { color: var(--ink); font-weight: 700; border-bottom-color: var(--accent-ink); }
-
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; background: var(--paper-2); }
+/* 契约：.seg-btn 不许设 overflow —— 弹性子项一旦 overflow 非 visible，min-width:auto
+   的「不小于内容」地板就塌成 0，按钮被挤到比文字还窄，字被自己裁掉（实测 768 档
+   「日/周/月」30>28）。nowrap 是配套：地板成立后也不允许标签折成两行改行高。 */
 .seg-btn {
   padding: 6px 13px; border: none; background: transparent; cursor: pointer;
-  font-size: 12.5px; letter-spacing: .03em; color: var(--ink-3); position: relative; overflow: hidden; transition: .18s;
+  font-size: 12.5px; letter-spacing: .03em; color: var(--ink-3); position: relative;
+  white-space: nowrap; transition: .18s;
 }
 .seg-btn + .seg-btn { border-left: 1px solid var(--line); }
 .seg-btn:hover { color: var(--ink); }
@@ -573,7 +596,7 @@ input[type="range"].range::-webkit-slider-thumb {
 .empty { padding: 42px 20px; text-align: center; color: var(--ink-3); border: 1px dashed var(--line); border-radius: var(--r-md); }
 /* 只放大空态自己的那枚主图标。原来写成后代选择器，会把「空态里的按钮」内的
    图标也一并撑到 30px（实测闪卡「去书架」因此从 34px 高被顶到 52px）。 */
-.empty > .ic { width: 30px; height: 30px; color: var(--line); margin-bottom: 10px; }
+.empty > .ic { width: var(--ic-xl); height: var(--ic-xl); color: var(--line); margin-bottom: 10px; }
 .empty p { font-size: 13.5px; letter-spacing: .1em; line-height: 1.9; }
 /* 阅读页的空态卡挂在 .doc 里：`.doc p`（正文两端对齐 + 首行缩进）与 `.empty p`
    权重相同（0-1-1）且写在后面，会把居中提示排成一段缩进正文。提一层权重收回。 */
@@ -815,7 +838,7 @@ html[data-int="bold"] .rule-2line { display: none; }
   text-align: center; cursor: pointer; background: var(--paper-2); transition: border-color .2s, background .2s;
 }
 .dropzone:hover { border-color: var(--accent-ink); background: var(--accent-wash); }
-.dropzone .ic { width: 32px; height: 32px; color: var(--ink-3); margin-bottom: 12px; }
+.dropzone .ic { width: var(--ic-xl); height: var(--ic-xl); color: var(--ink-3); margin-bottom: 12px; }
 .dropzone h3 { font-size: 16px; letter-spacing: .14em; margin-bottom: 7px; }
 .dropzone p { font-size: 12.5px; color: var(--ink-3); letter-spacing: .06em; }
 .steps-panel { margin-top: 18px; }
@@ -1187,8 +1210,10 @@ html[data-auto="on"] .doc[data-doc-theme="academic"] p { text-align: justify; }
 .doc.pg-cols h1, .doc.pg-cols .doc-meta, .doc.pg-cols .doc-fig, .doc.pg-cols .doc-img,
 .doc.pg-cols .math-block, .doc.pg-cols table,
 .doc.pg-cols .md-tablebox, .doc.pg-cols .md-code { column-span: all; }
-/* 竖向浏览：连续滚动，滚动条细窄、不抢纸面 */
-.page-sheet[data-mode="scroll"] { overscroll-behavior: contain; scrollbar-width: thin; }
+/* 竖向浏览：连续滚动。原先这里挂 scrollbar-width:thin 想让条细窄，实测反而
+   把该元素从 webkit 通道切到标准通道，画出 OS 浅色的 #fcfcfc 白带（v2.23 §7.2.2 E3），
+   细条交回全局 ::-webkit-scrollbar 的 9px。 */
+.page-sheet[data-mode="scroll"] { overscroll-behavior: contain; }
 .page-sheet[data-mode="scroll"] .doc { padding-bottom: 120px; }
 .doc-fig { margin: 1.2em 0; padding: 18px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--paper-2); text-align: center; }
 .doc-fig .fig-box { height: 116px; display: grid; place-items: center; color: var(--ink-3); }
@@ -1275,7 +1300,6 @@ html[data-auto="on"] .doc[data-doc-theme="academic"] p { text-align: justify; }
   border-top: 1px solid var(--rule); background: var(--paper-2);
   font-size: 12.5px; color: var(--ink-2); flex-wrap: wrap;
 }
-.auto-bar[hidden] { display: none; }
 .auto-bar .auto-play {
   border-color: var(--mark); color: var(--mark-ink); border-radius: 50%;
   width: 34px; padding: 0;
@@ -1556,14 +1580,14 @@ sup, sub { font-size: .7em; }
 .chat-input-row .field { flex: 1; }
 
 /* Compact（≤600px）：对话卡固定 620px，会把输入行顶到底部标签栏底下 —— 打字得先滚动。
-   此处让对话卡按视口收缩：快捷问题收成单行可横扫、头部收紧、消息区按 dvh 定高并内部滚动，
+   此处让对话卡按视口收缩：头部收紧、消息区按 dvh 定高并内部滚动、快捷问题折行，
    输入行便稳稳落在标签栏之上。 */
 @media (max-width: 600px) {
-  /* min-width:0 必须给到 grid 项：否则 nowrap 的快捷问题会把 min-content 撑大，
-     1fr 列随之变宽，消息文本整行被裁到视口外 */
+  /* min-width:0 必须给到 grid 项：否则 chips 的 min-content 会把 1fr 列顶宽，
+     消息文本整行被裁到视口外 */
   .chat-card { height: auto; min-width: 0; }
   .chat-head { padding: 11px 15px; row-gap: 7px; }
-  .chat-quick { flex-wrap: nowrap; overflow-x: auto; padding: 0 15px 10px; min-width: 0; }
+  .chat-quick { flex-wrap: wrap; padding: 0 15px 10px; min-width: 0; }
   .chat-quick > * { flex: none; }
   .chat-msgs { flex: 0 1 auto; height: 26dvh; min-height: 132px; padding: 14px; }
   .chat-input-row { padding: 11px 15px; }
@@ -1675,8 +1699,7 @@ html[data-reduce="on"] .mem-row.on { animation: none; }
   border: 1px solid color-mix(in srgb, var(--amber) 38%, transparent);
   background: color-mix(in oklab, var(--amber) 10%, transparent);
 }
-.sync-warn[hidden] { display: none; }
-.sync-warn .ic { width: 13px; height: 13px; flex: 0 0 auto; margin-top: 3px; }
+.sync-warn .ic { width: var(--ic-xs); height: var(--ic-xs); flex: 0 0 auto; margin-top: 3px; }
 .sync-log li { list-style: none; font-size: 12px; color: var(--ink-2); padding: 7px 0; border-bottom: 1px dashed var(--line-2); letter-spacing: .03em; line-height: 1.65; }
 .sync-log li:last-child { border-bottom: none; }
 .sync-log b { color: var(--ink); font-size: 11px; letter-spacing: .1em; margin-right: 8px; }
@@ -1942,7 +1965,7 @@ body:not(.immersive) .immerse-bar { display: none; }
 }
 .ol-tag:hover { border-color: var(--accent-ink); color: var(--accent-ink); }
 .ol-tag.on { background: var(--accent-wash); border-color: var(--accent-ink); color: var(--accent-ink); }
-.ol-tag .ic { width: 12px; height: 12px; }
+.ol-tag .ic { width: var(--ic-xs); height: var(--ic-xs); }
 .ol-check {
   width: 17px; height: 17px; flex: none; margin: 5px 4px 0 0; border: 1.4px solid var(--ink-3);
   border-radius: 3px; background: transparent; cursor: pointer; display: grid; place-items: center;
@@ -2026,10 +2049,12 @@ body:not(.immersive) .immerse-bar { display: none; }
 .wb-src a:hover { text-decoration: underline; }
 .wb-foot { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--line-2); }
 .wb-foot .ef-hint { font-size: 11.5px; color: var(--ink-3); letter-spacing: .06em; }
-/* v2.11 Bug1：工作台卡给高度上界（让出顶栏 46 + 页头与页边距约 184）——
-   卡内 npane/md-split 的 min-height:0 链从「有界」变「有效」，
-   长文被关进编辑器与预览各自的滚动条里，整页不再被撑爆。 */
-.work-card { display: flex; flex-direction: column; min-height: 560px; max-height: var(--work-h-max); }
+/* v2.11 Bug1：工作台卡给高度上界 —— 卡内 npane/md-split 的 min-height:0 链从「有界」变「有效」，
+   长文被关进编辑器与预览各自的滚动条里，整页不再被撑爆。
+   上界由 notes.html 实测写入 --work-h-max（styles.css:1885 的 calc 只是首帧与嵌窗的兜底）。
+   下限必须跟着预算走：原先写死 560，矮窗（1280×620 实测）里 min 压过 max，
+   右卡 560 而左卡被夹在 394 —— 两卡底边差 170px 且整页多出一条滚动，正是 #53 那类回归。 */
+.work-card { display: flex; flex-direction: column; min-height: min(560px, max(320px, var(--work-h-max))); max-height: var(--work-h-max); }
 /* 沉浸态由 body.nw 自管高度（.work-layout height:100%），撤掉上界与下限 */
 body.nw .work-card { max-height: none; min-height: 0; }
 
@@ -2055,7 +2080,6 @@ body.nw .work-card { max-height: none; min-height: 0; }
   background: color-mix(in srgb, #000 44%, transparent);
   opacity: 0; transition: opacity .2s ease;
 }
-.ap-mask[hidden] { display: none; }
 .ap-mask.on { opacity: 1; }
 
 .ap {
@@ -2133,7 +2157,7 @@ body.nw .work-card { max-height: none; min-height: 0; }
 .ap-seg-scroll {
   display: flex; width: 100%; max-width: 100%;
   overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
-  border-radius: var(--r-sm); scrollbar-width: thin; -webkit-overflow-scrolling: touch;
+  border-radius: var(--r-sm); -webkit-overflow-scrolling: touch;
 }
 /* chip 只长不缩（flex-grow 吃掉余量、flex-shrink 0 保住样张不被压字）：
    原先 flex:none 让整条边框盒子铺满 1410px 而 chip 只占左半边，实测中文行
@@ -2152,9 +2176,21 @@ body.nw .work-card { max-height: none; min-height: 0; }
   background: var(--paper-2); color: var(--ink);
   font-size: 12.5px; padding: 5px 8px; cursor: pointer;
 }
-.ap-sel { padding-right: 22px;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8577' stroke-width='2' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");
-  background-repeat: no-repeat; background-position: right 6px center;
+.ap-sel { padding-right: 22px; }
+/* v2.23 §W3 第七步：箭头过去是 data-URI 里写死的 %238b8577 —— 29 套主题各自换墨色，
+   这支箭头一动不动：暗主题下几乎看不见，亮主题下又偏灰。改成「遮罩 + currentColor」，
+   形状仍是同一条 chevron-down 路径（与主表 ICONS["chevron-down"] 逐字同形），
+   颜色由宿主 .ap-sel-w 的 currentColor 出，于是跟着 --ink-3 走。
+   select 自己挂不了伪元素，故 theme.js 的两处下拉各套一层 span；
+   宿主只多一个 color，select 的 color 仍由 .ap-sel 规则决定，文字色不受影响。 */
+.ap-sel-w {
+  position: relative; display: inline-flex; color: var(--ink-3);
+}
+.ap-sel-w::after {
+  content: ""; position: absolute; right: 7px; top: 50%; width: 12px; height: 12px;
+  margin-top: -6px; pointer-events: none; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>") no-repeat center / 12px 12px;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>") no-repeat center / 12px 12px;
 }
 .ap-num { width: 58px; text-align: center; cursor: text; font-variant-numeric: tabular-nums; }
 .ap-sel:focus-visible, .ap-num:focus-visible, .ap-seg-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -2221,11 +2257,9 @@ body.nw .work-card { max-height: none; min-height: 0; }
 
 /* 定时主题折叠块 */
 .ap-sched { margin-top: 10px; padding: 4px 10px; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--paper-2); }
-.ap-sched[hidden] { display: none; }
 
 /* 日出日落 / 钟点 两组子控件互斥显示 */
 .ap-sun, .ap-fix { display: block; }
-.ap-sun[hidden], .ap-fix[hidden] { display: none; }
 /* 经纬度比钟点宽，需容纳负号与四位小数 */
 .ap-num-wide { width: 94px; }
 /* 极昼极夜等需要提醒的说明 */
@@ -2249,7 +2283,6 @@ body.nw .work-card { max-height: none; min-height: 0; }
   background-color: var(--paper); background-image: var(--grain);
   animation: bootOut .42s ease .62s both;
 }
-.boot[hidden] { display: none; }
 .boot-seal {
   width: 56px; height: 56px; display: grid; place-items: center;
   background: var(--accent);
@@ -2450,7 +2483,6 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
   background-color: var(--paper-2); background-image: var(--grain);
   box-shadow: var(--sh-md);
 }
-.batch-bar[hidden] { display: none; }
 .batch-bar .bb-n { font-size: 12.5px; color: var(--ink-2); letter-spacing: .04em; }
 .batch-bar .bb-n b { color: var(--accent-ink); font-size: 15px; }
 .batch-bar .field { min-width: 132px; }
@@ -2545,7 +2577,6 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
   transform: translateY(0); opacity: 1;
   transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 220ms ease-out;
 }
-.more-sheet[hidden] { display: none; }
 /* v2.14 阅读器「更多」：列表式窄卡 sheet（居中 420px；全局导航那份是五列宫格，两不相扰） */
 .more-sheet.reader-more {
   left: 50%; right: auto; width: min(420px, calc(100vw - 20px));
@@ -2615,7 +2646,7 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
     font-size: 10.5px; letter-spacing: .04em;
   }
   .nav-link span { display: inline; font-size: 10.5px; }
-  .nav-link .ic { width: 20px; height: 20px; }
+  .nav-link .ic { width: var(--ic-lg); height: var(--ic-lg); }
   .nav-link.active { background: transparent; }
   .nav-link.active::before {
     top: 0; left: 50%; transform: translateX(-50%);
@@ -2629,7 +2660,7 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
     cursor: pointer; min-height: 44px;
   }
   .nav-more span { font-size: 10.5px; }
-  .nav-more .ic { width: 20px; height: 20px; color: var(--ink-3); transition: color .18s; }
+  .nav-more .ic { width: var(--ic-lg); height: var(--ic-lg); color: var(--ink-3); transition: color .18s; }
   .nav-more.active { color: var(--ink); font-weight: 600; }
   .nav-more.active .ic { color: var(--accent-ink); }
 
@@ -2662,10 +2693,10 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
    分段选择器左右相邻，故 .seg-btn 只纵向外扩，横向靠自身宽度兜底。 */
 @media (pointer: coarse) {
   /* 视觉尺寸不动，靠 ::after 外扩命中区 */
-  .icon-btn, .seg-btn, .bc-edit, .td-cb { position: relative; }
+  .icon-btn, .bc-edit, .td-cb { position: relative; }
   .icon-btn::after, .bc-edit::after { content: ""; position: absolute; inset: -8px; }
-  /* 分段选择器左右相邻，只纵向外扩，横向靠自身宽度兜底 */
-  .seg-btn::after { content: ""; position: absolute; inset: -8px 0; }
+  /* .seg-btn 的外扩在这里是死规则：.seg 容器 overflow:hidden 会把它裁回原盒
+     （见下方 .seg{min-height:44px}），所以分段控件一律走实打实补高。 */
   .btn, .field { min-height: 44px; }
   /* 大尺寸触屏（平板横屏 ≥1181px）走的是全宽侧栏，rail 档的 48px 够不着，这里兜底 */
   .nav-link, .nav-more { min-height: 44px; }
@@ -2705,6 +2736,12 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
      外扩等于白扩，只能整体实打实补足 44px 命中区 */
   .seg { min-height: 44px; }
   .seg-btn { display: inline-flex; align-items: center; justify-content: center; }
+  /* 闪卡「复习 ⇄ 卡组」标签页（36px）：补高不影响下划线（.on 的 border-bottom 随盒底走）。
+     沉浸笔记「大纲 / 脑图 / Markdown」标签页（29px）外补高会顶满 46px 浮条、
+     .active 的底色块变成整条，故只纵向外扩命中区，视觉尺寸不动。 */
+  .fc-tab { min-height: 44px; }
+  .nw-tab { position: relative; }
+  .nw-tab::after { content: ""; position: absolute; inset: -8px 0; }
   /* 笔记提纲行的行内小控件（折叠 17×26 / 优先级 22×26 / 分类签 28×18 / 勾选 17×17）
      原本只有 28px 行距，直接外扩到 44 会盖住上下行的同一个控件、点错行。
      故先把行距抬到 46px，再让这四枚控件按新行距补足命中区；
@@ -2714,6 +2751,37 @@ body.shelf-manage .book-card.on .book-meta b { color: var(--accent-ink); }
   .ol-caret::after, .ol-pri::after, .ol-tag::after, .ol-check::after {
     content: ""; position: absolute; inset: -8px -4px;
   }
+
+  /* ---- v2.23 §W3 第六步：本轮实测出的七条欠账 ----
+     口径不是人肉估的：把样式表里所有 @media(pointer:coarse) 声明剥掉条件重新注入
+     （CDP 的 setEmulatedMedia 只认 prefers-color-scheme / color-gamut / forced-colors，
+     pointer 传进去静默无效 —— 这就是 §7.4 第 24 条说「本闸覆盖不到」的真正原因），
+     再逐页量 getBoundingClientRect + ::after 外扩。取证 .work/v223/coarse-*.log。
+     横竖两轴的取向沿用本仓既有规矩：独占一处的补足两轴，左右紧邻的只纵向外扩。 */
+
+  /* 1 分段按钮实测 42 高（.seg 补到 44 后按钮自己仍差 2px，index/notes/themes 三页同病）；
+     闪卡视图切换的两个裸按钮 33 高，一并补实高 —— 它们同样被 .seg/.view-seg 的圆角裁外扩。 */
+  .seg-btn, .view-seg button { min-height: 44px; }
+  /* 2 裸 <select> 没有基线：实测主脑页上下文下拉 18 高、闪卡排序下拉 37 高
+     （.field 那条管不到没挂 .field 的 select）。补一条全局地板。 */
+  select { min-height: 44px; }
+  /* 3 小按钮实测 40 宽（闪卡侧栏折叠钮）：高度那条已有，宽度补上，两轴都到 44。 */
+  .btn { min-width: 44px; }
+  /* 4 检索清空钮实测 22×22，绝对定位挂在输入框右沿：外扩 11px 正好 44，
+     不改盒尺寸就不动那一行的排版（宿主已是 absolute，::after 有定位参照）。 */
+  .q-clear::after { content: ""; position: absolute; inset: -11px; }
+  /* 5 已存检索行的删除钮实测 17×17（12px 图标 + 2px padding），是全仓最小的一枚。
+     行高本身只有 33px，直接外扩到 44 会盖住上下行同名控件，故先把行补到 46；
+     左右也扩到 44 —— 这一行整条都是「打开该检索」的按钮，删除扩出去的邻域抢的是
+     同一个宿主行控件里最右侧那一小段计数（.si-n），不是别的行。 */
+  .side-item { min-height: 46px; }
+  .si-x { position: relative; }
+  .si-x::after { content: ""; position: absolute; inset: -14px; }
+  /* 6 嵌窗动作条的 mini 钮实测 24×18（图标款）与 42×22（文字款）：独占一行，两轴都补足。 */
+  .mpd-mini { min-height: 44px; min-width: 44px; }
+  /* 7 三处浮层关闭钮实测 26 / 30 / 28 见方，头部条里左右都有控件，故只纵向外扩。 */
+  .modal-x, .td-x, .aa-x { position: relative; }
+  .modal-x::after, .td-x::after, .aa-x::after { content: ""; position: absolute; inset: -9px 0; }
 }
 
 /* 设置面板与弹窗：窄屏转底部抽屉 */
@@ -2850,8 +2918,6 @@ html[data-int="bold"] .field { border-color: var(--ink); border-radius: 0; }
 html[data-int="bold"] .switch,
 html[data-int="bold"] .switch::after { border-radius: 0; }
 html[data-int="bold"] .switch.on { border-color: var(--accent-ink); }
-html[data-int="bold"] .tabs { border-bottom-width: var(--int-bd-2); border-bottom-color: var(--ink); }
-html[data-int="bold"] .tab.active,
 html[data-int="bold"] .side-tab.active { border-bottom-width: var(--int-bd-2); }
 
 /* ---------- 七、统计卡：双色侧条 ---------- */
@@ -2952,7 +3018,9 @@ html[data-int="bold"] .ap-rd { border-radius: 0; }
    ============================================================ */
 .task-drawer {
   position: absolute; top: 0; right: 0; bottom: 0; z-index: 270;
-  width: 344px; max-width: 92vw;
+  /* 宽与位置由 InkWin 逐帧下发；原先这里的 max-width:92vw 会夹住「铺满」档
+     （640 宽视口下 92vw=588，铺满却在 588 处留一条边），入窗后必须摘掉 */
+  width: 344px;
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--paper);
   border-left: var(--int-bd-2) solid var(--rule);
@@ -3107,7 +3175,6 @@ html[data-int="bold"] .tbadge { border-radius: 0; }
   transform: translateX(102%); visibility: hidden;
   transition: transform .3s cubic-bezier(.2, .8, .3, 1), visibility .3s;
 }
-.aa[hidden] { display: none; }
 .aa.on { transform: none; visibility: visible; }
 
 .aa-head {
@@ -3385,12 +3452,13 @@ html[data-int="bold"] .aa-step:active { transform: translate(2px, 2px); }
 @media (max-width: 700px) {
   .th-grid { grid-template-columns: 1fr 1fr; }
   .th-ed-grid { grid-template-columns: 1fr; }
-  /* 主题商城的五个分区（我的主题/主题商城/我的创作/字体/音色）在窄屏排不下：
-     .seg 的 overflow:hidden 会把末尾的「音色」裁掉。整条改为可横滑，按钮不压缩不折行。 */
   .th-bar { gap: 9px; }
-  .th-tabs { flex: 1 1 100%; max-width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-  .th-tabs::-webkit-scrollbar { display: none; }
-  .th-tabs .seg-btn { flex: none; white-space: nowrap; }
+  /* 五个分区（我的主题/主题商城/我的创作/字体/音色）在窄屏排不下。原先让整条横滑，
+     代价是「音色」被推到视口外 —— 用户不知道有这一档，等于功能消失。改成折行：
+     .seg 自身 wrap，同行按钮等宽铺满（.seg-btn 不设 overflow，min-width:auto 的
+     「不小于内容」地板仍在，标签不会自我裁切）。 */
+  .th-tabs { flex: 1 1 100%; max-width: 100%; flex-wrap: wrap; }
+  .th-tabs .seg-btn { flex: 1 1 auto; white-space: nowrap; }
 }
 @media (max-width: 640px) {
   /* 窄屏：转底部抽屉，落在拇指区 */
@@ -3486,12 +3554,11 @@ html[data-reduce="on"] .sc-top .scene-band { transition: none; }
   font-size: 12.5px; color: var(--ink-2);
   animation: rise .28s both;
 }
-.edit-bar[hidden] { display: none; }
 .edit-bar .eb-k {
   display: inline-flex; align-items: center; gap: 5px;
   font-weight: 700; letter-spacing: .04em; color: var(--accent-ink);
 }
-.edit-bar .eb-k .ic { width: 14px; height: 14px; }
+.edit-bar .eb-k .ic { width: var(--ic-sm); height: var(--ic-sm); }
 .edit-bar .spacer { flex: 1; }
 /* 「完成并上锁」是正向收尾：走墨色实底，比「恢复原文」更重，是这条带的主按钮 */
 .edit-bar .eb-done {
@@ -3847,7 +3914,8 @@ html[data-reduce="on"] .scene-band { transition: none !important; }
    ============================================================ */
 .toc-panel {
   position: absolute; top: 0; right: 0; bottom: 0; z-index: 260;
-  width: 344px; max-width: 92vw;
+  /* 同 .task-drawer：几何归 InkWin，92vw 这道闸会把「铺满」夹出一条边 */
+  width: 344px;
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--paper);
   border-left: var(--int-bd-2) solid var(--rule);
@@ -3855,8 +3923,6 @@ html[data-reduce="on"] .scene-band { transition: none !important; }
   transform: translateX(102%); visibility: hidden;
   transition: transform .34s cubic-bezier(.2, .8, .3, 1), visibility .34s;
 }
-/* hidden 属性要显式压回 display:none —— 作者样式的 display:flex 会盖掉 UA 的 [hidden] */
-.toc-panel[hidden] { display: none; }
 .toc-panel.on { transform: none; visibility: visible; }
 
 .tpc-grip { display: none; flex: none; width: 42px; height: 4px; border-radius: 3px; background: var(--line); margin: 9px auto 0; }
@@ -3882,6 +3948,15 @@ html[data-reduce="on"] .scene-band { transition: none !important; }
 .seg-xs { display: flex; }
 .seg-xs .seg-btn { flex: 1; padding: 6px 8px; font-size: 12px; }
 #findHint, #jumpMeta { margin-top: 8px; }
+
+/* 窗一铺满，控件就跟着长到整幅：这四条都是 flex:1「吃掉可用宽」，停靠态（≤560）刚好，
+   铺满态实测 段条 313→1042、输入框 254→983、页签 237→1072 —— 两枚选项各占 521px，
+   检索框比正文还宽。统一夹到 340（与 .search-box 那条既有上限同一个数）：
+   停靠态三条实测 313 / 254 / 237 全在 340 以内，这条只在浮宽和铺满时才咬得住。
+   .side-tabs 夹的是页签本身而不是那条栏 —— 栏的 border-bottom 是整幅分隔线，
+   跟着夹会在铺满态断成半截线。 */
+.seg-xs, .td-seg, .tpc-find .field, .tpc-jump .field { max-width: 340px; }
+.side-tabs .side-tab { max-width: 170px; }
 
 /* 底部：可拖进度条（拖动即预览，松手才跳） */
 .tpc-foot { flex: none; padding: 12px 15px 14px; border-top: 1px solid var(--line); background: var(--paper-3); }
@@ -3926,7 +4001,6 @@ html[data-reduce="on"] .scene-band { transition: none !important; }
 .fr-clear { background: none; border: none; padding: 0; font-size: 11.5px; color: var(--ink-3); cursor: pointer; letter-spacing: .06em; }
 .fr-clear:hover { color: var(--ink); text-decoration: underline; }
 .fr-refine { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 9px; }
-.fr-refine[hidden] { display: none; }
 
 .fr-card {
   display: block; padding: 10px 10px 9px; margin-bottom: 8px; cursor: pointer;
@@ -4183,15 +4257,6 @@ body.immersive .mode-pop {
   transition: color .18s, border-color .18s;
 }
 .mpd-x:hover { color: var(--ink); border-color: var(--ink-3); }
-/* 头部图标键（草稿纸「全屏」等），与关闭键同款 */
-.mpd-ic {
-  flex: none; width: 30px; height: 30px;
-  display: grid; place-items: center; background: none; cursor: pointer;
-  border: 1px solid var(--line); border-radius: var(--int-r-sm); color: var(--ink-3);
-  transition: color .18s, border-color .18s, background .18s;
-}
-.mpd-ic:hover { color: var(--ink); border-color: var(--ink-3); }
-.mpd-ic[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--accent-wash); }
 .mpd-sub {
   flex: none; margin: 0; padding: 0 15px 11px;
   border-bottom: 1px solid var(--line);
@@ -4260,7 +4325,7 @@ body.immersive .mode-pop {
   transition: border-color .18s, background .18s;
 }
 .cite-item.on { border-color: var(--accent-ink); background: var(--accent-wash); }
-.cite-item input { flex: none; width: 15px; height: 15px; margin: 3px 0 0; accent-color: var(--accent); }
+.cite-item input { flex: none; width: 15px; height: 15px; margin: 3px 0 0; accent-color: var(--accent-ink); }
 .cite-n { flex: none; padding-top: 1px; font-size: 11.5px; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 .cite-tx { font-size: 12.6px; line-height: 1.75; color: var(--ink); }
 
@@ -4360,7 +4425,6 @@ body.immersive .mode-pop {
   display: flex; flex-direction: column;
   background: var(--paper);
 }
-.guide-stage[hidden] { display: none; }
 .gd-box {
   flex: 1; min-height: 0; overflow: auto;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -4381,17 +4445,27 @@ body.immersive .mode-pop {
 /* ---------- 五、翻译：划词浮层 + 段落对照（四类内容共用的公共能力） ---------- */
 .tr-pop {
   position: fixed; z-index: 292;
-  width: 320px; max-width: calc(100vw - 20px);
+  display: flex; flex-direction: column;
+  width: 320px; max-width: calc(100vw - 20px); max-height: min(62vh, 460px);
   padding: 11px 12px;
   background: var(--paper);
   border: var(--int-bd-2) solid var(--line); border-radius: var(--int-r);
   box-shadow: var(--sh-md);
 }
+/* v2.23 W2 · 翻译浮层入窗：InkWin 自造的细栏拉平到卡片边框，戴上这顶帽子才像一扇窗；
+   滚动交给译文区（语言栏是控件行，跟着一起滚就没法改语向了） */
+.tr-pop .inkw-bar { margin: -11px -12px 9px; border-radius: calc(var(--int-r) - 2px) calc(var(--int-r) - 2px) 0 0; }
+.tr-pop[data-dock-state="docked"] .inkw-bar,
+.tr-pop[data-dock-state="max"] .inkw-bar { border-radius: 0; }
+.tr-pop[data-dock-state="docked"], .tr-pop[data-dock-state="max"] { max-height: none; border-radius: 0; }
+.tr-pop[data-docked="left"] { border-left: 0; }
+.tr-pop[data-docked="right"] { border-right: 0; }
 .tr-load { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-3); }
 
 /* 语言栏：源 ⇄ 目标，置顶。语向是划词翻译里最常改的一件东西 ——
    改任一端立即重译，不必重划一遍再等一遍。 */
 .tr-langs {
+  flex: none;
   display: flex; align-items: center; gap: 6px;
   padding-bottom: 9px; border-bottom: 1px dashed var(--line);
 }
@@ -4410,7 +4484,7 @@ body.immersive .mode-pop {
 }
 .tr-swap:hover { color: var(--accent-ink); border-color: var(--accent-ink); }
 
-.tr-body { padding-top: 8px; }
+.tr-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-top: 8px; }
 .tr-src { font-size: 12px; color: var(--ink-3); line-height: 1.6; }
 .tr-x {
   flex: none; width: 24px; height: 24px; display: grid; place-items: center;
@@ -4434,14 +4508,25 @@ body.immersive .mode-pop {
    不做解释性扩写 —— 「在哪儿」和「是什么意思」是两件事，分开给。 */
 .aux-card {
   position: fixed; z-index: 293;
-  width: 344px; max-width: calc(100vw - 20px); max-height: min(62vh, 460px); overflow-y: auto;
+  display: flex; flex-direction: column;
+  width: 344px; max-width: calc(100vw - 20px); max-height: min(62vh, 460px);
   padding: 12px 13px;
   background: var(--paper);
   border: var(--int-bd-2) solid var(--line); border-radius: var(--int-r);
   box-shadow: var(--sh-md);
   animation: rise .18s both;
 }
-.aux-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+/* v2.23 W2 · 卡片入窗（InkWin）：头部就是拖窗把手，滚动交给正文区 ——
+   缩放手柄是卡片的直接子节点，若滚动发生在卡片本体上，手柄会跟着内容一起被卷走。
+   停靠 / 铺满时它是侧栏：撑满那一条、去掉圆角，超长由 .aux-body 自己滚。 */
+.aux-head { cursor: move; touch-action: none; user-select: none; }
+.aux-head .inkw-st { align-self: center; }
+.aux-head .inkw-btn { width: 24px; height: 24px; }
+.aux-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.aux-card[data-dock-state="docked"], .aux-card[data-dock-state="max"] { max-height: none; border-radius: 0; }
+.aux-card[data-docked="left"] { border-left: 0; }
+.aux-card[data-docked="right"] { border-right: 0; }
+.aux-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex: none; }
 .aux-head .spacer { flex: 1; }
 .aux-head b { font-size: 13px; letter-spacing: .04em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aux-k {
@@ -4489,6 +4574,9 @@ body.immersive .mode-pop {
 }
 .tr-qn { margin: 5px 0 0; font-size: 11.4px; line-height: 1.7; color: var(--ink-3); }
 .tr-p { margin: 0; font-size: 12.6px; line-height: 1.85; color: var(--ink-2); }
+/* 未结构化：模型的原话如实展示（最多 4000 字），超高即滚，卡片不许被一段话顶穿屏幕 */
+.un-raw { max-height: 210px; overflow-y: auto; white-space: pre-wrap; color: var(--ink-3); }
+.aux-exits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .tr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .tr-chip { padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; color: var(--ink-2); }
 .tr-refs { display: flex; flex-wrap: wrap; gap: 6px 12px; }
@@ -4705,6 +4793,47 @@ html[data-int="bold"] .pv-chip { border-radius: 0; }
 .mtest.err .ic { color: var(--amber-ink); }
 .mtest-note { flex-basis: 100%; font-size: 11.3px; color: var(--ink-3); }
 
+/* 模型候选面板（v2.23）：借用命令面板 .ikp-item / .ikp-list 的行样式，
+   于是「随主题、可键盘上下、可点选」三件事与快捷键面板同一套实现。
+   z-index 260 排在 modal-mask(250) 之上、命令面板(960) 之下 —— 它是弹层，
+   不是新的对话层，不该盖住用户随时能呼出的命令面板。 */
+.mdd {
+  position: fixed; z-index: 260;
+  min-width: 260px; max-width: min(420px, 92vw); max-height: 262px;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--paper); color: var(--ink);
+  border: var(--int-bd) solid var(--line); border-radius: var(--int-r-sm);
+  box-shadow: var(--sh-md);
+  animation: fadeIn .14s both;
+}
+/* position:relative 是给键盘导航当坐标系的：offsetTop 要相对滚动容器算，
+   否则 scrollIntoView 会连带把外层 modal 与页面一起滚。 */
+.mdd .ikp-list { padding: 4px 0 6px; position: relative; }
+/* 当前值不在可用列表：黄底一行说清「现在用的是哪个、能换成哪个」，不做静默替换 */
+.mdd-cur {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 4px 8px 2px; padding: 6px 8px;
+  border: var(--int-bd) solid color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: var(--int-r-sm); background: var(--amber-wash);
+  font-size: 11.8px; color: var(--ink-2);
+}
+.mdd-cur b { font: 500 11.8px/1.5 var(--font-mono); overflow-wrap: anywhere; color: var(--ink); }
+.mdd-use {
+  margin-left: auto; flex: none; cursor: pointer;
+  padding: 3px 9px; font-size: 11.5px; color: var(--accent-ink);
+  background: var(--paper); border: var(--int-bd) solid var(--accent-ink);
+  border-radius: 999px; white-space: nowrap;
+}
+.mdd-use:hover { background: var(--accent-wash); }
+.mdd-foot {
+  flex: none; padding: 6px 12px; border-top: 1px solid var(--line-2);
+  background: var(--paper-2); font-size: 11px; color: var(--ink-3);
+}
+.mdd-mark { color: var(--accent-ink); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .mdd { animation: none; } }
+/* 站内「减少动效」开关与系统偏好等效：本项目所有动效都吃这两道闸，漏一道就是不一致 */
+html[data-reduce="on"] .mdd { animation: none; }
+
 @media (max-width: 640px) {
   .mm-v { text-align: left; }
   .key-row { flex-wrap: wrap; }
@@ -4763,9 +4892,6 @@ html[data-int="bold"] .ms-val { border-radius: 0; }
 }
 .fc-due b { color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 .fc-rate { display: flex; gap: 6px; margin-top: 10px; }
-/* hidden 修正：类选择器的 display:flex 会盖掉 UA 的 [hidden]{display:none}——
-   修复「闪卡未翻面就能看到评分排」（v2.6 协调项，与 #ttsTimerPop 同一教训） */
-.fc-rate[hidden] { display: none; }
 .fc-rate-btn {
   flex: 1; display: inline-flex; flex-direction: column; align-items: center; gap: 2px;
   padding: 7px 4px; cursor: pointer;
@@ -5484,7 +5610,6 @@ button.user-chip:hover .uc-go { color: var(--accent-ink); }
 
 /* ---------- 里程碑激励弹窗（InkCheer） ---------- */
 .ink-cheer { position: fixed; inset: 0; z-index: 260; display: grid; place-items: center; padding: 22px; }
-.ink-cheer[hidden] { display: none; }
 .ink-cheer .ic-scrim { position: absolute; inset: 0; background: var(--scrim); animation: fadeIn .22s both; }
 .ink-cheer .ic-card {
   position: relative; width: min(430px, 92vw); overflow: hidden;
@@ -5563,7 +5688,6 @@ button.user-chip:hover .uc-go { color: var(--accent-ink); }
 .ink-cheer .ic-sub { font-size: 12px; letter-spacing: .06em; color: var(--ink-3); }
 .ink-cheer .ic-foot { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 18px; }
 .ink-cheer .ic-more { font-size: 12.5px; letter-spacing: .05em; color: var(--accent-ink); text-decoration: none; border-bottom: 1px solid var(--accent-ink); }
-.ink-cheer .ic-more[hidden] { display: none; }
 .ink-cheer .ic-more:hover { color: var(--accent-deep); border-bottom-color: var(--accent-deep); }
 
 /* 减少动效 / 系统偏好：无粒子、无扫光，直接显示（火焰仍按进度呈色） */
@@ -5619,6 +5743,86 @@ html[data-reduce="on"] .ink-cheer .ic-flamebox { animation: none; }
 .dock-guide[data-side="right"] { right: 0; border-right: 0; }
 .dock-guide.on { opacity: 1; visibility: visible; }
 html[data-reduce="on"] .dock-guide { transition: none; }
+/* v2.23 W2 · 上边缘的落点＝整块可用区：铺满的预告纸影就是全幅，不量宽 */
+.dock-guide[data-side="max"] { left: 0; right: 0; }
+
+/* ---------- v2.23 W2 · 浮层形态钮（InkWin 注入，所有侧栏与悬浮窗共用） ----------
+   规格沿用页头既有按钮：28×28 与 .mp-x / .mpd-x 同档，按下态走 --accent-*
+   ——「当前停靠在哪个形态」和「当前页签」本来就是同一个语义家族，不该有两个长相。
+   .inkw-bar 只在浮层自己没头部时才会被建出来（卡片类浮层）；有头部的注入到既有头部里。 */
+.inkw-bar {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid var(--line);
+  background: var(--paper-2); cursor: move; touch-action: none; user-select: none;
+}
+.inkw-t {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; font-weight: 700; letter-spacing: .05em; color: var(--ink-2);
+}
+.inkw-st { flex: none; display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
+.inkw-btn {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center;
+  background: none; cursor: pointer; color: var(--ink-3);
+  border: 1px solid var(--line); border-radius: var(--int-r-sm);
+  transition: color .18s, border-color .18s, background .18s;
+}
+.inkw-btn:hover { color: var(--ink); border-color: var(--ink-3); }
+.inkw-btn[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent-ink); background: var(--accent-wash); }
+/* 图标表缺席的页（不加载 app.js）退成文字符号，不留空钮 */
+.inkw-g { font-size: 13px; line-height: 1; }
+/* v2.23 W2 头部统一：宿主自带的标题行被征用成把手（data-inkw-bar），可它长得和普通标题一样，
+   光标过去还是箭头——用户按住形态钮那一段拖不动（343px 抽屉里四枚钮 + ✕ 占了右 160px，
+   正中正好压在钮上），只会以为「这窗拖不动」。把可拖语义还给光标：行=move、钮=pointer。 */
+[data-inkw-bar] { cursor: move; touch-action: none; }
+[data-inkw-bar] button { cursor: pointer; }
+
+/* ---------- v2.23 W2 · 三块侧栏入窗后的形态 ----------
+   目录 / 任务 / 书签侧栏原先钉死一边，靠 top/right/bottom + width 定位；
+   现在几何由 InkWin 逐帧下发（inline left/top/width/height），CSS 只管「长相」与「收起」。
+   三种形态的语言与草稿纸浮窗、工具抽屉完全一致（见 .mode-drawer[data-dock-state] 那一组）：
+     浮动 = 一张能浮在正文上的卡（描边 + 圆角 + 双层投影）
+     停靠 = 贴住正文的一块纸（去掉卡片描边，只留与正文之间那条界栏）
+     铺满 = 整块可用区（无描边无投影，界栏交给内容自己分隔）
+   换边的时候界栏要跟着镜像 —— 停靠左侧却在左边画一条缝，等于把窗画进了屏幕外。 */
+.toc-panel[data-dock-state="float"],
+.task-drawer[data-dock-state="float"],
+.reader-side[data-dock-state="float"] {
+  border: 1px solid var(--line-2); border-radius: var(--r-md);
+  box-shadow: 0 26px 64px -34px var(--edge), 0 3px 12px -8px var(--edge);
+}
+.toc-panel[data-dock-state="max"],
+.task-drawer[data-dock-state="max"],
+.reader-side[data-dock-state="max"] { border: 0; border-radius: 0; box-shadow: none; }
+.toc-panel[data-docked="left"],
+.task-drawer[data-docked="left"] {
+  border-left: 0; border-right: var(--int-bd-2) solid var(--line);
+  box-shadow: 22px 0 46px -26px var(--edge);
+}
+.reader-side[data-docked="right"] {
+  border-right: 0; border-left: 1px solid var(--rule);
+  box-shadow: -12px 0 26px -24px var(--edge);
+}
+/* 自建把手（书签侧栏没有头部，形态钮只能落在 InkWin 造的那条细栏上）：
+   栏本身带 --paper-2 底，浮动态卡片圆角的第一条边由它承担，别让 1px 描边压在圆角外。 */
+.reader-side .inkw-bar { padding: 6px 8px; }
+.reader-side[data-dock-state="float"] .inkw-bar { border-radius: calc(var(--r-md) - 1px) calc(var(--r-md) - 1px) 0 0; }
+.reader-side[data-dock-state="max"] .inkw-bar { border-radius: 0; }
+
+/* 头部被形态钮占掉一格后，标题不许折行 —— 实测 344px 出厂停靠宽下「目 / 录」竖成两行，
+   这一条是本轮最扎眼的回头账。让位的必须是**可有可无的那一格**（当前文档名 / 范围 chip），
+   不是窗口的名字。钮退到 24 档与 .aux-head 同规格、行距从 9 收到 6：一行里六件东西，
+   按页头的疏朗走，344px 就只能保住标题。InkWin 自建的 .inkw-bar 不在此列 ——
+   那一行只有「标题 + 钮」，28 档装得下（实测 232px 不溢出、标题走省略号）。 */
+.tpc-head[data-inkw-bar], .td-head[data-inkw-bar] { gap: 6px; }
+.tpc-head[data-inkw-bar] .inkw-btn, .td-head[data-inkw-bar] .inkw-btn { width: 24px; height: 24px; }
+.tpc-head b, .td-title { flex: none; white-space: nowrap; }
+.tpc-doc { flex: 0 1 auto; min-width: 0; }
+.td-head .chip { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+/* 任务抽屉这条头没有 .spacer，让位全靠 ✕ 自己的 margin-left:auto；
+   形态钮组（.inkw-st）也带一条 auto —— 实测 343px 时两份 auto 把剩余空间对半分
+   （各 16.6px），形态钮被撂在行中间、和右边的 ✕ 分家。注入之后 pushing 的活儿归组，
+   ✕ 的那条 auto 撤掉：一行里「标题 · 范围 · ｜形态钮 ✕」右端成对。 */
+.td-head[data-inkw-bar] .td-x { margin-left: 0; }
 
 .dock-edge {                      /* 停靠态：内侧竖边可拖宽（与浮动态右下抓角各司其职） */
   position: absolute; top: 0; bottom: 0; width: 9px; z-index: 4;
@@ -5742,7 +5946,6 @@ body[data-page="tasks"] button.btn-accent[data-check]:active {
   padding: min(12vh, 120px) 20px 40px;
   animation: fadeIn .16s both;
 }
-.ikp-mask[hidden] { display: none; }   /* 作者态 display 会压过 UA 的 [hidden]，必须显式回收 */
 .ikp {
   width: min(560px, 94vw); max-height: min(66vh, 620px);
   display: flex; flex-direction: column;

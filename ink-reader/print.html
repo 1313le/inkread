@@ -17,6 +17,10 @@
 :root { --p-imgh: 180mm; }</style>
 <style>
 /* 本页外壳：屏幕上的工具条与空态。纸面排印不在这里（见 paper.css） */
+/* 纸面视图恒为亮色（body 固定 paper、.bar 带 .no-print、paper.css 与 /api/export
+   离线 HTML 共用一份，不随 app 主题），但原生 select/checkbox 的长相原先靠 OS 默认，
+   这里显式声明 light 把它钉住（v2.23 §7.2.1：不声明时控件跟随 OS，与页面意图无关）。 */
+:root { color-scheme: light; }
 .bar {
   max-width: 170mm; margin: 0 auto; padding: 10px 6mm; display: flex; align-items: center;
   gap: 10px; flex-wrap: wrap; font-family: "InkRead Sans", system-ui, sans-serif;
@@ -83,14 +87,19 @@
     <label class="ctl ctl-chk"><input type="checkbox" id="ckLand">横版</label>
     <label class="ctl ctl-chk"><input type="checkbox" id="ckChap">章首分页</label>
   </div>
+  <!-- v2.23 §W3 第五步：这两枚是本闸唯一不走的旁路 —— print.html 只加载 mock.js/md.js/api.js/
+       paper-spec.js，没有 app.js，收编进 icon() 工厂会把它拽进整套壳层依赖（主题、同步、字体）。
+       打视图是导出管线的独立渲染面，不该为两枚 svg 背上阅读器运行时。故豁免：路径字面量与
+       ICONS.printer / ICONS["chevron-left"] 逐字对齐，契约参数（1.8 + round）补齐。
+       闸 K10 的豁免表登记此两处，改动主表这两名时需人工同步。 -->
   <button type="button" id="btnPrint" aria-label="打开系统打印面板">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><path d="M7 16h10v4H7z"/>
     </svg>打印
   </button>
   <a class="btn" href="index.html">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-      <path d="M15 6l-6 6 6 6"/>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="m15 18-6-6 6-6"/>
     </svg>返回书架
   </a>
 </div>

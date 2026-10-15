@@ -237,9 +237,12 @@
      —— 长文按句切到 220 字一段，段间「边播边预取」，听感连续。
      —— 拿不到（离线 / 静态托管无该路由）一律返回 null，无缝退回本机声线。
      ------------------------------------------------------------ */
-  var _neuralAudio = null, _neuralStop = false, _neuralFin = null;
+  /* 代际令牌：每开一轮朗读 /api/tts +1，在飞的旧循环恢复后发现自己不是当前代，
+     就自行退出。用布尔量做不到这点——新一轮把标志清回 false 时，旧循环的
+     await 还没恢复，恢复后读到的仍是 false，于是两轮抢同一张声卡（叠声）。 */
+  var _neuralAudio = null, _neuralGen = 0, _neuralFin = null;
   function stopNeural() {
-    _neuralStop = true;
+    _neuralGen++;
     try { if (_neuralAudio) _neuralAudio.pause(); } catch (e) {}
     try { if (_neuralFin) _neuralFin(); } catch (e) {}
     _neuralAudio = null; _neuralFin = null;
@@ -264,6 +267,11 @@
   }
   function playClip(src) {
     return new Promise(function (resolve) {
+      /* 两轮朗读交叠（换页重起队列 / 朗读与试听同时按）时，旧clip还在出声：
+         先把上一条真正按停并结掉它的 Promise，绝不两段神经音频叠在一起放。 */
+      var prev = _neuralAudio, prevFin = _neuralFin;
+      if (prev) { try { prev.pause(); } catch (e) {} }
+      if (prevFin) { try { prevFin(); } catch (e) {} }
       var a = new Audio(src);
       _neuralAudio = a;
       var settled = false, began = false;
@@ -287,19 +295,20 @@
     if (!v || !v.edge || !window.InkVoice || !InkVoice.ttsUrl) return null;
     var chunks = neuralChunks(body);
     var urls = chunks.map(function (c) { return InkVoice.ttsUrl(v, c); });
-    _neuralStop = false;
+    stopNeural();                       /* 上一轮还在放：先收声，再认领本轮代际 */
+    var my = _neuralGen;
     /* 先取第一段：拿不到就整体放弃，交给本机声线（不做半截朗读） */
     var cur = await fetchClip(urls[0]);
     if (!cur) return null;
     var next = urls.length > 1 ? fetchClip(urls[1]) : Promise.resolve(null);
     for (var i = 0; i < urls.length; i++) {
       var src = (i === 0) ? cur : await next;
-      if (_neuralStop) { try { if (src) URL.revokeObjectURL(src); } catch (e) {} return { code: 0, data: { mode: "neural", voice: v.name } }; }
+      if (my !== _neuralGen) { try { if (src) URL.revokeObjectURL(src); } catch (e) {} return { code: 0, data: { mode: "neural", voice: v.name } }; }
       next = (i + 2 < urls.length) ? fetchClip(urls[i + 2]) : Promise.resolve(null);
       if (!src) { onTick((i + 1) / urls.length); continue; }  /* 中途一句取声失败只跳过这句，不整体作废 —— 旧版在这里整段放弃、退回系统声线从文章开头重读，正是「读完又换声线再读一遍」的另一根源 */
       await playClip(src);
       onTick((i + 1) / urls.length);
-      if (_neuralStop) break;
+      if (my !== _neuralGen) break;
     }
     return { code: 0, data: { mode: "neural", voice: v.name } };
   }
@@ -324,7 +333,7 @@
     /* gen = 代际令牌：start / seekIdx / 换速换嗓都会令旧队列的全部 pending
        恢复后 halt(id) 为真而自行退出，杜绝新旧两条队列并行抢声卡的竞态。 */
     var st = { units: [], i: 0, speed: 1, voice: "", dead: true, paused: false, gen: 0,
-               stopAt: 0, stopBi: null, sysLock: null, noNeural: false };
+               stopAt: 0, stopBi: null, sysLock: null, noNeural: false, neuralWhy: "" };
     var ev = { onSegment: null, onTick: null, onState: null, onMode: null };
     function emit(name, a, b) { try { if (ev[name]) ev[name](a, b); } catch (e) {} }
     function curVoice() {
@@ -334,7 +343,7 @@
     async function waitWhilePaused(id) {
       while (st.paused && !halt(id)) await delay(120);
     }
-    async function simSegment(text, id) {
+    async function simSegment(text, id, note) {
       var secs = Math.min(10, Math.max(2, Math.round(String(text || "").length / (60 * st.speed))));
       for (var k = 1; k <= secs; k++) {
         if (halt(id)) return;
@@ -343,14 +352,16 @@
         await delay(650 / st.speed);
         emit("onTick", (st.i + k / secs) / st.units.length);
       }
-      emit("onMode", { mode: "sim", voice: "" });
+      /* note 非空 = 这一轮其实一句声音都没出（计时模拟只为让界面行为一致）：
+         带着原因发给上层显示，不能让用户以为「在朗读」而屏幕前一片安静。 */
+      emit("onMode", { mode: note ? "none" : "sim", voice: "", note: note || "" });
     }
     async function sysSegment(text, id) {
       var synth = window.speechSynthesis, U = window.SpeechSynthesisUtterance;
-      if (!synth || typeof U !== "function") { await simSegment(text, id); return; }
+      if (!synth || typeof U !== "function") { await simSegment(text, id, "本机没有语音合成接口"); return; }
       var voices = await waitVoices(synth, 1200);
       if (halt(id)) return;
-      if (!voices.length) { await simSegment(text, id); return; }
+      if (!voices.length) { await simSegment(text, id, "本机未列出任何声线"); return; }
       var v = curVoice();
       /* 语速叠加到系统声线上（神经链路走 rate 参数，这里走 utterance.rate） */
       var vv = v ? Object.assign({}, v, { rate: Math.max(0.5, Math.min(3, ((v.rate) || 1) * st.speed)) }) : { rate: st.speed };
@@ -368,15 +379,24 @@
         if (r.ok || r.started) {
           if (r.ok) rememberSysVoice(cands[c]);
           st.sysLock = cands[c];           /* 一条声线播成功就锁定，换段不再重新挑（避免中途变声） */
-          emit("onMode", { mode: "speech", voice: cands[c].name || "" });
+          emit("onMode", { mode: "speech", voice: cands[c].name || "", note: st.neuralWhy });
           return;
         }
       }
-      if (!halt(id)) await simSegment(text, id);
+      await simSegment(text, id, cands.length ? "本机声线全部哑火" : "本机没有该语言或性别的声线");
     }
     async function neuralSegment(text, id) {
       var v = curVoice();
-      if (!v || !v.edge || !v.id || st.noNeural) return false;
+      st.neuralWhy = "";
+      if (!v || !v.edge || !v.id) return false;   /* 这款音色本来就没有神经版本，不算故障 */
+      /* 音色念不出这段正文时，端点不报错、直接回 0 字节空音频（实测：英文音色 + 纯中文段落）。
+         先在本机判掉：省一次注定为空的往返，更把原因说准 ——
+         「这款音色念不出中文」是可以换个音色解决的，「神经合成未响应」会让读者去查网络。 */
+      if (window.InkVoice && InkVoice.canSpeak && !InkVoice.canSpeak(v, text)) {
+        st.neuralWhy = "这款音色念不出正文语言";
+        return false;
+      }
+      if (st.noNeural) { st.neuralWhy = "神经合成未响应"; return false; }
       var chunks = neuralChunks(text);
       var url = function (t) {
         return "/api/tts?voice=" + encodeURIComponent(v.id) +
@@ -387,7 +407,7 @@
       var urls = chunks.map(url);
       var first = await fetchClip(urls[0]);
       if (halt(id)) return true;
-      if (!first) return false;             /* 第一句都拿不到 → 本队列放弃神经链路 */
+      if (!first) { st.noNeural = true; st.neuralWhy = "神经合成未响应"; return false; }  /* 第一句都拿不到 → 本队列放弃神经链路，后续段不再逐段付一次失败往返 */
       var next = urls.length > 1 ? fetchClip(urls[1]) : Promise.resolve(null);
       for (var i = 0; i < urls.length; i++) {
         var src = i === 0 ? first : await next;
@@ -467,6 +487,7 @@
         try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
         st.i = Math.max(0, Math.min(st.units.length - 1, i || 0));
         st.dead = false; st.paused = false; _ttsAbort = false;
+        st.noNeural = false;   /* 跳段 / 换速 / 换嗓都是用户主动动作：给神经链路一次重试机会 */
         emit("onState", "playing");
         run(st.gen);
       },
@@ -767,10 +788,17 @@
     if (mem.length) sys += "\n这位读者以往的归类习惯（供参考，不是硬性规则）：\n- " + mem.join("\n- ");
     var usr = "文件名：" + String(fileName == null ? "" : fileName) +
       "\n正文节选（前 1200 字）：" + (head || "（二进制文档，拿不到正文）");
-    var txt = await callChat(cfg, sys, usr, { temp: 0.1, maxTokens: 300, timeout: 12000 });
-    var j = pickJson(txt);
-    if (!j || !isKind(j.kind)) throw new Error("模型未返回可解析的类别");
-    return { kind: j.kind, reason: String(j.reason || "").slice(0, 120) };
+    var r = await askJson(cfg, sys, usr, {
+      temp: 0.1, maxTokens: 300, timeout: 12000, fields: ["kind", "reason"]
+    });
+    /* 闭合标签空间是这条路的护栏：结构再完整，kind 不在八类里就算失败 */
+    if (!isKind(r.j.kind)) {
+      var er = new Error("模型给的类别不在八类之内");
+      er.name = "UnstructuredError";
+      er.raw = r.raw;
+      throw er;
+    }
+    return { kind: r.j.kind, reason: String(r.j.reason || "").slice(0, 120), via: r.via };
   }
   function hasModelNow() { var c = getModelCfg(); return !!(c.baseUrl && c.key && c.model); }
 
@@ -1379,7 +1407,8 @@
       var src = String(text || "").trim();
       var cfg = getModelCfg();
       if (src && cfg.baseUrl && cfg.key && cfg.model) {
-        var ck = cacheKey("explain", src + "|" + ((ctx && ctx.chapter) || ""), cfg);
+        /* 缓存键必须带文档标识：同一句话在两本书里，上下文包不同，答案不该复用 */
+        var ck = cacheKey("explain", src + "|" + (ctxDocId(ctx) || "") + "|" + ((ctx && ctx.chapter) || ""), cfg);
         var hit = cacheGet(ck);
         if (hit) return { code: 0, data: Object.assign({}, hit, { cached: true }) };
         try {
@@ -1388,7 +1417,14 @@
           return { code: 0, data: d };
         } catch (e) {
           var st = explainStub(src, ctx);
-          st.note = "主脑解析失败：" + window.API.netErrPhrase(e) + "，已改用本地词表解析。";
+          if (e && e.name === "UnstructuredError") {
+            /* 模型说了话、只是没成结构：话如实交出去，别把它按进「解析失败」里 */
+            st.unstructured = true;
+            st.raw = String(e.raw || "").slice(0, 4000);
+            st.note = "模型的回复没有成为可分栏的结构，下面附上它的原话；本地词表解析垫底。";
+          } else {
+            st.note = "主脑解析失败：" + window.API.netErrPhrase(e) + "，已改用本地词表解析。";
+          }
           return { code: 0, data: st };
         }
       }
@@ -1423,7 +1459,7 @@
         }) };
       }
 
-      var ck = cacheKey("trace", src, cfg);
+      var ck = cacheKey("trace", src + "|" + (ctxDocId(ctx) || ""), cfg);
       var hit = cacheGet(ck);
       if (hit) return { code: 0, data: Object.assign({}, hit, { hits: local.hits, count: local.count, exact: local.exact, query: src, cached: true }) };
 
@@ -1436,8 +1472,12 @@
         }) };
       } catch (e) {
         await delay(120);
+        var un = e && e.name === "UnstructuredError";
         return { code: 0, data: Object.assign({}, blank, local, {
-          note: "考据请求失败：" + window.API.netErrPhrase(e) + "，已退回「在本文中的落点」。"
+          unstructured: un, raw: un ? String(e.raw || "").slice(0, 4000) : "",
+          note: un
+            ? "模型的回复没有成为可分栏的结构，下面如实附上它的原话。"
+            : "考据请求失败：" + window.API.netErrPhrase(e) + "，已退回「在本文中的落点」。"
         }) };
       }
     },
@@ -1452,7 +1492,7 @@
       var q = String(query || "").trim();
       var cfg = getModelCfg();
       if (q && list.length && cfg.baseUrl && cfg.key && cfg.model) {
-        var ck = cacheKey("search", q + "|" + list.length, cfg);
+        var ck = cacheKey("search", q + "|" + list.length + "|" + (ctxDocId({}) || ""), cfg);
         var hit = cacheGet(ck);
         if (hit) return { code: 0, data: Object.assign({}, hit, { cached: true }) };
         try {
@@ -1461,7 +1501,10 @@
           return { code: 0, data: d };
         } catch (e) {
           var loc = localSearch(q, list);
-          loc.note = "主脑检索失败：" + window.API.netErrPhrase(e) + "，已改用本地字符检索。";
+          var un = e && e.name === "UnstructuredError";
+          if (un) { loc.unstructured = true; loc.raw = String(e.raw || "").slice(0, 2000); }
+          loc.note = (un ? "主脑的回复没有成为可分栏的结构" : "主脑检索失败：" + window.API.netErrPhrase(e))
+            + "，已改用本地字符检索。";
           return { code: 0, data: loc };
         }
       }
@@ -1563,6 +1606,9 @@
 
     /* GET /api/tts/engine —— 听书引擎（段落队列，见 ttsEngine 注释） */
     ttsEngine: ttsEngine,
+
+    /* 等系统声线列出来（首次取常是空数组）—— 试听与朗读共用这一份实现 */
+    waitVoices: waitVoices,
 
     /* GET /api/tts/config · POST /api/tts/config —— 云音色（Moss）配置 */
     ttsConfig() { var c = ttsCfg(); return { code: 0, data: { baseUrl: c.baseUrl, model: c.model, hasKey: !!c.key } }; },
@@ -1704,83 +1750,23 @@
       await delay(180);
       return { code: 0, data: getModelCfg() };
     },
+    /* 归一化与预设识别：界面与本机共用一套规则，免得两处各判各的 */
+    modelBaseNorm(u) { return normBase(u); },
+    modelPresetKey(u) { return presetKeyOfBase(u); },
+
+    /* GET /api/ai/models —— 只做「把可用模型名拉回来」这一件事。
+       不兼职测连通：拉列表与测通的失败原因不同，混在一起就会把「没有列表端点」
+       说成「连通失败」，再把一次 ping 的结论当成模型列表（问题一的一条根因）。
+       出参 data.kind ∈ ok | auth | network | cors | unsupported。 */
+    async fetchModels(cfg) { return fetchModelsRun(cfg || {}); },
 
     /* POST /api/ai/model/test —— 连通性测试：真发请求（v2.4 起，不再是桩）。
-       ① 先 GET {base}/models（OpenAI 标准端点）—— 实测延迟 + 真实模型列表；
-       ② 服务不支持 /models（404/405 等）→ 回退一次最小 chat completion
+       ① 先走 fetchModels（GET {base}/models）—— 实测延迟 + 真实模型列表；
+       ② 仅当服务不支持 /models（404/405/501）才回退一次最小 chat completion
           （max_tokens:1 的 ping）—— 「真的能对话」比「能列模型」更贴近可用性；
-       ③ 一切失败如实回报：HTTP 状态、超时、跨域被拦（浏览器直连某些服务时）。
-       与真实对话链路同规范：baseUrl 去尾斜杠 + Bearer 头。 */
-    async testModel(cfg) {
-      var c = cfg || {};
-      var base = String(c.baseUrl || "").trim().replace(/\/+$/, "");
-      var key = String(c.key || "").trim();
-      if (!/^https?:\/\//i.test(base)) {
-        return { code: 1, data: { ok: false, reason: "接口地址需以 http:// 或 https:// 开头" } };
-      }
-      if (!key) {
-        return { code: 1, data: { ok: false, reason: "缺少 API Key" } };
-      }
-      var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 12000);
-      function pickModels(j) {
-        var arr = j && (Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : Array.isArray(j) ? j : []);
-        return (arr || []).map(function (m) {
-          return m && (m.id || m.name || m.model);
-        }).filter(function (x) { return typeof x === "string" && x; });
-      }
-      var t0 = Date.now();
-      try {
-        var res = await fetch(base + "/models", {
-          method: "GET",
-          headers: { "Authorization": "Bearer " + key },
-          signal: ctl ? ctl.signal : undefined
-        });
-        if (res.ok) {
-          var lat = Date.now() - t0;
-          var j = await res.json().catch(function () { return null; });
-          var ids = pickModels(j);
-          clearTimeout(timer);
-          return {
-            code: 0,
-            data: {
-              ok: true, latency: lat, models: ids,
-              note: "经 GET /models 实测（HTTP " + res.status + "）" +
-                (ids.length ? " · 模型名已入候选，可直接选用" : " · 该服务未返回列表，可在上方手填模型名")
-            }
-          };
-        }
-        /* ② /models 不可用 → 用一次最小对话验证「真的能聊」 */
-        var model = c.model || (PRESETS[c.preset] && PRESETS[c.preset].models && PRESETS[c.preset].models[0]) || "gpt-4o-mini";
-        var res2 = await fetch(base + "/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
-          body: JSON.stringify({ model: model, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false }),
-          signal: ctl ? ctl.signal : undefined
-        });
-        var lat2 = Date.now() - t0;
-        clearTimeout(timer);
-        if (res2.ok) {
-          return {
-            code: 0,
-            data: { ok: true, latency: lat2, models: [],
-              note: "该服务无 /models 端点，已用最小对话实测通过（HTTP " + res2.status + "）· 模型名 " + model + " 可用" }
-          };
-        }
-        var body = "";
-        try { body = (await res2.text()).slice(0, 160).replace(/\s+/g, " "); } catch (e) {}
-        return { code: 1, data: { ok: false, reason: "HTTP " + res2.status + (body ? " · " + body : "") } };
-      } catch (e) {
-        clearTimeout(timer);
-        var msg = String((e && e.message) || e);
-        if (/abort/i.test(msg)) return { code: 1, data: { ok: false, reason: "请求超时（12 秒无响应）" } };
-        return {
-          code: 1,
-          data: { ok: false, reason: "请求失败：" + msg +
-            (/Failed to fetch/i.test(msg) ? "（网络不通，或浏览器直连被跨域拦截——桌面 App 版会自动补跨域头）" : "") }
-        };
-      }
-    },
+       ③ 一切失败如实回报并按 kind 分类，界面据此给可操作的下一步。
+       与真实对话链路同规范：baseUrl 去尾斜杠 + Bearer 头 + 12 秒超时。 */
+    async testModel(cfg) { return testModelRun(cfg || {}); },
 
     /* ------------------------------------------------------------
        主脑出口（brain.js 专用）
@@ -1884,6 +1870,60 @@
     async saveCard(id, st) {
       await delay(140);
       return { code: 0, data: setCard(id, st) };
+    },
+
+    /* POST /api/tasks —— 新建一条独立任务（v2.23 W1d′：助手「变成任务」的落点）。
+       与导入任务同一口径：只有带 x 的整条记录才算独立任务（mergedTasks 按 x 判别），
+       演示任务住在 DB.tasks、本机库里没有整条记录，删不掉也不该假装删得掉。
+       id 在这里生成，不接受调用方自带 —— 让外面塞 id 等于允许它写进别人的键。 */
+    async saveTask(task) {
+      await delay(200);
+      var title = String((task && (task.x || task.title)) || "").trim().slice(0, 120);
+      if (!title) return { code: 1, msg: "empty-title" };
+      var all = taskStoreGet();
+      var now = new Date();
+      var id = "t-ai-" + now.getTime().toString(36) + "-" + Object.keys(all).length;
+      var rec = {
+        assignee: "",
+        today: (task && task.today) ? 1 : 0,
+        x: title, docId: (task && task.docId) || "", anchor: (task && task.anchor) || "",
+        kind: "daily", week: "助手", time: "—",
+        month: String(now.getMonth() + 1), monthLabel: (now.getMonth() + 1) + " 月", phase: "",
+        src: (task && task.src) || "AI 助手",
+        at: now.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+      };
+      all[id] = rec;
+      var ok = taskStoreSet(all);
+      return { code: ok ? 0 : 1, data: Object.assign({ id: id }, rec), stored: ok };
+    },
+
+    /* DELETE /api/tasks/{id} —— 删一条独立任务（助手撤销走这里）。
+       notFound 如实返回：撤销一条没写成的任务不该报「已撤销」。 */
+    async deleteTask(id) {
+      await delay(160);
+      var all = taskStoreGet();
+      if (!id || !all[id]) return { code: 1, msg: "not-found" };
+      delete all[id];
+      return { code: taskStoreSet(all) ? 0 : 1, removed: String(id) };
+    },
+
+    /* 主脑工具层（ink-agent.js）复用的两条结构化出口 ——
+       解析器与「要一份 JSON」的梯子（能力位 + 一次纠错重试）在 api.js 只此一份，
+       工具层再抄一份就会和溯源/解析走出两套容错口径。 */
+    aiJson(sys, usr, o) { return askJson(getModelCfg(), sys, usr, o || {}); },
+    aiParse(txt, keys) { return parseStructured(txt, keys); },
+    /* 能力位读写（inkread.ai.cap.v1，按「接口地址 + 模型」记）：
+       工具层用它记「这一家认不认原生 tool_calls」，字段里只有 0/1 与时间戳，不含密钥。 */
+    capGet(field) {
+      var e = capMap()[capKeyOf(getModelCfg())];
+      return !e || e[field] !== 0;
+    },
+    capSet(field, ok) {
+      var m = capMap(), k = capKeyOf(getModelCfg()), patch = {};
+      patch[field] = ok ? 1 : 0; patch.at = Date.now();
+      m[k] = Object.assign({}, m[k], patch);      /* 只动这一位：不能把 json 位的记账洗掉 */
+      try { localStorage.setItem(K_CAP, JSON.stringify(m)); } catch (e) {}
+      return m[k];
     }
   };
 
@@ -1930,6 +1970,147 @@
     return next;
   }
 
+  /* 归一化 Base URL：大小写、尾斜杠、尾部版本号（/v1 /v4）都不算差异 ——
+     从服务商官网复制的地址带不带 /v1 常常随机，全等匹配会掉成「自定义」，
+     预设芯片随之失去高亮、候选模型也空了（问题一的一条根因）。 */
+  function normBase(u) {
+    return String(u || "").trim().toLowerCase().replace(/\/+$/, "").replace(/\/v\d+$/, "");
+  }
+  function presetKeyOfBase(u) {
+    var n = normBase(u);
+    if (!n) return "";
+    return Object.keys(PRESETS).filter(function (k) {
+      return PRESETS[k].baseUrl && normBase(PRESETS[k].baseUrl) === n;
+    })[0] || "";
+  }
+
+  /* ------------------------------------------------------------
+     OpenAI 兼容出网唯一通路（模型列表 / 测试 ping / 对话共用）
+     —— 桌面成品由 main.js 给所有响应补 Access-Control-Allow-Origin，
+        普通浏览器没有这层：跨域拦住的是「读响应」，用户看到的却是
+        「连通失败」。浏览器侧因此改走本机 /api/llm 透传，与成品对齐；
+        透传只认回环地址，Key 只随请求体进、只进上游请求头。
+     ------------------------------------------------------------ */
+  var LLM_VIA = null;   /* null 未探明 / "proxy" 本机透传 / "direct" 直连 */
+  async function llmVia() {
+    if (LLM_VIA) return LLM_VIA;
+    LLM_VIA = "direct";
+    if (window.inkread) return LLM_VIA;
+    try {
+      var r = await fetch("/api/llm", { method: "GET", cache: "no-store" });
+      var j = r.ok ? await r.json().catch(function () { return null; }) : null;
+      if (j && j.data && j.data.ok) LLM_VIA = "proxy";
+    } catch (e) {}
+    return LLM_VIA;
+  }
+  /* o = {baseUrl, key, path, method, body, signal} → 标准 Response，
+     直连与透传同一形状：res.ok / res.status / res.json() / res.body.getReader() 都照旧。 */
+  async function llmFetch(o) {
+    var base = String(o.baseUrl || "").replace(/\/+$/, "");
+    var via = await llmVia();
+    var sig = o.signal;
+    if (via === "proxy") {
+      return fetch("/api/llm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl: base, key: o.key || "", path: o.path, method: o.method, body: o.body || null }),
+        signal: sig
+      });
+    }
+    var h = { "Authorization": "Bearer " + (o.key || "") };
+    if (o.body) h["Content-Type"] = "application/json";
+    return fetch(base + o.path, {
+      method: o.method, headers: h,
+      body: o.body ? JSON.stringify(o.body) : undefined, signal: sig
+    });
+  }
+
+  /* /models 的返回形状各家不一：data / models / 直接给数组，元素取 id / name / model */
+  function pickModels(j) {
+    var arr = j && (Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : Array.isArray(j) ? j : []);
+    return (arr || []).map(function (m) {
+      return m && (m.id || m.name || m.model);
+    }).filter(function (x) { return typeof x === "string" && x; });
+  }
+  /* HTTP 状态 → 分类：界面按类给「下一步做什么」，而不是只报一个状态码 */
+  function kindOfStatus(s) {
+    if (s === 401 || s === 403) return "auth";
+    if (s === 404 || s === 405 || s === 501) return "unsupported";
+    return "network";
+  }
+  function failRes(kind, reason) {
+    return { code: 1, data: { ok: false, kind: kind, models: [], reason: reason } };
+  }
+
+  async function fetchModelsRun(cfg) {
+    var base = String(cfg.baseUrl || "").trim().replace(/\/+$/, "");
+    var key = String(cfg.key || "").trim();
+    if (!/^https?:\/\//i.test(base)) return failRes("network", "接口地址需以 http:// 或 https:// 开头");
+    if (!key) return failRes("auth", "缺少 API Key");
+    var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 12000);
+    var t0 = Date.now();
+    try {
+      var res = await llmFetch({ baseUrl: base, key: key, path: "/models", method: "GET", signal: ctl && ctl.signal });
+      if (res.ok) {
+        var ids = pickModels(await res.json().catch(function () { return null; }));
+        return {
+          code: 0,
+          data: {
+            ok: true, kind: "ok", latency: Date.now() - t0, models: ids,
+            note: "经 GET /models 实测（HTTP " + res.status + "）" +
+              (ids.length ? " · 模型名已入候选，可直接选用" : " · 该服务未返回列表，可在上方手填模型名")
+          }
+        };
+      }
+      var txt = "";
+      try { txt = (await res.text()).slice(0, 160).replace(/\s+/g, " "); } catch (e) {}
+      return failRes(kindOfStatus(res.status), "HTTP " + res.status + (txt ? " · " + txt : ""));
+    } catch (e) {
+      var msg = String((e && e.message) || e);
+      if (/abort/i.test(msg)) return failRes("network", "请求超时（12 秒无响应）");
+      return failRes(/Failed to fetch/i.test(msg) ? "cors" : "network", "请求失败：" + msg +
+        (/Failed to fetch/i.test(msg) ? "（网络不通，或浏览器直连被跨域拦截——桌面版会自动补跨域头）" : ""));
+    } finally { clearTimeout(timer); }
+  }
+
+  async function testModelRun(cfg) {
+    var r = await fetchModelsRun(cfg);
+    var d = r.data || {};
+    if (d.ok) return { code: 0, data: d };
+    /* 只有「没有 /models 端点」值得再试一次最小对话：拉不到列表并不等于不能聊。
+       鉴权 / 网络 / 跨域三类错，ping 也一样撞墙 —— 把一种错说成另一种只会误导。 */
+    if (d.kind !== "unsupported") return r;
+    var base = String(cfg.baseUrl || "").trim().replace(/\/+$/, "");
+    var key = String(cfg.key || "").trim();
+    var model = cfg.model || (PRESETS[cfg.preset] && PRESETS[cfg.preset].models && PRESETS[cfg.preset].models[0]) || "gpt-4o-mini";
+    var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 12000);
+    var t0 = Date.now();
+    try {
+      var res = await llmFetch({
+        baseUrl: base, key: key, path: "/chat/completions", method: "POST", signal: ctl && ctl.signal,
+        body: { model: model, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false }
+      });
+      if (res.ok) {
+        return {
+          code: 0,
+          data: {
+            ok: true, kind: "ok", noList: true, latency: Date.now() - t0, models: [],
+            note: "该服务无 /models 端点，已用最小对话实测通过（HTTP " + res.status + "）· 模型名 " + model + " 可用"
+          }
+        };
+      }
+      var body = "";
+      try { body = (await res.text()).slice(0, 160).replace(/\s+/g, " "); } catch (e) {}
+      return failRes(kindOfStatus(res.status), "HTTP " + res.status + (body ? " · " + body : ""));
+    } catch (e) {
+      var msg = String((e && e.message) || e);
+      if (/abort/i.test(msg)) return failRes("network", "请求超时（12 秒无响应）");
+      return failRes(/Failed to fetch/i.test(msg) ? "cors" : "network", "请求失败：" + msg);
+    } finally { clearTimeout(timer); }
+  }
+
   /* ------------------------------------------------------------
      一、AI 调用通路（全站唯一）
      翻译 / 溯源 / 解析 / 模式识别都走 callChat 一条路 ——
@@ -1958,19 +2139,29 @@
     var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, o.timeout || 15000);
     try {
-      var res = await fetch(String(cfg.baseUrl).replace(/\/+$/, "") + "/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.key },
-        body: JSON.stringify({
-          model: cfg.model,
-          temperature: o.temp == null ? (Number(cfg.temp) || 0.4) : o.temp,
-          max_tokens: o.maxTokens || Math.min(Number(cfg.maxTokens) || 1024, 2048),
-          stream: !!stream,
-          messages: [{ role: "system", content: sys }, { role: "user", content: user }]
-        }),
-        signal: ctl ? ctl.signal : undefined
+      var body = {
+        model: cfg.model,
+        temperature: o.temp == null ? (Number(cfg.temp) || 0.4) : o.temp,
+        max_tokens: o.maxTokens || Math.min(Number(cfg.maxTokens) || 1024, 2048),
+        stream: !!stream,
+        messages: [{ role: "system", content: sys }, { role: "user", content: user }]
+      };
+      /* response_format 是各家 OpenAI 兼容层里最不一致的一个字段：认的能显著提升结构命中，
+         不认的直接 400（而不是忽略）。带不带由能力位决定，撞过一次就不再带（askJson 记）。 */
+      if (o.jsonFormat) body.response_format = { type: "json_object" };
+      var res = await llmFetch({
+        baseUrl: cfg.baseUrl, key: cfg.key, path: "/chat/completions", method: "POST",
+        signal: ctl ? ctl.signal : undefined, body: body
       });
-      if (!res.ok) throw new Error("HTTP " + res.status);
+      if (!res.ok) {
+        /* 状态码 + 一小段响应体留在错误上：上层要分清「这一家不认 response_format」
+           和「密钥错了 / 限流」—— 前者该换请求形状，后者重试一百次也是白。 */
+        var snip = "";
+        try { snip = String(await res.text()).slice(0, 200).replace(/\s+/g, " "); } catch (e) {}
+        var er = new Error("HTTP " + res.status + (snip ? " · " + snip : ""));
+        er.status = res.status; er.body = snip;
+        throw er;
+      }
       if (stream && res.body && res.body.getReader) return await readStream(res, o.onDelta);
       var j = await res.json();
       var txt = String(((((j.choices || [])[0] || {}).message) || {}).content || "").trim();
@@ -1984,18 +2175,26 @@
   async function chatMsgs(cfg, messages, o, stream) {
     var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, o.timeout || 30000);
+    /* 外部叫停（v2.23 W1e 助手上的「停止」）：把调用方的 signal 接到内部控制器上。
+       abort 出来的错误加一个 aborted 标记 —— 上层要分清「读者按了停止」与「模型答不上」，
+       前者不该去兜离线库，否则一次停止看起来像一次故障。 */
+    if (o.signal && typeof o.signal.addEventListener === "function") {
+      if (o.signal.aborted && ctl) ctl.abort();
+      else if (o.signal.aborted) { clearTimeout(timer); throw mkAborted(); }
+      else o.signal.addEventListener("abort", function () { if (ctl) ctl.abort(); });
+    }
+    function mkAborted() { var e = new Error("已停止"); e.aborted = true; return e; }
     try {
-      var res = await fetch(String(cfg.baseUrl).replace(/\/+$/, "") + "/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.key },
-        body: JSON.stringify({
+      var res = await llmFetch({
+        baseUrl: cfg.baseUrl, key: cfg.key, path: "/chat/completions", method: "POST",
+        signal: ctl ? ctl.signal : undefined,
+        body: {
           model: cfg.model,
           temperature: o.temp == null ? (Number(cfg.temp) || 0.6) : o.temp,
           max_tokens: o.maxTokens || Math.min(Number(cfg.maxTokens) || 1024, 2048),
           stream: !!stream,
           messages: messages
-        }),
-        signal: ctl ? ctl.signal : undefined
+        }
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
       if (stream && res.body && res.body.getReader) return await readStream(res, o.onDelta);
@@ -2003,6 +2202,9 @@
       var txt = String(((((j.choices || [])[0] || {}).message) || {}).content || "").trim();
       if (!txt) throw new Error("响应为空");
       return txt;
+    } catch (e) {
+      if (o.signal && o.signal.aborted) e.aborted = true;
+      throw e;
     } finally { clearTimeout(timer); }
   }
 
@@ -2079,7 +2281,227 @@
     return null;
   }
 
+  /* ============================================================
+     v2.23 W1c · 结构化契约
+     实测过的旧行为：模型回一段散文（或 JSON 被 max_tokens 截断）时，
+     一次请求、一句「模型未返回可解析的结构」，模型说过的话整段丢掉，读者什么也看不到。
+     这里把「向模型要一份 JSON」做成一条有梯子的路：
+       ① 带 response_format 请求（这一家明确不吃就不再带，见能力位）；
+       ② 四级解析：整段 parse → 剥围栏取平衡块 → 截断补平 → 按字段重建；
+       ③ 仍不行就把上次的原话摊回去，再要一次「只返回 JSON」；
+       ④ 最终失败不再丢话：原话如实交出去，界面标「未结构化」并给出口。
+     ============================================================ */
+
+  /* provider 对 response_format 的态度只有试过才知道。按「接口地址 + 模型」记一位：
+     1 认 / 0 不认 / 没记过当认（试一次）。里面只有 0/1 与时间戳，不含 Key，
+     与模型配置同属设备本地数据 —— 但地址与模型名不是密钥，允许随同步走。 */
+  var K_CAP = "inkread.ai.cap.v1";
+  function capKeyOf(cfg) { return normBase(cfg && cfg.baseUrl) + "|" + String((cfg && cfg.model) || ""); }
+  function capMap() {
+    try { var m = JSON.parse(localStorage.getItem(K_CAP)); return (m && typeof m === "object") ? m : {}; } catch (e) { return {}; }
+  }
+  function capJsonOk(cfg) { var e = capMap()[capKeyOf(cfg)]; return !e || e.json !== 0; }
+  function capMarkJson(cfg, ok) {
+    var m = capMap();
+    m[capKeyOf(cfg)] = { json: ok ? 1 : 0, at: Date.now() };
+    try { localStorage.setItem(K_CAP, JSON.stringify(m)); } catch (e) {}
+  }
+  function capSnapshot() { return capMap(); }
+  function capClear() { try { localStorage.removeItem(K_CAP); } catch (e) {} return {}; }
+
+  /* 「这一家不认 response_format」的证据：4xx 且响应体明确点到这个字段 / json 模式。
+     只按状态码判会把「密钥错、限流、上下文超长」也当成字段问题，
+     记错能力位之后这条路就永久降级了 —— 宁可漏判，不可误判。 */
+  function jsonFormatRejected(e) {
+    var s = Number(e && e.status) || 0;
+    var b = String((e && e.body) || "");
+    if (!b) return false;
+    if (!(s === 400 || s === 422 || s === 404)) return false;
+    return /response_format|json[_-]?object|json_mode/i.test(b);
+  }
+
+  /* 括号成对检查：返回要补的收尾串；串里引号没闭合、括号错序 → null（补也补不出来） */
+  function jsonClosers(s) {
+    var st = [], inStr = false, esc = false;
+    for (var i = 0; i < s.length; i++) {
+      var c = s[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === "{" || c === "[") st.push(c);
+      else if (c === "}" || c === "]") {
+        if (!st.length) return null;
+        var o = st.pop();
+        if ((o === "{") !== (c === "}")) return null;
+      }
+    }
+    if (inStr) return null;
+    var out = "";
+    for (var k = st.length - 1; k >= 0; k--) out += st[k] === "{" ? "}" : "]";
+    return out;
+  }
+
+  /* 截断修复：从尾部往前找「值已完结」的位置（} ] , 三种收口），
+     截到这里为止再补平剩下的括号。只回看尾部 60 个候选位 —— 
+     截断只发生在尾巴上，整串回溯是白花的力气。 */
+  function repairJson(s) {
+    var src = String(s || "");
+    var i0 = src.indexOf("{");
+    if (i0 < 0) return null;
+    src = src.slice(i0);
+    var tried = 0;
+    for (var end = src.length; end > 8 && tried < 60; end--) {
+      var c = src[end - 1];
+      if (c !== "}" && c !== "]" && c !== ",") continue;
+      tried++;
+      var head = src.slice(0, end).replace(/[,\s]+$/, "");
+      var closers = jsonClosers(head);
+      if (closers == null) continue;
+      try {
+        var j = JSON.parse(head + closers);
+        if (j && typeof j === "object" && !Array.isArray(j)) return j;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  /* 字段级重建：模型彻底讲成一段话时，按已知字段名把它能捞出来的那几句捞出来。
+     只捞标量（数组 / 嵌套交给上面的 JSON 梯子），一条都不剩就返回 null。 */
+  function softFields(txt, keys) {
+    var s = String(txt || "");
+    if (!s || !(keys || []).length) return null;
+    var out = {}, got = 0;
+    keys.forEach(function (k) {
+      var pats = [
+        new RegExp('"' + k + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"'),
+        new RegExp('[【\\[（(]?\\s*' + k + '\\s*[:：]\\s*([^\\n"，。;；]{2,120})')
+      ];
+      for (var i = 0; i < pats.length; i++) {
+        var m = pats[i].exec(s);
+        if (m && m[1]) {
+          var v = String(m[1]).replace(/^\s*“|”\s*$/, "").trim();
+          if (v) { out[k] = v.slice(0, 400); got++; break; }
+        }
+      }
+    });
+    return got ? out : null;
+  }
+
+  /* 四级解析：整段 parse → 剥围栏取平衡块 → 截断补平 → 按字段重建。
+     返回 {j, via}，via 进数据形状，界面/闸门据此知道结构是哪一级捞回来的。 */
+  function parseStructured(txt, keys) {
+    var raw = String(txt || "").trim();
+    if (!raw) return null;
+    try {
+      var direct = JSON.parse(raw);
+      if (direct && typeof direct === "object" && !Array.isArray(direct)) return { j: direct, via: "direct" };
+    } catch (e) {}
+    var b = pickJson(raw);
+    if (b) return { j: b, via: "braced" };
+    var r = repairJson(raw);
+    if (r) return { j: r, via: "repaired" };
+    var f = softFields(raw, keys);
+    if (f) return { j: f, via: "fields" };
+    return null;
+  }
+
+  /* 要一份 JSON 的唯一入口。成功返回 {j, via, raw, retried}；
+     拿不到结构抛 UnstructuredError（带 raw，由调用方按「未结构化」如实展示）；
+     网络 / 鉴权 / 超时照常上抛 —— 那些不是格式问题，不该用纠错重试去掩盖。 */
+  async function askJson(cfg, sys, usr, o) {
+    var opts = o || {};
+    var useFmt = capJsonOk(cfg);
+    var raw = "";
+    for (var guard = 0; guard < 3; guard++) {
+      try {
+        raw = await callChat(cfg, sys, usr, {
+          temp: opts.temp, maxTokens: opts.maxTokens, timeout: opts.timeout, jsonFormat: useFmt
+        });
+        break;
+      } catch (e) {
+        if (useFmt && jsonFormatRejected(e)) {
+          capMarkJson(cfg, false);
+          useFmt = false;
+          continue;                    /* 换掉请求形状重来一次，不消耗纠错重试的预算 */
+        }
+        throw e;
+      }
+    }
+    var p = parseStructured(raw, opts.fields);
+    if (p) return { j: p.j, via: p.via, raw: raw, retried: false };
+
+    var again = "";
+    try {
+      again = await callChat(cfg, sys, usr + "\n\n——\n上次你返回的内容不是合法 JSON：\n" +
+        String(raw).slice(0, 600) +
+        "\n这次只返回 JSON 对象本身：不要 markdown 围栏，不要任何解释、不要前后缀。", {
+        temp: 0, maxTokens: opts.maxTokens, timeout: opts.timeout, jsonFormat: useFmt
+      });
+    } catch (e) {
+      /* 纠正重试自己也没打成：不算新错误，模型第一次的话是真说过了 */
+    }
+    var p2 = parseStructured(again, opts.fields);
+    if (p2) return { j: p2.j, via: p2.via, raw: again, retried: true };
+
+    var err = new Error("模型未返回可解析的结构");
+    err.name = "UnstructuredError";
+    err.raw = String(again || raw || "");
+    throw err;
+  }
+
+  /* 上下文提供者（v2.23 W1b）：书名、章、正文由 brain.js 的上下文包供给。
+     Brain 没加载（纯 api.js 的页面）就退回「只带选中文本」的旧形状，功能不因此关掉。 */
+  function contextForPrompt(o) {
+    if (!window.Brain || !Brain.contextFor) return null;
+    try { return Brain.contextFor(o) || null; } catch (e) { return null; }
+  }
+  /* ctx.doc 历史上既有人传书名、也有人传整条书架记录（reader.html 的 auxCtx 就是),
+     拼进 prompt 就成了「《[object Object]》」：模型看到的是乱码，读者丢的是书名。 */
+  function ctxDocName(ctx) {
+    var d = ctx && ctx.doc;
+    if (typeof d === "string") return d;
+    if (d && d.title) return String(d.title);
+    var id = (ctx && ctx.docId) || (d && d.id) || "";
+    if (id && window.InkStore && InkStore.getDoc) {
+      try { var e = InkStore.getDoc(id); if (e && e.title) return e.title; } catch (x) {}
+    }
+    return "";
+  }
+  function ctxDocId(ctx) {
+    var d = ctx && ctx.doc;
+    if (d && d.id) return d.id;
+    if (ctx && ctx.docId) return ctx.docId;
+    /* 只给了书名（字符串或 {title}）：先按书名反查书架 —— 当前阅读的书不是它时，
+       直接回退到 currentDoc 会把 A 书的正文喂给 B 书的问题。 */
+    var t = typeof d === "string" ? d : (d && d.title) || "";
+    if (t && window.InkStore && InkStore.getShelf) {
+      try {
+        var hit = InkStore.getShelf().filter(function (x) { return x && x.title === t; })[0];
+        if (hit) return hit.id;
+      } catch (e) {}
+    }
+    if (window.Brain && Brain.currentDoc) { try { return Brain.currentDoc() || ""; } catch (e) {} }
+    return "";
+  }
+  /* 一次请求的完整材料：正文包（W1b）+ 「它出现在《X》第 N 章」的定位行 */
+  function ctxPrompt(ctx, query, budget) {
+    var id = ctxDocId(ctx);
+    var pack = contextForPrompt({
+      docId: id, anchor: ctx && ctx.anchor, bi: ctx && ctx.bi, query: query, budget: budget
+    });
+    var head = pack && pack.text ? pack.text + "\n\n" : "";
+    var name = ctxDocName(ctx) || (pack && pack.meta.title) || "";
+    var loc = (ctx && ctx.chapter)
+      ? "（它出现在《" + name + "》" + ctx.chapter + (ctx.page ? " · 第 " + ctx.page + " 页" : "") + "）" : "";
+    return { text: head, loc: loc, chars: pack ? pack.chars : 0, cut: pack ? pack.cut : [], tier: pack ? pack.tierChars : null, docId: id };
+  }
+
   /* 结果缓存：同一段文字反复划选、同一段反复翻译，不该每次都打网络。
+
      仅内存（刷新即空），上限 80 条、10 分钟过期 —— 只管「手一抖又划一次」这种重复。 */
   var AICACHE = new Map();
   function cacheKey(ns, s, cfg) { return ns + "|" + ((cfg && cfg.model) || "") + "|" + s; }
@@ -2312,11 +2734,15 @@
       "facts 的 k 可自由取（如 出处 / 年代 / 作者 / 流行时期 / 地域 / 相关人物），2-5 条即可。",
       "宁可写「未详」也不要编造。年代、作者、原话拿不准，一律标注不确定 —— 读者要的是可靠，不是好听。"
     ].join("\n");
-    var usr = "待溯源的内容：\n" + src +
-      (ctx && ctx.chapter ? "\n\n（它出现在《" + (ctx.doc || "") + "》" + ctx.chapter + "）" : "");
-    var txt = await callChat(cfg, sys, usr, { temp: 0.2, maxTokens: 1400, timeout: 22000 });
-    var j = pickJson(txt);
-    if (!j) throw new Error("模型未返回可解析的结构");
+    var c = ctxPrompt(ctx, src, 2600);
+    /* 材料在前、问题在后：模型对紧邻提问的内容最敏感，把「待溯源的句子」放在尾巴上，
+       书的正文与目录作为背景垫在前面（2.1 的缺陷是背景整段被丢弃，只剩一句选中文本）。 */
+    var usr = (c.text || "") + "待溯源的内容：\n" + src + (c.loc ? "\n" + c.loc : "");
+    var r = await askJson(cfg, sys, usr, {
+      temp: 0.2, maxTokens: 1400, timeout: 22000,
+      fields: ["kind", "title", "lead", "meaning", "doubt"]
+    });
+    var j = r.j;
     return {
       kind: String(j.kind || "出处"),
       title: String(j.title || ""),
@@ -2335,7 +2761,8 @@
           .map(function (r) { return { t: String(r.t).slice(0, 80), u: /^https?:\/\//i.test(String(r.u || "")) ? String(r.u) : "" }; })
         : [],
       doubt: String(j.doubt || ""),
-      engine: cfg.model
+      engine: cfg.model,
+      via: r.via, ctxChars: c.chars, retried: !!r.retried
     };
   }
 
@@ -2548,7 +2975,9 @@
   }
 
   /* 主脑检索：把候选段落编号交给模型，让它按「读者的粗略描述」重排。
-     只让模型给段号与理由，正文一律由本地回填 —— 模型不该有机会改写原文。 */
+     只让模型给段号与理由，正文一律由本地回填 —— 模型不该有机会改写原文。
+     候选段落本身已由 reader 的 corpus 给足（每块 120 字 + 章名 + 页码），
+     这里补的是「这是哪本书」：模型知道书目，判断「写桃花林景色」这类描述时才不飘。 */
   async function callSearch(query, corpus, cfg) {
     var list = (Array.isArray(corpus) ? corpus : []).slice(0, 60);
     var lines = list.map(function (e, i) {
@@ -2560,10 +2989,13 @@
       '{"hits":[{"i":段号,"reason":"为什么相关，20字内"}],"note":"补充说明，可空"}',
       "最多 5 条，按相关度降序。宁少勿滥 —— 没有真正相关的就返回空数组，并在 note 里直说没有。"
     ].join("\n");
-    var usr = "读者的描述：" + query + "\n\n候选段落：\n" + lines;
-    var txt = await callChat(cfg, sys, usr, { temp: 0.2, maxTokens: 800, timeout: 18000 });
-    var j = pickJson(txt);
-    if (!j) throw new Error("模型未返回可解析的结构");
+    var name = ctxDocName({ docId: ctxDocId({}) });
+    var usr = "读者的描述：" + query +
+      (name ? "\n这本书：《" + name + "》" : "") + "\n\n候选段落：\n" + lines;
+    var r = await askJson(cfg, sys, usr, {
+      temp: 0.2, maxTokens: 800, timeout: 18000, fields: ["note"]
+    });
+    var j = r.j;
     var hits = [];
     (Array.isArray(j.hits) ? j.hits : []).forEach(function (h) {
       var idx = Number(h && h.i) - 1;
@@ -2576,6 +3008,7 @@
     });
     return {
       mode: "ai", count: hits.length, query: query, engine: cfg.model,
+      via: r.via, retried: !!r.retried,
       note: hits.length ? String(j.note || "").slice(0, 120) : (String(j.note || "").slice(0, 120) || "主脑认为正文里没有与描述相符的段落。"),
       hits: hits.slice(0, 5)
     };
@@ -2590,11 +3023,13 @@
       '{"kind":"phrase|sentence|formula|paragraph","title":"一句话定性，18字内","lead":"30-80字：这段在讲什么","items":[{"k":"关键点","v":"…"}],"terms":[{"w":"术语原词","pos":"词性，可空","mean":"一句释义"}]}',
       "items 给 2-4 条；terms 只列这段里真正需要解释的术语，没有就给空数组 —— 不确定的术语宁可不说。"
     ].join("\n");
-    var usr = "待解析的文字：\n" + src +
-      (ctx && ctx.chapter ? "\n\n（它出现在《" + (ctx.doc || "") + "》" + ctx.chapter + "）" : "");
-    var txt = await callChat(cfg, sys, usr, { temp: 0.3, maxTokens: 900, timeout: 18000 });
-    var j = pickJson(txt);
-    if (!j) throw new Error("模型未返回可解析的结构");
+    var c = ctxPrompt(ctx, src, 3600);
+    var usr = (c.text || "") + "待解析的文字：\n" + src + (c.loc ? "\n" + c.loc : "");
+    var r = await askJson(cfg, sys, usr, {
+      temp: 0.3, maxTokens: 900, timeout: 18000,
+      fields: ["kind", "title", "lead"]
+    });
+    var j = r.j;
     return {
       kind: String(j.kind || "sentence"),
       title: String(j.title || ""),
@@ -2607,7 +3042,8 @@
         ? j.terms.filter(function (t) { return t && t.w; }).slice(0, 8)
           .map(function (t) { return { w: String(t.w).slice(0, 24), pos: String(t.pos || "").slice(0, 10), mean: String(t.mean || "").slice(0, 120) }; })
         : [],
-      engine: cfg.model, note: ""
+      engine: cfg.model, note: "",
+      via: r.via, ctxChars: c.chars, retried: !!r.retried
     };
   }
 

@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.22.0";
+window.InkVersion = "2.23.0";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -15,9 +15,7 @@ window.ICONS = {
   "notebook-pen": '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>',
   "list-checks": '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
   sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
-  sparkle: '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
-  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
   wifi: '<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
   "wifi-off": '<path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M13.83 10.17A10 10 0 0 1 19 12.859"/><path d="M2 8.82a15 15 0 0 1 4.17-2.65"/><path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76"/><path d="m2 2 20 20"/>',
   battery: '<rect width="16" height="10" x="2" y="7" rx="2" ry="2"/><line x1="22" x2="22" y1="11" y2="13"/><line x1="6" x2="6" y1="11" y2="13"/><line x1="10" x2="10" y1="11" y2="13"/>',
@@ -25,17 +23,16 @@ window.ICONS = {
   database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+  /* v2.21 出纸：与纸面视图工具条上那颗同一形制（原先由 reader.html 运行时塞进 ICONS，
+     图形不该有两个住处，迁回主表）。 */
+  printer: '<path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><path d="M7 16h10v4H7z"/>',
   flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
-  "circle-check": '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
-  circle: '<circle cx="12" cy="12" r="10"/>',
-  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
-  calendar: '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
+  "circle-check": '<circle cx="12" cy="12" r="10"/><path d="m6.4 12.8 4 4 7.2-8"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 12V4.2"/><path d="M12 12l6.8 3.9"/>',
   "calendar-days": '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/>',
   bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>',
-  "bookmark-check": '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/><path d="m9 10 2 2 4-4"/>',
   user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
-  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   cpu: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>',
   "refresh-cw": '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
@@ -57,8 +54,7 @@ window.ICONS = {
   send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
   stamp: '<path d="M5 22h14"/><path d="M19.27 13.73A2.5 2.5 0 0 0 17.5 13h-11A2.5 2.5 0 0 0 4 15.5V17a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1.5c0-.66-.26-1.3-.73-1.77Z"/><path d="M14 13V8.5C14 7 15 7 15 5a3 3 0 0 0-6 0c0 2 1 2 1 3.5V13"/>',
   "alert-triangle": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
-  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
-  history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 8.4v9.2"/><path d="M12 5.4h.01"/>',
   zap: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
   brain: '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/>',
@@ -66,20 +62,15 @@ window.ICONS = {
   /* 闪卡「不再出卡 / 改挖这里 / 换个空」三枚：eye-off 直接在 eye 上加斜线，
      保证与现有眼睛图形同源；另两枚取 lucide text-select / shuffle 轮廓。 */
   "eye-off": '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/><path d="m2 2 20 20"/>',
-  "text-select": '<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4Z"/><path d="M5 4h6"/><path d="M8 4v8.5"/>',
   shuffle: '<path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.9l-.5-.8"/><path d="m18 14 4 4-4 4"/>',
   monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
   cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
   smartphone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
   type: '<path d="M12 4v16"/><path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2"/><path d="M9 20h6"/>',
-  "columns-2": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>',
   "panel-right": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
   "volume-2": '<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>',
   play: '<polygon points="6 3 20 12 6 21 6 3"/>',
   "audio-lines": '<path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/>',
-  mic: '<path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/>',
-  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
-  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
   "file-input": '<path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/>',
   "trash-2": '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
   "undo-2": '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
@@ -94,11 +85,10 @@ window.ICONS = {
   sigma: '<path d="M18 7V5a1 1 0 0 0-1-1H6.5a.5.5 0 0 0-.4.8l4.5 6a2 2 0 0 1 0 2.4l-4.5 6a.5.5 0 0 0 .4.8H17a1 1 0 0 0 1-1v-2"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   table: '<path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>',
-  image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+  image: '<rect x="2.6" y="5" width="18.8" height="14" rx="2.4"/><circle cx="8.2" cy="9.6" r="1.9"/><path d="m4.8 17.4 4.1-4.5a2 2 0 0 1 2.9 0l4.5 4.9"/><path d="m14.2 15.9 2.1-2.3a2 2 0 0 1 2.9 0l2.3 2.5"/>',
   copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
   layers: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
-  feather: '<path d="M12.67 19a2 2 0 0 0 1.416-.588l6.154-6.172a6 6 0 0 0-8.49-8.49L5.586 9.914A2 2 0 0 0 5 11.328V18a1 1 0 0 0 1 1z"/><path d="M16 8 2 22"/><path d="M17.5 15H9"/>',
   "pen-line": '<path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/>',
   "graduation-cap": '<path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/>',
   "maximize-2": '<path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/>',
@@ -106,12 +96,10 @@ window.ICONS = {
   star: '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
   tag: '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>',
   activity: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
-  "trending-up": '<path d="M16 7h6v6"/><path d="m22 7-8.5 8.5-5-5L2 17"/>',
-  "sliders-horizontal": '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>',
-  "grid-2x2": '<path d="M12 3v18"/><path d="M3 12h18"/><rect x="3" y="3" width="18" height="18" rx="2"/>',
+  "grid-2x2": '<rect x="3.4" y="3.4" width="7.4" height="7.4" rx="1.4"/><rect x="13.2" y="3.4" width="7.4" height="7.4" rx="1.4"/><rect x="3.4" y="13.2" width="7.4" height="7.4" rx="1.4"/><rect x="13.2" y="13.2" width="7.4" height="7.4" rx="1.4"/>',
   "wand-2": '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>',
   "scan-text": '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h8"/><path d="M7 12h10"/><path d="M7 16h6"/>',
-  "loader-circle": '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  "loader-circle": '<path d="M19 12a7 7 0 1 1-2.05-4.95"/>',
   "grip-vertical": '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
   "chevron-up": '<path d="m18 15-6-6-6 6"/>',
   "arrow-up": '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
@@ -120,19 +108,14 @@ window.ICONS = {
   "arrow-left-right": '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
   maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
   minimize: '<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>',
-  "panel-left-close": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/>',
+  "panel-left": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
   focus: '<circle cx="12" cy="12" r="3"/><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>',
   "link-2": '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>',
   network: '<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
-  hand: '<path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>',
-  "mouse-pointer-2": '<path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/>',
   "zoom-in": '<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/>',
   "zoom-out": '<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/>',
-  "corner-down-left": '<polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/>',
   "indent-increase": '<polyline points="3 8 7 12 3 16"/><line x1="21" x2="11" y1="12" y2="12"/><line x1="21" x2="11" y1="6" y2="6"/><line x1="21" x2="11" y1="18" y2="18"/>',
   "indent-decrease": '<polyline points="7 8 3 12 7 16"/><line x1="21" x2="11" y1="12" y2="12"/><line x1="21" x2="11" y1="6" y2="6"/><line x1="21" x2="11" y1="18" y2="18"/>',
-  "circle-dot": '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/>',
-  "minus-circle": '<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/>',
   "text-cursor": '<path d="M12 20h-1a2 2 0 0 1-2-2 2 2 0 0 1-2 2H6"/><path d="M13 8h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-7"/><path d="M5 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1"/><path d="M6 4h1a2 2 0 0 1 2 2 2 2 0 0 1 2-2h1"/><path d="M9 6v12"/>',
   "list-tree": '<path d="M21 12h-8"/><path d="M21 6h-8"/><path d="M21 18h-8"/><path d="M3 10v4c0 1.1.9 2 2 2h3"/><path d="M3 6h1"/><path d="M3 18h1"/>',
   /* v2.19.5 · 「目录」专用图标（用户指 list-tree 太丑）。list-tree 的左侧那段折钩
@@ -149,41 +132,73 @@ window.ICONS = {
      圆形回环那款读作「刷新」，是错的可供性；箭头折尾勾进竖杠的那款，
      杠与钩在 18px 下并成一团；只有两行的那款读成「等号」。三行才立得住。 */
   "trace-back": '<path d="M6.5 9 2.5 12.5l4 3.5"/><path d="M2.5 12.5h6"/><path d="M10.5 6.5v12"/><path d="M21 8.5h-7"/><path d="M21 13h-7"/><path d="M18 17.5h-4"/>',
-  "heading-1": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="m17 12 3-2v8"/>',
-  "heading-2": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M21 18h-4c0-4 4-3 4-6 0-1.5-2-2.5-4-1"/>',
-  "heading-3": '<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17.5 10.5c1.7-1 3.5 0 3.5 1.5a2 2 0 0 1-2 2"/><path d="M17 17.5c2 1.5 4 .3 4-1.5a2 2 0 0 0-2-2"/>',
   palette: '<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>',
-  sliders: '<line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/>',
-  "rotate-ccw": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
   "clipboard-check": '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>',
   ellipsis: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   languages: '<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>',
-  "panel-bottom": '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 15h18"/>',
-  "text-quote": '<path d="M17 6H3"/><path d="M21 12H8"/><path d="M21 18H8"/><path d="M3 12v6"/>',
   "square-pen": '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/>',
-  "book-copy": '<path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M9 3h10a2 2 0 0 1 2 2v10"/>',
   "move-horizontal": '<path d="m18 8 4 4-4 4"/><path d="M2 12h20"/><path d="m6 8-4 4 4 4"/>',
-  /* v14 文档修改：锁 / 开锁（阅读态上锁，防误触改动正文） */
-  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
-  "lock-open": '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
-  /* v15 听书面板：播放 / 暂停 / 跳段 / 定时（Lucide 路径，1.8 描边同库） */
-  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  /* v14 文档修改：锁 / 开锁（阅读态上锁，防误触改动正文）
+     v2.23 §W3 重绘：原两名的差别只有锁梁右腿那 4 单位弧（16px 上几乎看不出，闸判内核 0.72 撞形）。
+     闭合态补锁孔、两腿扣进锁体；开锁态右腿悬空脱开 —— 差异落在物理事实上，不靠端点挪 1px。 */
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7.5 11V7.2a4.5 4.5 0 0 1 9 0V11"/><circle cx="12" cy="15.2" r="1.7"/><path d="M12 16.9v2.3"/>',
+  "lock-open": '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7.5 11V6.6a4.4 4.4 0 0 1 8.8 0"/>',
+  /* v15 听书面板：暂停 / 跳段 / 定时（播放键在上面的朗读族里，同一枚不重复登记） */
   pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
   "skip-back": '<polygon points="19 20 9 12 19 4 19 20"/><line x1="5" x2="5" y1="19" y2="5"/>',
   "skip-forward": '<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/>',
   timer: '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
-  /* v2.12 笔记自由文本搜索：放大镜 / 空结果（Lucide 同库路径） */
-  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
-  "search-x": '<path d="m13.5 8.5-5 5"/><path d="m8.5 8.5 5 5"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
-  /* v2.14 ≤600 底栏「更多」 */
-  menu: '<line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/>'
+  /* v2.12 笔记自由文本搜索：空结果（放大镜就是表首那枚 search，同一画法不另立一份） */
+  "search-x": '<path d="m13.5 8.5-5 5"/><path d="m8.5 8.5 5 5"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>'
+};
+
+/* v2.23 §W3 · 图标族名册。唯一性闸（verify-v223-icons.js）把「墨落同处」的两枚判红，
+   但有一类相似是**有意为之**的：同一个底形换内核表状态（eye/eye-off）、同一对方框镜像
+   （panel-left/panel-right）。这类不进"放过"通道，必须在这里写明族名与理由 —— 闸会照样
+   检查它们，只是检查的是**内核**（把两名共用的基元摘掉后剩下的墨）是否仍可区分。
+   换句话说：族名册回答"为什么可以像"，内核检查回答"像的地方必须有底形以外的理由"。 */
+window.ICON_FAMILY = {
+  "ring-badge": { why: "同一 r=10 圆环作徽标底，内核各表一义（完成/时刻/提示/靶心）", members: ["circle-check", "clock", "info", "target"] },
+  panel: { why: "同一方框 + 一条界栏，左右镜像表示侧栏在哪个方向", members: ["panel-left", "panel-right"] },
+  magnifier: { why: "同一枚放大镜（镜片 r=8 + 手柄），镜内符号与加减号表搜索状态", members: ["search", "search-x", "zoom-in", "zoom-out"] },
+  book: { why: "同一册书脊，加书签带表示已标", members: ["book", "book-marked"] },
+  lock: { why: "同一锁体；闭合态锁梁两腿扣进锁体并露锁孔，开锁态右腿悬空脱开", members: ["lock", "lock-open"] },
+  vision: { why: "同一只眼，加斜线表隐藏", members: ["eye", "eye-off"] },
+  transfer: { why: "同一托盘，箭头朝向表进出", members: ["download", "upload"] },
+  indent: { why: "同一三行文本 + 缩进箭头，箭头朝向表增减", members: ["indent-increase", "indent-decrease"] },
+  spin: { why: "同一圆弧语言：回转（重试）/双箭头（同步）/开口弧（载入中）", members: ["rotate-ccw", "refresh-cw", "loader-circle"] },
+  "window-state": { why: "同一四角括号，朝外=放大、朝内=还原", members: ["maximize", "minimize"] },
+  signal: { why: "同一组信号弧 + 句点，斜线表断开", members: ["wifi", "wifi-off"] },
+  power: { why: "同一节电池外壳，内芯与斜线表电量/充电", members: ["battery", "battery-charging"] },
+  playback: { why: "朗读播放的两个互斥状态", members: ["play", "pause"] },
+  skip: { why: "同一三角 + 一道竖线，朝向表前后", members: ["skip-back", "skip-forward"] }
+};
+
+/* v2.23 §W3 第六步：尺寸从 17 档（11/12/13/14/15/16/17/18/19/20/22/24/26/28/30/32/34）
+   收进五档。档位值与 styles.css 的 --ic-* 必须一致（闸 K9 逐档比对，两边漂移当场红）。
+   边界一律"往小收"：宁可缩 1–4px，也不撑破既有按钮与 chip 的热区。 */
+window.ICON_SIZES = { xs: 12, sm: 14, md: 16, lg: 20, xl: 28 };
+window.iconSize = function (size) {
+  const t = window.ICON_SIZES;
+  if (typeof size === "string" && t[size] !== undefined) return t[size];
+  const n = Number(size);
+  if (!isFinite(n) || n <= 0) return t.md;
+  return n <= 13 ? t.xs : n <= 15 ? t.sm : n <= 19 ? t.md : n <= 24 ? t.lg : t.xl;
 };
 
 window.icon = function (name, size, cls) {
-  size = size || 18;
-  return '<svg class="ic' + (cls ? " " + cls : "") + '" width="' + size + '" height="' + size +
+  const px = window.iconSize(size);
+  /* 查不到名字不再静默出空图：#120（无书可读态图标全空）与 icSide:"panel-left" 两次事故
+     同一放大器 —— 空 svg 不报错，缺陷要等肉眼走查才现形。这里只警告不改返回值，
+     以免一处笔误把整页渲染打断。 */
+  let d = window.ICONS[name];
+  if (d === undefined) {
+    console.warn("[墨读·图标] 未在册的名字：" + String(name) + "（本次渲染为空）");
+    d = "";
+  }
+  return '<svg class="ic' + (cls ? " " + cls : "") + '" width="' + px + '" height="' + px +
     '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
-    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (window.ICONS[name] || "") + "</svg>";
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + "</svg>";
 };
 
 /* ---------- 本地持久化 ---------- */
@@ -469,7 +484,7 @@ window.preview = function (title, text) {
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("click", onOut, true);
   }
-  function onKey(e) { if (e.key === "Escape") close(); }
+  function onKey(e) { if (e.key === "Escape" && !e.__inkEscHandled) close(); }
   function onOut(e) { if (!el.contains(e.target)) close(); }
   el.querySelector(".pv-x").addEventListener("click", close);
   setTimeout(function () {
@@ -1110,7 +1125,8 @@ window.InkDate = (function () {
   var SVG_RESTORE = '<svg ' + WSVG + '><rect x="0.5" y="2.5" width="7" height="7"/><path d="M2.5 2.5v-2h7v7h-2"/></svg>';
   var SVG_CLOSE = '<svg ' + WSVG + ' stroke-width="1.1"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9"/></svg>';
 
-  /* 顶栏原始状态图标（云同步 / Wi-Fi / 电量）沿用原 HTML 内联路径 */
+  /* 顶栏状态图标：网络 / 电量走 icon()，「本地已保存」原来在这里手抄了一份 cloud
+     的路径字面量（与主表同形但不在契约内，改主表时它不会跟着改）。一并收编。 */
   var topbar =
     '<div class="device-topbar" id="inkTopbar" role="banner">' +
       '<div class="brand">' +
@@ -1121,7 +1137,7 @@ window.InkDate = (function () {
       '<div class="tb-drag" aria-hidden="true"></div>' +
       '<div class="status">' +
         '<span class="status-item hide-sm" id="statusDate"></span>' +
-        '<span class="status-item hide-sm"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>本地已保存</span>' +
+        '<span class="status-item hide-sm">' + icon("cloud", 15) + "本地已保存</span>" +
         /* v2.2：网络与电量改为与本机真实状态同步（见 syncMachineStatus） */
         '<span class="status-item" id="inkNet" title="网络状态"><span id="inkNetIco"></span></span>' +
         '<span class="status-item" id="inkBat" title="电池状态"><span id="inkBatIco"></span><em id="inkBatTxt" class="status-num">—</em></span>' +
@@ -1193,7 +1209,7 @@ window.InkDate = (function () {
            v2.19：名字不再是演示人设「林知夏」，改读本机称呼 inkread.profile.v1。 */
         '<button class="user-chip" id="inkDataBtn" type="button" title="本机数据 · 备份与恢复">' +
           '<span class="avatar" id="ucInitial"></span>' +
-          '<div><b id="ucName"></b><span>本机数据 · 点击管理</span></div>' +
+          '<div><b id="ucName"></b><span>本机数据</span></div>' +
           '<span class="uc-go" id="icDataGo"></span>' +
         '</button>' +
         '<div class="nav-date" id="navDate" aria-hidden="true"></div>' +
@@ -1221,7 +1237,7 @@ window.InkDate = (function () {
     moreBtn.setAttribute("aria-haspopup", "true");
     moreBtn.setAttribute("aria-expanded", "false");
     moreBtn.setAttribute("aria-controls", "navMoreSheet");
-    moreBtn.innerHTML = icon("menu", 19) + "<span>更多</span>";
+    moreBtn.innerHTML = icon("ellipsis", 19) + "<span>更多</span>";
     navList.appendChild(moreBtn);
 
     var sheet = document.createElement("div");
@@ -1275,6 +1291,9 @@ window.InkDate = (function () {
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && open) closeSheet();
     });
+    /* 层栈让路（§W2.4）：sheet 是盖在窗上面的模态，Esc 先归它。
+       不登记的话实测「一次 Esc 收两层」：sheet 收起、身后的目录窗也收起。 */
+    if (window.InkWin) InkWin.yieldTo("more-sheet", function () { return open; });
   })();
 
   /* v2.14：侧栏足部日期 —— 复用 InkDate.text() 同一文案源，不新建格式逻辑；
@@ -1432,6 +1451,9 @@ window.InkDate = (function () {
       if (danger && danger.style.display !== "none") return;   /* 危险弹窗开着时，Esc 交给它 */
       close();
     });
+    /* 层栈让路（§W2.4）：本机数据 modal 盖在窗上面，Esc 先收它。
+       危险确认在它里面，所以这条谓词一并盖住两层 —— mask 开着就不归栈管。 */
+    if (window.InkWin) InkWin.yieldTo("data-modal", function () { return mask.style.display !== "none"; });
 
     /* 导出：带版本与时间戳的完整 JSON —— 换机/换端口（localStorage 换套）时的救生索 */
     qs("#ldExport").addEventListener("click", function () {
@@ -1488,7 +1510,7 @@ window.InkDate = (function () {
         ["book", "本书", count("inkread.shelf.v1", function (v) { return (v || []).length; })],
         ["notebook-pen", "条笔记", count("inkread.notes.v1", function (v) { return (v || []).length; })],
         ["brain", "条记忆", count("inkread.memory.v1", function (v) { return (v || []).length; })],
-        ["history", "条打卡与统计", ck + days],
+        ["calendar-days", "条打卡与统计", ck + days],
         ["palette", "套主题设置", count("inkread.themes.installed.v1", function (v) { return (v || []).length; })]
       ];
     }
@@ -1636,6 +1658,7 @@ window.InkSync = (function () {
     "inkread.docs.edit.v1": "正文修改", "inkread.progress.v1": "阅读进度", "inkread.memory.v1": "主脑记忆",
     "inkread.glossary.v1": "生词本", "inkread.stats.v1": "阅读统计", "inkread.checkins.v1": "打卡",
     "inkread.milestones.v1": "里程碑", "inkread.kindmap.v1": "类别映射", "inkread.synclog.v1": "同步日志",
+    "inkread.ai.cap.v1": "模型能力位",
     "inkread.themes.installed.v1": "已装主题", "inkread.covers.v1": "封面", "inkread.nav.v1": "导航",
     "inkread.boot.v1": "启动记录"
   };

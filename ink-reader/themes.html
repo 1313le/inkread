@@ -571,9 +571,14 @@
      —— 旧版只走 Web Speech：中文系统声线就那两三条，24 款音色听着完全一样、
         且都是机械音；英文音色配中文样文，不是没声就是念成女声。 */
   var _aud = null;                 /* 正在试听的样音播放器 */
+  var _audGen = 0;                 /* 试听代际：换音色/停止后，在飞的旧重试链自行作废 */
   function stopAudition() {
+    _audGen++;
     try { if (_aud) { _aud.pause(); _aud = null; } } catch (e) {}
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
+    /* 试听也会走朗读链路（云音色 / 本机声线都经 API.speak），所以必须连它一起停：
+       只停样音播放器的话，上一条试听还在读，下一条已经开口 —— 这就是「多种音色混合」 */
+    try { window.API && API.stopSpeak && API.stopSpeak(); } catch (e) {}
   }
   /* 在线 TTS 是否可用：填了密钥、且账号里至少有一款云音色。
      安卓端（APK）没有本机 /api/tts，试听与朗读都以这条云端链路为主。 */
@@ -589,6 +594,7 @@
     var v = window.InkVoice && InkVoice.meta(k);
     if (!v) return;
     stopAudition();
+    var gen = _audGen;                  /* 本轮试听的代际：下面每一条异步回调先认它 */
     var tag = "「" + v.name + "」（" + (v.gender === "m" ? "男声" : "女声") +
       " · " + String(v.lang || "").toUpperCase() + "）";
     var text = v.demo || InkVoice.DEMO[v.lang] || InkVoice.DEMO.zh;
@@ -598,7 +604,7 @@
       try { API.stopSpeak && API.stopSpeak(); } catch (e) {}
       toast("试听 " + tag + " · Moss 真合成…", "audio-lines");
       API.cloudAudition(text, v).then(function (r) {
-        if (r) return;
+        if (r || gen !== _audGen) return;
         toast("云合成未出声（检查密钥 / 网络 / 余额）· 退回本机声线", "alert-triangle");
         webSpeak(v, tag);
       });
@@ -611,7 +617,7 @@
       _aud = a;
       var fell = false;
       var fallback = function () {
-        if (fell) return;
+        if (fell || gen !== _audGen) return;
         fell = true;
         if (_aud === a) _aud = null;
         if (cloudReady()) { toast("试听 " + tag + " · 云音色", "audio-lines"); API.speak(text, { voice: v.k }); return; }
@@ -619,7 +625,7 @@
       };
       a.onerror = fallback;
       a.onended = function () { if (_aud === a) _aud = null; };
-      a.onplay = function () { toast("试听 " + tag + " · 神经语音", "audio-lines"); };
+      a.onplay = function () { if (gen === _audGen) toast("试听 " + tag + " · 神经语音", "audio-lines"); };
       /* 8s 还没出声（离线 / 静态托管没有该路由）—— 退回本机声线 */
       var guard = setTimeout(function () { if (!fell && a.paused) fallback(); }, 8000);
       a.addEventListener("playing", function () { clearTimeout(guard); });
@@ -632,14 +638,14 @@
       _aud = s;
       var fell2 = false;
       var fb2 = function () {
-        if (fell2) return;
+        if (fell2 || gen !== _audGen) return;
         fell2 = true;
         if (_aud === s) _aud = null;
         webSpeak(v, tag);
       };
       s.onerror = fb2;
       s.onended = function () { if (_aud === s) _aud = null; };
-      s.onplay = function () { toast("试听 " + tag + " · 云端样音", "audio-lines"); };
+      s.onplay = function () { if (gen === _audGen) toast("试听 " + tag + " · 云端样音", "audio-lines"); };
       var g2 = setTimeout(function () { if (!fell2 && s.paused) fb2(); }, 2500);
       s.addEventListener("playing", function () { clearTimeout(g2); });
       try { s.play().catch(fb2); } catch (e) { fb2(); }
@@ -652,26 +658,49 @@
   /* 兜底：本机声线，按语言池 + 性别挑，哑火就换下一条 */
   function webSpeak(v, tag) {
     var synth = window.speechSynthesis, U = window.SpeechSynthesisUtterance;
-    if (!synth || typeof U !== "function") { toast("本机无可用声线", "alert-triangle"); return; }
+    if (!synth || typeof U !== "function") { toast("本机没有语音合成接口", "alert-triangle"); return; }
     var text = v.demo || InkVoice.DEMO[v.lang] || InkVoice.DEMO.zh;
+    var gen = _audGen;
+    function alive() { return gen === _audGen; }
     function tryOne(list, i) {
-      if (i >= list.length) { toast("本机没有「" + v.name + "」可用的声线", "alert-triangle"); return; }
+      if (!alive()) return;
+      if (i >= list.length) {
+        toast("本机没有「" + v.name + "」这一" + (v.gender === "m" ? "男" : "女") +
+          "声线（语言或性别不匹配）· 建议启用神经语音或填写云密钥", "alert-triangle");
+        return;
+      }
       var sys = list[i];
       var u = new U(text);
       u.voice = sys;
       u.lang = sys.lang || (v.lang === "en" ? "en-US" : v.lang === "ja" ? "ja-JP" : "zh-CN");
       u.rate = v.rate; u.pitch = v.pitch;
       var done = false, ok = false;
-      var t = setTimeout(function () { if (done || ok) return; done = true; tryOne(list, i + 1); }, 1400);
+      var t = setTimeout(function () { if (done || ok || !alive()) return; done = true; tryOne(list, i + 1); }, 1400);
       u.onstart = function () { ok = true; };
       u.onend = function () { if (done) return; done = true; clearTimeout(t); };
       u.onerror = function () { if (done) return; done = true; clearTimeout(t); tryOne(list, i + 1); };
+      /* 换下一条之前先把上一条彻底停掉：不 cancel 的话旧 utterance 还在出声，
+         新的已经开口，两条系统声线叠在一起 —— 与朗读链路（api.js 同样逐候选 cancel）
+         对齐后，试听与朗读的互斥行为一致。 */
+      try { synth.cancel(); } catch (e) {}
+      if (!alive()) return;
       try { synth.speak(u); } catch (e) { clearTimeout(t); if (!done) { done = true; tryOne(list, i + 1); } }
     }
-    var list = (InkVoice.candidates(v, text, synth.getVoices() || []) || []).filter(Boolean);
-    if (!list.length) { toast("本机暂无可用声线", "alert-triangle"); return; }
-    tryOne(list, 0);
-    toast("试听 " + tag + " · 本机声线", "audio-lines");
+    /* 系统声线是异步列出来的，直接读 getVoices() 首帧常是空数组 ——
+       等一次 voiceschanged（与朗读链路同一个 waitVoices），否则会误报「本机暂无可用声线」。 */
+    var waiter = (window.API && API.waitVoices) ? API.waitVoices(synth, 1200) : Promise.resolve(synth.getVoices() || []);
+    waiter.then(function (voices) {
+      if (!alive()) return;
+      var list = (InkVoice.candidates(v, text, voices || []) || []).filter(Boolean);
+      if (!list.length) {
+        toast((voices || []).length
+          ? "本机没有「" + v.name + "」这一" + (v.gender === "m" ? "男" : "女") + "声线 · 已跳过本机试听"
+          : "本机未列出任何声线（系统语音未安装或被禁用）", "alert-triangle");
+        return;
+      }
+      tryOne(list, 0);
+      if (alive()) toast("试听 " + tag + " · 本机声线", "audio-lines");
+    });
   }
 
   function nameOf(k) { var m = T.metaOf(k); return m ? m.name : k; }

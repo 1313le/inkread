@@ -428,8 +428,11 @@
      而同页的批注与草稿纸早已能「拖到边缘吸附成侧栏、拖出去成浮窗」。
      四个面板共用同一个 #modePanel 元素，所以挂**一个** InkDock 实例四个一起获得，
      而不是各写一份（各写一份还要处理互相抢边）。
-     刻意不给浮窗能力的：目录 / 书签 / Aa / 更多 —— 那些是「看一眼就走」的临时弹层，
-     浮起来只会挡住正文，Material 3 supporting pane 的判据也是「常驻且主内容可重排」才停靠。 */
+     刻意不给浮窗能力的：Aa 排版 sheet / 「更多」sheet / 模式选择弹层 / 目录预览 ——
+     那些是钉在触发钮上、点外面就收的一次性弹层，浮起来只会挡住正文，
+     Material 3 supporting pane 的判据也是「常驻且主内容可重排」才停靠。
+     （v2.19.6 这条豁免原本还写着「目录 / 书签」：v2.23 W2 判据改成「常驻侧栏一律可拆
+     可合」，目录 / 任务清单 / 书签侧栏三块已入 InkWin，见 reader.html 的 panelWin。） */
   var mpDock = null, mpReady = false;
   function mpNarrow() { return window.innerWidth <= 700; }
   /* 最大化上界＝正文台顶（与批注浮窗同一口径，别盖住顶栏） */
@@ -446,10 +449,12 @@
     var firstTime = !InkDock.read()["modepanel"];
     mpDock = InkDock.create(el, {
       id: "modepanel", host: "#reader", handle: ".mpd-head",
+      /* W2 头部统一：形态钮插进这条 .mpd-head（标题 + 空档 + 关闭），
+         ✕ 复用宿主已有的 #modePanelClose，不造第二只。 */
+      bar: ".mpd-head", x: "#modePanelClose",
       min: { w: 300, h: 320 }, dock: { min: 280, max: 560, width: 344 }, snap: 24,
       maxTop: mpMaxTop, narrow: mpNarrow,
       onState: function (l) {
-        mpPaintDock();
         /* 建实例时为「出厂钉右侧」补的那一次 setState 不算用户动作，别弹「已合并回侧栏」 */
         if (!mpReady) return;
         if (l.state === "docked") ctx.toast("已合并回" + (l.side === "right" ? "右" : "左") + "侧栏 · 拖标题栏可再拆出", "panel-right");
@@ -459,14 +464,6 @@
     if (firstTime) mpDock.setState("docked", { side: "right" });
     mpReady = true;
     return mpDock;
-  }
-  function mpPaintDock() {
-    var btn = qs("#mpdDockBtn");
-    if (!btn || !mpDock) return;
-    var docked = mpDock.state().state === "docked";
-    btn.innerHTML = icon(docked ? "panel-left-close" : "panel-right", 15);
-    btn.title = docked ? "解除停靠（拖标题栏也能拆出）" : "合并回侧栏（或直接把标题栏拖到左右边缘）";
-    btn.setAttribute("aria-pressed", docked ? "true" : "false");
   }
   /* InkDock 靠**计算样式里的 visibility** 判断面板还在不在（不在就不能占停靠边）。
      而抽屉的开合带 .34s 的 visibility 过渡，过渡期间读到的还是旧值，两头都会错：
@@ -490,18 +487,11 @@
       '<header class="mpd-head">' +
         '<span class="mpd-title" id="mpdTitle"></span>' +
         '<span class="spacer"></span>' +
-        '<button class="mpd-ic" id="mpdDockBtn" type="button" aria-label="拆分或合并侧栏"></button>' +
         '<button class="mpd-x" id="modePanelClose" aria-label="收起">' + icon("x", 16) + '</button>' +
       '</header>' +
       '<p class="mpd-sub" id="mpdSub"></p>' +
       '<div class="mpd-body" id="mpdBody"></div>';
     qs("#modePanelClose", host).addEventListener("click", closePanel);
-    qs("#mpdDockBtn", host).addEventListener("click", function () {
-      var d = ensureDock();
-      if (!d) { ctx.toast("当前页面不支持拆成浮窗", "info"); return; }
-      if (mpNarrow()) { ctx.toast("窄屏下侧栏就是全屏 —— 拆成浮窗没有意义", "info"); return; }
-      d.toggleDock();
-    });
     bindGrip(host);
   }
 
@@ -517,7 +507,6 @@
     qs("#mpdTitle", host).innerHTML = icon(p.icon, 15) + esc(p.title);
     qs("#mpdSub", host).textContent = p.sub;
     p.render(qs("#mpdBody", host));
-    mpPaintDock();
   }
 
   function bindGrip(host) {
@@ -1231,7 +1220,7 @@
           ? '<button class="btn btn-accent btn-sm" id="fcPickOk">' + icon("check", 13) + '确定这个空</button>' +
             '<button class="btn btn-ghost btn-sm" id="fcPickNo">取消</button>' +
             (st && st.cloze ? '<button class="btn btn-ghost btn-sm" id="fcPickAuto">恢复自动</button>' : "")
-          : '<button class="btn btn-ghost btn-sm" id="fcPick">' + icon("text-select", 13) + '改挖这里</button>' +
+          : '<button class="btn btn-ghost btn-sm" id="fcPick">' + icon("text-cursor", 13) + '改挖这里</button>' +
             '<button class="btn btn-ghost btn-sm" id="fcShift"' + (noCand ? " disabled" : "") + '>' + icon("shuffle", 13) + '换个空</button>' +
             '<button class="btn btn-ghost btn-sm" id="fcExcl">' + icon("eye-off", 13) + '不再出卡</button>') +
       '</div>' +
@@ -1308,6 +1297,12 @@
       };
       document.addEventListener("keydown", key, true);
       S().fcKey = key;
+      /* 层栈让路（§W2.4）：「改挖这里」的选空态是抽屉窗**里面**的一层，
+         Esc 该先取消选空、窗留着 —— 不登记时实测一次 Esc 把窗整个收掉。
+         按 key 登记，每次 render 换一次谓词闭包，不堆旧闭包。 */
+      if (window.InkWin) InkWin.yieldTo("fc-pick", function () {
+        return panelKey === "card" && S().fcPick === true;
+      });
       var okBtn = qs("#fcPickOk"), noBtn = qs("#fcPickNo"), auBtn = qs("#fcPickAuto");
       if (okBtn) okBtn.addEventListener("click", commitPick);
       if (noBtn) noBtn.addEventListener("click", function () { S().fcPick = false; renderPanel(); });
@@ -1554,6 +1549,24 @@
     trPaintBody(pop, r.data, p);
   }
 
+  /* v2.23 W2 · 翻译浮层入 InkWin：可拖、可停靠（正文让位）、可铺满，位置尺寸记忆。
+     原先每次划词都按鼠标重摆、尺寸写死 320 —— 连着查五六个词时，浮层一直在
+     「跳到鼠标下面 → 挡住下一段要读的字」之间循环，也没法把它常驻在手边。
+     把手用 InkWin 自造的细栏：语言栏那一行是控件不是标题，四枚形态钮挤不进去。 */
+  var trWin = null;
+  function ensureTrWin(pop) {
+    if (trWin || !window.InkWin) return trWin;
+    trWin = InkWin.create(pop, {
+      id: "tr", host: "viewport", claim: "#reader", autoH: true,
+      handle: ".inkw-bar", x: "#trClose", title: "翻译",
+      f: { w: 320, h: 260 }, min: { w: 272, h: 160 },
+      dock: { min: 272, max: 520, width: 320 }, snap: 20,
+      shown: function () { return !pop.hidden; },
+      onClose: function () { pop.hidden = true; }
+    });
+    return trWin;
+  }
+
   /* 划词：在选中工具条点「译」后调用 */
   async function translateSelection(text, x, y) {
     var pop = qs("#trPop");
@@ -1562,6 +1575,7 @@
     trCur = text;
     pop.dataset.kind = "word";
     pop.hidden = false;
+    ensureTrWin(pop);
     pop.innerHTML = '<div class="tr-load">' + icon("loader-circle", 14) + "翻译中…</div>";
     place(pop, x, y);
 
@@ -1631,8 +1645,18 @@
 
   function place(pop, x, y) {
     var w = 320;
-    pop.style.left = Math.max(10, Math.min(window.innerWidth - w - 10, (x || window.innerWidth / 2) - w / 2)) + "px";
-    pop.style.top = Math.max(10, (y || 120)) + "px";
+    if (!trWin) {                              /* dock.js 没在：按老写法贴鼠标 */
+      pop.style.left = Math.max(10, Math.min(window.innerWidth - w - 10, (x || window.innerWidth / 2) - w / 2)) + "px";
+      pop.style.top = Math.max(10, (y || 120)) + "px";
+      return;
+    }
+    trWin.open();
+    /* 本机第一次用它：贴着点词的位置放一次；之后位置归读者拖出来的那个。
+       「改语向不该让浮层跳位置」这条老规矩在这里同样成立 —— 重译只动 #trBody，不走这里。 */
+    if (!InkWin.read()["tr"]) {
+      var left = Math.max(10, Math.min(window.innerWidth - w - 10, (x || window.innerWidth / 2) - w / 2));
+      trWin.place(left, Math.max(10, y || 120), w);
+    }
   }
 
   /* 悬停译：指针停在段落上就地浮出译文，移开即撤 —— 「按需一瞥」而非常驻对照。

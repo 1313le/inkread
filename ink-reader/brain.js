@@ -744,7 +744,15 @@
   function docBrief() {
     var d = CUR_DOC ? docMeta(CUR_DOC) : null;
     if (!d) return "";
-    return "《" + d.title + "》" + (d.author ? "（" + d.author + "）" : "");
+    /* 只报书名等于没报（v2.23 W1b）：模型拿到「《X》」三个字，仍然不知道这是一本
+       多长、分几节、读者读到哪儿的书。补上体量与进度，它才谈得出「这本书」。 */
+    var bs = blocksOf(d.id);
+    var s = "《" + d.title + "》" + (d.author ? "（" + d.author + "）" : "");
+    s += bs.length ? " · 正文 " + bs.length + " 块 / " + chaptersOf(bs).length + " 节" : " · 本机没有它的正文";
+    if (d.words) s += " · 约 " + d.words + " 字";
+    if (d.pages) s += " / " + d.pages + " 页";
+    if (d.progress) s += " · 读者读到 " + d.progress + "%";
+    return s;
   }
 
   /* ---------- v2.7 阅读统计摘要（主脑「对一切数据了如指掌」的入口） ----------
@@ -820,9 +828,19 @@
     return String(k);
   }
 
+  /* 正文块的两个来源（v2.23 W1b）：导入的书落在本机正文库（inkread.contents.v1，经 API.localContent），
+     随包样书在 mock 的 DB.contents。过去这里只读后者 —— 用户导入的每一本书，
+     在主脑的检索、摘要、对话里都是「零块」，等于主脑看不见他的藏书。
+     顺序与 reader.html 的 sourceBlocks 一致：本机库优先，取不到再回 mock。 */
   function blocksOf(id) {
-    var c = window.DB && DB.contents && DB.contents[id];
-    return Array.isArray(c) ? c : [];
+    if (id && window.API && API.localContent) {
+      try {
+        var c = API.localContent(id);
+        if (c && c.length) return c;
+      } catch (e) {}
+    }
+    var m = window.DB && DB.contents && DB.contents[id];
+    return Array.isArray(m) ? m : [];
   }
 
   /* 把一个块摊成可检索的文字 */
@@ -867,6 +885,243 @@
       var r = await API.aiSearch(q, all);
       return ((r.data && r.data.hits) || []).slice(0, n || 6);
     } catch (e) { return []; }
+  }
+
+  /* ============================================================
+     四点五、上下文包（v2.23 W1b）
+     主脑的每个 AI 入口从前只拿到「选中的那一句」，一本书的字都没进 prompt
+     （实测：溯源请求的 user 消息 44 字、解析 59 字，全书 1141 字一个字没带）。
+     这里把「这本书」摊成分级的材料包，让入口只管提问、不管搬书。
+     分级与预算（按字符，中文约 1 字 ≈ 1 token 多一点；默认 5200 字 ≈ 一轮请求的稳妥区间）：
+       ① 同章正文 62% ② 相关段落 22% ③ 邻章首尾 8% ④ 全书目录 6% ⑤ 书目 + 批注 4%
+     实测参照：随包样书全书 1141 字 / 单章最大 456 字；24 段导入文档全书 3215 字 / 单章 3207 字
+     —— 默认预算装得下「一章 + 一圈周边」，装不下的按级裁，并如实记下裁过哪些级。
+     ============================================================ */
+
+  /* 按标题块切章：返回 [{title, level, anchor, start, end}]（end 不含）。
+     正文起首若有非标题块（无前言的文档很常见），补一条「（正文起首）」章占住它们。 */
+  function chaptersOf(bs) {
+    var list = bs || [];
+    var hs = [];
+    list.forEach(function (b, i) {
+      if (b && (b.type === "h1" || b.type === "h2" || b.type === "h3")) {
+        hs.push({ title: String(b.x || "").trim(), level: b.type, anchor: b.id || "", start: i });
+      }
+    });
+    if (!hs.length) return [{ title: "", level: "", anchor: list.length ? (list[0].id || "") : "", start: 0, end: list.length }];
+    hs.forEach(function (h, i) { h.end = i + 1 < hs.length ? hs[i + 1].start : list.length; });
+    if (hs[0].start > 0) hs.unshift({ title: "（正文起首）", level: "", anchor: "", start: 0, end: hs[0].start });
+    return hs;
+  }
+
+  /* 上下文包内部的相关度：查询的 2/3 字符片在段落里的命中占比。
+     够钝就行 —— 真正的语义重排是 aiSearch 的活，这一级只保证最相关的段落不被预算裁掉。 */
+  function relRank(q, text) {
+    var s = String(q || "").replace(/\s+/g, "");
+    var t = String(text || "");
+    if (s.length < 2 || !t) return 0;
+    var hit = 0, tot = 0;
+    for (var n = 2; n <= 3; n++) {
+      for (var i = 0; i + n <= s.length; i++) {
+        tot++;
+        if (t.indexOf(s.slice(i, i + n)) >= 0) hit++;
+      }
+    }
+    return tot ? hit / tot : 0;
+  }
+
+  /* 从 o 里定住「读者站在哪一块」：显式块号 → 锚点 id → 查询命中的块 → 第一章 */
+  function locate(bs, o, q) {
+    if (typeof o.bi === "number" && o.bi >= 0 && o.bi < bs.length) return o.bi;
+    if (o.anchor) {
+      for (var i = 0; i < bs.length; i++) if (bs[i] && bs[i].id === o.anchor) return i;
+    }
+    if (q) {
+      var best = -1, bs0 = 0;
+      bs.forEach(function (b, i) {
+        var s = relRank(q, blockText(b));
+        if (s > bs0) { bs0 = s; best = i; }
+      });
+      if (bs0 > 0) return best;
+    }
+    return 0;
+  }
+
+  /* 取 [s,e) 里以 center 为中心、不超过 room 字的连续窗口（含 center 那一块） */
+  function windowOf(bs, texts, s, e, center, room) {
+    var a = center, b = center, chars = texts[center].length;
+    for (;;) {
+      var grew = false;
+      if (b + 1 < e && chars + texts[b + 1].length + 1 <= room) { b++; chars += texts[b].length + 1; grew = true; }
+      if (a > s && chars + texts[a - 1].length + 1 <= room) { a--; chars += texts[a].length + 1; grew = true; }
+      if (!grew) break;
+    }
+    return { a: a, b: b };
+  }
+
+  /* 建包：无书 / 无正文 → null（调用方退回「只带选中文本」的旧形状，不把功能关掉） */
+  function buildContextPack(o) {
+    o = o || {};
+    var docId = o.docId || CUR_DOC || null;
+    var d = docId ? docMeta(docId) : null;
+    if (!d) return null;
+    var bs = blocksOf(docId);
+    if (!bs.length) return null;
+
+    var budget = Math.max(800, Math.min(12000, Number(o.budget) || 5200));
+    var q = String(o.query || "").trim();
+    var texts = bs.map(function (b) { return String(blockText(b) || "").trim(); });
+    var chs = chaptersOf(bs);
+    var at = Math.max(0, Math.min(bs.length - 1, locate(bs, o, q)));
+    var ci = 0;
+    for (var i = 0; i < chs.length; i++) if (at >= chs[i].start && at < chs[i].end) { ci = i; break; }
+    var ch = chs[ci];
+
+    var pack = {
+      docId: docId,
+      meta: {
+        title: d.title || "", author: d.author || "", type: d.type || "",
+        tags: (d.tags || []).slice(0, 6), pages: d.pages || 0, words: d.words || 0,
+        progress: d.progress || 0, group: d.group || ""
+      },
+      at: at,
+      chapter: { index: ci, count: chs.length, title: ch.title || d.title || "", anchor: ch.anchor || "", from: ch.start, to: ch.end, text: "", whole: true, cut: false },
+      around: { before: "", after: "" },
+      related: [],
+      toc: chs.map(function (c) { return { lv: c.level || "p", x: String(c.title || "").slice(0, 24), bi: c.start }; }),
+      notes: [],
+      cut: []
+    };
+    if (pack.toc.length > 40) { pack.toc = pack.toc.slice(0, 40); pack.cut.push("toc"); }
+
+    /* ⑤ 书目 + 批注：先扣掉（小额固定开销），剩下的才轮到正文分级 */
+    var notes = ((window.InkStore && InkStore.getNotes && InkStore.getNotes()) || [])
+      .filter(function (n) { return n && n.docId === docId && (n.text || n.body); })
+      .slice(0, 6)
+      .map(function (n) {
+        return {
+          text: String(n.text || "").slice(0, 80), body: String(n.body || "").slice(0, 80),
+          anchor: n.anchor || "", page: n.page || 0
+        };
+      });
+    if (notes.length > 6) pack.cut.push("notes");
+    pack.notes = notes;
+
+    var nChars = notes.reduce(function (s, n) { return s + n.text.length + n.body.length + 8; }, 0);
+    var tChars = pack.toc.reduce(function (s, t) { return s + t.x.length + 6; }, 0);
+    var room = Math.max(200, budget - nChars - tChars - 160);
+
+    /* ① 同章正文（离提问最近的一级，装不下就围绕立足点扩窗） */
+    var w = windowOf(bs, texts, ch.start, ch.end, at, Math.floor(room * 0.62));
+    var seg = [];
+    for (var k = w.a; k <= w.b; k++) if (texts[k]) seg.push(texts[k]);
+    pack.chapter.from = w.a; pack.chapter.to = w.b + 1;
+    pack.chapter.whole = (w.a === ch.start && w.b + 1 === ch.end);
+    pack.chapter.text = seg.join("\n");
+    if (pack.chapter.text.length > Math.floor(room * 0.62)) {
+      pack.chapter.text = pack.chapter.text.slice(0, Math.floor(room * 0.62));
+      pack.chapter.cut = true;
+    }
+    if (!pack.chapter.whole) pack.cut.push("chapter");
+
+    /* ② 相关段落：全书打分，去掉已在同章窗口里的 */
+    if (q) {
+      var scored = [];
+      bs.forEach(function (b, i) {
+        if (i >= w.a && i <= w.b) return;
+        var sc = relRank(q, texts[i]);
+        if (sc > 0.12 && texts[i].length >= 8) scored.push({ i: i, s: sc, t: texts[i] });
+      });
+      scored.sort(function (x, y) { return y.s - x.s || x.i - y.i; });
+      var used = 0, capR = Math.floor(room * 0.22);
+      scored.forEach(function (x) {
+        if (pack.related.length >= 5 || used + x.t.length > capR) return;
+        var hh = null;
+        for (var m = 0; m < chs.length; m++) if (x.i >= chs[m].start && x.i < chs[m].end) { hh = chs[m]; break; }
+        pack.related.push({
+          bi: x.i, anchor: (bs[x.i] && bs[x.i].id) || "",
+          chapter: (hh && hh.title) || d.title || "", score: Math.round(x.s * 100) / 100,
+          page: pageOf(d, bs.length, x.i), text: x.t.slice(0, capR - used)
+        });
+        used += x.t.length;
+      });
+      if (scored.length > pack.related.length) pack.cut.push("related");
+    }
+
+    /* ③ 邻章首尾：只给「这一章之前/之后在讲什么」的一句话轮廓 */
+    var capA = Math.floor(room * 0.08);
+    var prev = ci > 0 ? chs[ci - 1] : null, next = ci + 1 < chs.length ? chs[ci + 1] : null;
+    if (prev) pack.around.before = chapterGlue(texts, prev, capA, "head");
+    if (next) pack.around.after = chapterGlue(texts, next, capA, "tail");
+    return pack;
+  }
+
+  /* 邻章轮廓：取该章正文的头（或尾）若干字 */
+  function chapterGlue(texts, ch, room, end) {
+    var parts = [];
+    for (var i = ch.start; i < ch.end; i++) if (texts[i]) parts.push(texts[i]);
+    var s = parts.join("\n");
+    if (!s) return "";
+    return (end === "tail" ? "…" + s.slice(-room) : s.slice(0, room));
+  }
+
+  /* 块号 → 页码（书架条目只有总页数，按块均分估；与 corpus() 同一口径） */
+  function pageOf(d, len, i) {
+    var perPage = Math.max(1, Math.ceil(len / Math.max(1, d.pages || 1)));
+    return Math.min(d.pages || 999, Math.floor(i / perPage) + 1);
+  }
+
+  /* 包 → prompt 文字。顺序按「越相关越靠近提问」排（长上下文中段最容易被读漏）：
+     书目 → 目录 → 批注 → 邻章 → 相关段落 → 当前章正文 →（调用方在此接上选中的那句 + 提问） */
+  function packPrompt(pack) {
+    if (!pack) return "";
+    var m = pack.meta, sec = [];
+    sec.push("【书目】《" + m.title + "》" + (m.author ? "（" + m.author + "）" : "") +
+      (m.type ? " · 类别 " + m.type : "") +
+      (m.tags && m.tags.length ? " · 标签 " + m.tags.join("、") : "") +
+      (m.words ? " · 全书约 " + m.words + " 字 / " + m.pages + " 页" : "") +
+      (m.progress ? " · 读者读到 " + m.progress + "%" : ""));
+    if (pack.toc.length > 1) {
+      sec.push("【目录】" + pack.toc.map(function (t, i) {
+        return (i + 1) + "." + (t.x || "（无题）");
+      }).join(" / "));
+    }
+    if (pack.notes.length) {
+      sec.push("【读者自己在书上的批注】\n" + pack.notes.map(function (n) {
+        return "· " + (n.text ? "「" + n.text + "」" : "") + (n.body ? " —— " + n.body : "") + (n.page ? "（第 " + n.page + " 页）" : "");
+      }).join("\n"));
+    }
+    if (pack.around.before || pack.around.after) {
+      sec.push("【前一章结尾】" + (pack.around.before || "（无）") +
+        "\n【后一章开头】" + (pack.around.after || "（无）"));
+    }
+    if (pack.related.length) {
+      sec.push("【书里与这个问题最接近的段落】\n" + pack.related.map(function (r) {
+        return "· " + r.chapter + " · 第 " + r.page + " 页：" + r.text;
+      }).join("\n"));
+    }
+    sec.push("【" + pack.chapter.title + " 正文" +
+      (pack.chapter.whole ? "" : " · 节选（围绕读者所站的位置取，本章未全文附上）") + "】\n" +
+      pack.chapter.text);
+    return sec.join("\n\n");
+  }
+
+  /* 供 api.js 一次取齐：包 + 拼好的文字 + 实测各级字数（闸门与「模型到底看到了多少字」的可查证据） */
+  function contextFor(o) {
+    var pack = buildContextPack(o);
+    if (!pack) return null;
+    var txt = packPrompt(pack);
+    return {
+      pack: pack, text: txt, chars: txt.length,
+      tierChars: {
+        chapter: pack.chapter.text.length,
+        related: pack.related.reduce(function (s, r) { return s + r.text.length; }, 0),
+        around: pack.around.before.length + pack.around.after.length,
+        toc: pack.toc.reduce(function (s, t) { return s + t.x.length; }, 0),
+        notes: pack.notes.reduce(function (s, n) { return s + n.text.length + n.body.length; }, 0)
+      },
+      cut: pack.cut.slice()
+    };
   }
 
   /* ============================================================
@@ -1134,7 +1389,7 @@
       var out = "";
       try {
         await API.llmMsgs(msgs, {
-          temp: 0.6, timeout: 60000,
+          temp: 0.6, timeout: 60000, signal: o.signal || null,
           onDelta: function (piece, all) {
             out = all != null ? all : out + piece;
             if (o.onDelta) o.onDelta(piece, out);
@@ -1147,9 +1402,15 @@
         return {
           reply: out, refs: mems.map(function (m) { return m.id; }),
           mode: "online", model: (API.modelCfg() || {}).model,
-          passages: passages.length
+          passages: passages.length, hits: passages
         };
       } catch (e) {
+        /* 读者按了停止：半句照原样交回去，不去兜离线库。
+           「我叫停的」被显示成「模型答不上来」，会让读者怀疑刚接好的模型坏了；
+           已流出的内容也不写进 history —— 半截话进上下文，下一轮就顺着半截编。 */
+        if (e && (e.aborted || (o.signal && o.signal.aborted))) {
+          return { reply: out, refs: [], mode: "stopped", aborted: true, passages: passages.length, hits: passages };
+        }
         var off = await offline(q, { docId: docId });
         off.note = "模型请求失败：" + API.netErrPhrase(e) + "，已改用离线库作答。";
         off.refs = off.refs || mems.map(function (m) { return m.id; });
@@ -1330,6 +1591,11 @@
     currentDoc: function () { return CUR_DOC; },
     docBrief: docBrief,
     behaviorBrief: behaviorBrief,
+    /* 上下文包（v2.23 W1b）：api.js 的三个 AI 入口靠它拿到「这本书」 */
+    buildContextPack: buildContextPack,
+    packPrompt: packPrompt,
+    contextFor: contextFor,
+    chaptersOf: chaptersOf,
 
     /* 对话 */
     ask: ask,

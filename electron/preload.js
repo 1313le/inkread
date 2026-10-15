@@ -2,7 +2,7 @@
    preload.js · 渲染进程 ↔ 主进程 的唯一通道
    —— contextIsolation 保持开启，页面拿到的只是这一个小 API：
       window.inkread.desktop   是否运行在桌面 App 内
-      window.inkread.win.*     最小化 / 最大化切换 / 关闭 / 最大化状态
+      window.inkread.win.*     最小化 / 最大化切换 / 关闭 / 最大化状态 / 主题同步
       window.inkread.paper.*   导出 PDF / 打印 / 打印机清单
    —— 自绘标题栏（一体化外壳）的窗口控制全部走这里。
    ============================================================ */
@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld("inkread", {
     toggleMaximize() { ipcRenderer.invoke("ink:win-max"); },
     close() { ipcRenderer.invoke("ink:win-close"); },
     isMaximized() { return ipcRenderer.invoke("ink:win-is-max"); },
+    /* 主题落地时告知主进程：窗口底色与 OS 明暗档跟着走（校验在主进程） */
+    setTheme(tone, paper) { return ipcRenderer.invoke("ink:win-theme", { tone: tone, paper: paper }); },
     /* 主进程最大化状态变化时回调；返回解绑函数 */
     onMaximizeChange(cb) {
       const handler = (_e, v) => cb(v);

@@ -257,8 +257,13 @@ body.embed #btnViewSwap, body.embed .view-sync { display: none; }
    （同一棵笔记树的三种渲染），不必每屏占一行广告位；全页一并撤下。 */
 #viewSync { display: none; }
 
-/* 4. 工具条：折两行 → 单行横向可滚；行内提示撤（与下方教学框是同一句话） */
-body.embed .md-toolbar { flex-wrap: nowrap; overflow-x: auto; padding: 6px 10px; gap: 3px; scrollbar-width: thin; }
+/* 4. 工具条：单行铺满、禁横滚（v2.23 W6.2 收口）。
+      原先折两行占高度，改成「单行 + overflow-x:auto」—— 但横滚会把看不见的钮变成
+      「不存在的钮」，还会在暗主题里留一条浅色滚条（正是问题六.2 指的那处）。
+      实测（probe-w6-embed，360/300/480 三档嵌窗）钮数 9、scrollWidth 恒等于 clientWidth，
+      也就是说横滚这条今天已经用不上：改成 wrap 不改变任何现有画面，只把这条
+      「以后加钮就复发」的路堵掉。行内提示照旧撤（与下方教学框是同一句话）。 */
+body.embed .md-toolbar { flex-wrap: wrap; padding: 6px 10px; gap: 3px; }
 body.embed .md-toolbar .card-note, body.embed .md-toolbar .spacer { display: none; }
 body.embed .md-toolbar .tool-btn { flex: none; }
 
@@ -266,8 +271,14 @@ body.embed .md-toolbar .tool-btn { flex: none; }
 body.embed .ol-hint { display: none; }
 body.embed .ol-wrap { padding: 8px 10px 12px; }
 
-/* 6. 底部动作条贴底、单行、不溢出；「回到原文」在浮窗里就在原文旁边，撤 */
+/* 6. 底部动作条贴底、单行、不溢出；「回到原文」在浮窗里就在原文旁边，撤
+   —— v2.23 W6.2 续：这条原先被 JS 那句 inline style 顶掉（内联优先于规则），
+      「回到原文」实际一直在浮窗里占 61px，把两个钮挤到被切（实测 340 宽各切 9px）。
+      改在 openNote() 里按 EMBED 决定是否渲染，规则留在这儿做兜底。
+      钮一律 flex:none：.btn 带 overflow:hidden，flex 项一旦有它就没有 min-width:auto 兜底，
+      会被压到比文案还窄 —— 与 .seg-btn 同一个病根。牺牲位只有提示语（它自带省略号）。 */
 body.embed .wb-foot { padding: 8px 10px; gap: 8px; flex-wrap: nowrap; }
+body.embed .wb-foot .btn { flex: none; }
 body.embed .wb-foot .ef-hint { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 body.embed #gotoSrc { display: none; }
 
@@ -662,7 +673,7 @@ body[data-page="notes"] .mm-stage {
     icQuote: "quote", icCode: "code", icSigma: "sigma", icLink: "link", icTable: "table",
     icEye: "eye", icMdFocus: "focus", icSave: "circle-check", icDel: "trash-2",
     icImm: "maximize-2", icNwSave: "circle-check", icNwExit: "minimize",
-    icNwWidth: "columns-2"
+    icNwWidth: "move-horizontal"
   };
   Object.keys(IC).forEach(function (id) { var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16); });
   qs("#olHintIc").innerHTML = icon("info", 14);
@@ -675,11 +686,19 @@ body[data-page="notes"] .mm-stage {
 
   var COLOR_HEX = { accent: "var(--accent)", green: "var(--green)", amber: "var(--amber)", blue: "var(--blue)", ink: "var(--ink-3)" };
   var KIND_LABEL = { highlight: "高亮", note: "笔记", bookmark: "书签", margin: "随笔" };
+  /* 批注条目可能来自同步/导入，kind 缺失或不在四类里时不能把「undefined」印在行首 ——
+     兜一个中性标签，筛选（state.kind）仍按原值走，不影响命中。 */
+  function kindLabel(n) { return KIND_LABEL[n && n.kind] || "批注"; }
   var NTYPE_ICON = { outline: "list-tree", mindmap: "network", md: "sigma" };
 
-  /* 文档名 / 筛选 / 归属与书架同源（含用户导入的文档，不再只看 mock 书架） */
+  /* 文档名 / 筛选 / 归属与书架同源（含用户导入的文档，不再只看 mock 书架）。
+     查不到时不许写「未知文档」——那等于告诉用户「坏了」却不说是哪一条：
+     带上 docId 前 6 位，两条孤儿笔记才分得开，也才好对着回收站找。 */
   function noteShelf() { return (window.shelfList ? shelfList() : DB.shelf) || []; }
-  function docTitle(id) { var d = noteShelf().find(function (x) { return x.id === id; }); return d ? d.title : "未知文档"; }
+  function docTitle(id) {
+    var d = noteShelf().find(function (x) { return x.id === id; });
+    return d ? d.title : (id ? "未收录文档 · #" + String(id).slice(0, 6) : "未收录文档");
+  }
   function curDocId() {
     var n = state.notes.find(function (x) { return x.id === state.curId; });
     if (n) return n.docId;
@@ -1008,7 +1027,7 @@ body[data-page="notes"] .mm-stage {
         ? '<span class="nr-hit">命中 ' + esc(hit.srcs.join(" · ")) + "</span>" : "";
       return '<div class="note-row' + (n.id === state.curId ? " on" : "") + '" data-note="' + n.id + '">' +
         '<div class="nr-top"><span class="nr-dot" style="background:' + (COLOR_HEX[n.color] || COLOR_HEX.accent) + '"></span>' +
-        KIND_LABEL[n.kind] + '<span class="spacer"></span>' + esc(n.at || "") + "</div>" +
+        kindLabel(n) + '<span class="spacer"></span>' + esc(n.at || "") + "</div>" +
         '<div class="nr-title">' + (ttlMark || esc(ttl)) + "</div>" +
         (dup ? "" : '<div class="nr-prev">' + (pvMark || esc(pv)) + "</div>") +
         '<div class="nr-top nr-foot" style="margin:8px 0 0"><span class="nr-ntype">' + icon(NTYPE_ICON[nType(n)], 11) + NTYPE_LABEL[nType(n)] + "</span>" +
@@ -1031,7 +1050,7 @@ body[data-page="notes"] .mm-stage {
     qs("#titleInput").value = n.title || "";
     qs("#srcChip").style.display = "inline-flex";
     qs("#srcChip").innerHTML = icon("book-marked", 12) + '<span class="wb-src-t">' + esc(docTitle(n.docId)) + " · P" + (n.page || 1) + "</span>";
-    qs("#gotoSrc").style.display = "inline-flex";
+    qs("#gotoSrc").style.display = EMBED ? "none" : "inline-flex";
     qs("#gotoSrc").href = srcLink(n.docId, n.id);
     qs("#gotoSrc").innerHTML = icon("arrow-up-right", 12) + "回到原文";
     qs("#btnDel").disabled = false;
@@ -2180,7 +2199,7 @@ body[data-page="notes"] .mm-stage {
     var md = "# 墨读笔记导出\n\n> 导出时间：" + new Date().toLocaleString("zh-CN") + " · 共 " + list.length + " 条\n\n";
     list.forEach(function (n) {
       md += "# " + (noteTitle(n) || "无标题") + "\n\n";
-      md += "> " + KIND_LABEL[n.kind] + " · " + docTitle(n.docId) + " · P" + (n.page || 1) + "\n\n";
+      md += "> " + kindLabel(n) + " · " + docTitle(n.docId) + " · P" + (n.page || 1) + "\n\n";
       var body = (n.outline && n.outline.length) ? serialize(n.outline) : (n.body || "");
       if (body) md += body + "\n\n";
       md += "---\n\n";
@@ -2366,6 +2385,40 @@ body[data-page="notes"] .mm-stage {
     window.addEventListener("resize", function () {
       if (state.view === "mindmap") { fitMind(); renderMind(); }
     });
+
+    /* ============================================================
+       v2.23 W6.3 · 工作台高度预算去魔数（问题六.1）
+       styles.css 里 --work-h-max = calc(100dvh - 46px - 184px)，那 184 是把
+       「页头 + 上下留白」一次估死。实测它根本不是一个常数：
+         1280 宽 顶边 172 + 下内距 54 = 226（估 230，差 4）
+          768 宽 顶边 230 + 下内距 48 = 278（估 230，少算 48 → 卡片比可用空间高 48）
+          390 宽 顶边 243 + 30 + 底部标签栏预留 74 = 347（估 230，少算 117 → 压进标签栏）
+       改为现场量：顶边到视口顶的距离 + 容器下方该留的内边距（含 ≤600 的标签栏预留）。
+       嵌窗(html.embed) 与沉浸(body.nw) 另有自己的高度口径（notes.html 顶部 / body.nw），不参与。
+       ============================================================ */
+    (function workBudget() {
+      var lay = qs(".work-layout");
+      if (!lay) return;
+      function set() {
+        var de = document.documentElement, bd = document.body;
+        if (de.classList.contains("embed") || bd.classList.contains("nw") || bd.classList.contains("immersive")) return;
+        var ac = qs("#appContent");
+        var pg = lay.closest(".page") || lay;
+        /* rect.top 是视口相对值：外层已滚动时它会变小，量出的预算虚高，补回 scrollTop */
+        var top = lay.getBoundingClientRect().top + (ac ? ac.scrollTop : 0);
+        var pad = (parseFloat(getComputedStyle(pg).paddingBottom) || 0)
+          + (parseFloat(getComputedStyle(ac || pg).paddingBottom) || 0);
+        var h = Math.round(window.innerHeight - top - pad);
+        if (h > 240) lay.style.setProperty("--work-h-max", h + "px");
+      }
+      set();
+      /* 页头换行 / 副标题加长 / 字体加载完（29 套主题各自换字体，度量会变）都会挪顶边 */
+      if (typeof ResizeObserver === "function" && qs(".page-head")) {
+        new ResizeObserver(set).observe(qs(".page-head"));
+      }
+      window.addEventListener("resize", set);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(set);
+    })();
   })();
 })();
 </script>

@@ -76,11 +76,6 @@
 
 /* ---------- 三、复习浮层：页内全屏，风格同阅读页闪卡面板 ---------- */
 .fc-stage { position: absolute; inset: 0; z-index: 280; display: flex; flex-direction: column; background: var(--paper); background-image: var(--grain); }
-.fc-stage[hidden] { display: none; }
-/* styles.css 的 .fc-rate 是 display:flex，会盖掉 UA 的 [hidden]（同 .toc-panel 那类问题）——
-   本页显式压回：没翻面时评分排不出现，与 modes.js 里 rate.hidden 的语义一致。
-   只作用于本页浮层，不动全局。 */
-.fc-stage .fc-rate[hidden] { display: none; }
 .fcs-top { display: flex; align-items: center; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--line-2); }
 .fcs-name { font-size: 14px; font-weight: 700; letter-spacing: .04em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fcs-prog { margin-left: auto; font-size: 12.5px; color: var(--ink-3); letter-spacing: .06em; font-variant-numeric: tabular-nums; }
@@ -93,7 +88,11 @@
 .fcs-key kbd { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; margin: 0 2px; background: var(--paper-2); }
 /* 完成小结 */
 .fcs-sum { text-align: center; padding: 20px 0; }
-.fcs-sum .ic { width: 34px; height: 34px; color: var(--accent-ink); margin-bottom: 12px; }
+/* v2.23 §W3 第六步：页内 <style> 里写死的 .ic 尺寸一并收进五档 token（本卡三处 + index 三处 + reader 一处）。
+   这一步不是审美统一 —— CSS 的 width/height 会盖掉 <svg> 上的属性值，所以这里的 13/11/22/34
+   是**真正生效**的尺寸，工厂 iconSize() 的档位换算对它们完全无效。对不上档的一律往小收
+   （闸 K8 扫源码、K9 量真实渲染值）。 */
+.fcs-sum .ic { width: var(--ic-xl); height: var(--ic-xl); color: var(--accent-ink); margin-bottom: 12px; }
 .fcs-sum .big { font-size: 26px; font-weight: 700; letter-spacing: .03em; }
 .fcs-sum .card-note { margin-top: 10px; }
 
@@ -136,7 +135,6 @@
   padding: 8px 12px; border: 1px solid var(--amber); border-radius: var(--r-sm);
   background: var(--amber-wash); color: var(--amber-ink); font-size: 12.5px; letter-spacing: .02em;
 }
-.q-err[hidden] { display: none; }
 .view-seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
 .view-seg button {
   display: flex; align-items: center; gap: 5px; padding: 7px 11px;
@@ -150,7 +148,6 @@
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer;
 }
 .save-box { display: inline-flex; align-items: center; gap: 6px; }
-.save-box[hidden] { display: none; }
 .save-box .field { padding: 6px 9px; font-size: 12.5px; width: 150px; }
 
 .cards-main { display: flex; gap: 20px; align-items: flex-start; }
@@ -163,7 +160,7 @@
   display: flex; align-items: center; gap: 7px; margin-bottom: 8px;
   font-size: 11px; color: var(--ink-3); letter-spacing: .14em;
 }
-.side-head .ic { width: 13px; height: 13px; }
+.side-head .ic { width: var(--ic-xs); height: var(--ic-xs); }
 .side-item {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px; margin-bottom: 2px;
   background: none; border: 1px solid transparent; border-radius: var(--r-xs); text-align: left;
@@ -171,7 +168,7 @@
 }
 .side-item:hover { background: var(--paper-2); color: var(--ink); }
 .side-item.on { border-color: var(--accent-ink); background: var(--accent-wash); color: var(--accent-ink); }
-.side-item .ic { width: 13px; height: 13px; color: var(--ink-3); flex: none; }
+.side-item .ic { width: var(--ic-xs); height: var(--ic-xs); color: var(--ink-3); flex: none; }
 .side-item.on .ic { color: var(--accent-ink); }
 .si-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .si-n { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
@@ -447,10 +444,13 @@
       var suspN = cards.filter(function (c) { return c.susp && !c.excl; }).length;
       var exclN = cards.filter(function (c) { return c.excl; }).length;
       var custom = state.decks[docId];
+      /* 文档已不在书架（被删除 / 导入残留）时不许只写「未知文档」：既说不清是哪一本，
+         也让人怀疑程序坏了。带上 docId 前 6 位，几本孤儿卡组彼此才分得开。 */
+      var orphans = "未收录文档 · #" + String(docId || "").slice(0, 6);
       return {
         docId: docId, type: type || "other",
-        bookTitle: title || "未知文档",
-        name: (custom && String(custom).trim()) || title || "未知文档",
+        bookTitle: title || orphans,
+        name: (custom && String(custom).trim()) || title || orphans,
         custom: !!(custom && String(custom).trim()),
         cards: cards, totalN: cards.length, dueN: dueN, suspN: suspN, exclN: exclN,
         liveN: cards.length - suspN - exclN
@@ -482,7 +482,10 @@
       var doc = null;
       (InkStore.getShelf() || []).forEach(function (d) { if (d.id === docId) doc = d; });
       var custom = state.decks[docId];
-      return { docId: docId, n: nByDoc[docId], name: (custom && String(custom).trim()) || (doc && doc.title) || "未知文档" };
+      var g = state.gone[docId] || {};
+      return { docId: docId, n: nByDoc[docId],
+        name: (custom && String(custom).trim()) || (doc && doc.title) || g.t ||
+              "未收录文档 · #" + String(docId).slice(0, 6) };
     });
   }
 
@@ -801,7 +804,7 @@
     box.push(sideItem("is", "is:due", "calendar-days", "到期", st.due, hasToken(q, "is:due"), "到期：is:due"));
     box.push(sideItem("is", "is:new", "sparkles", "新卡", st.new, hasToken(q, "is:new"), "新卡：is:new"));
     box.push(sideItem("is", "is:sched", "clock", "已排期", st.sched, hasToken(q, "is:sched"), "已排期：is:sched"));
-    box.push(sideItem("is", "is:susp", "minus-circle", "已挂起", st.susp, hasToken(q, "is:susp"), "已挂起：is:susp"));
+    box.push(sideItem("is", "is:susp", "pause", "已挂起", st.susp, hasToken(q, "is:susp"), "已挂起：is:susp"));
     box.push(sideItem("is", "is:excl", "eye-off", "已排除", st.excl, hasToken(q, "is:excl"), "已排除：is:excl"));
     box.push("</section>");
 
@@ -867,7 +870,7 @@
       '<div class="dc-top">' +
         '<span class="chip chip-accent">' + icon(catIcon(d.type), 13) + esc(catName(d.type)) + "</span>" +
         (d.custom ? '<span class="chip">' + icon("square-pen", 12) + "自定名</span>" : "") +
-        (d.suspN ? '<span class="chip chip-amber">' + icon("minus-circle", 12) + "挂起 " + d.suspN + "</span>" : "") +
+        (d.suspN ? '<span class="chip chip-amber">' + icon("pause", 12) + "挂起 " + d.suspN + "</span>" : "") +
         (d.exclN ? '<span class="chip">' + icon("eye-off", 12) + "已排除 " + d.exclN + "</span>" : "") +
         '<span class="spacer"></span>' +
         '<button class="btn btn-ghost btn-sm dc-more" data-more="' + esc(d.docId) + '" title="卡组操作" aria-label="卡组操作">' + icon("ellipsis", 16) + "</button>" +
@@ -1061,7 +1064,8 @@
     d.cards.forEach(function (c) { if (state.cards[c.n.id]) { delete state.cards[c.n.id]; n++; } });
     writeCardsAll(state.cards);
     if (state.decks[docId]) { delete state.decks[docId]; writeDecks(state.decks); }
-    state.gone[docId] = { at: stamp(), n: d.totalN };
+    /* 墓碑顺手记下书名：文档删了以后，这一组仍叫得出自己原来是谁（老墓碑没这个字段，走占位文案） */
+    state.gone[docId] = { at: stamp(), n: d.totalN, t: d.bookTitle };
     writeGone(state.gone);
     state.menu = null; state.confirmDel = null;
     var oi = state.ui.openDecks.indexOf(docId);
@@ -1139,7 +1143,7 @@
     var d = findDeck(docId);
     if (!d) return;
     var q = deckQueue(d);
-    if (!q.list.length) { toast("这一组的卡都不在复习中 · 到详情里恢复或撤回排除", "minus-circle"); return; }
+    if (!q.list.length) { toast("这一组的卡都不在复习中 · 到详情里恢复或撤回排除", "pause"); return; }
     state.rv = { docId: docId, name: d.name, list: q.list, idx: 0, flipped: false, done: false, ahead: q.ahead, reviewed: 0 };
     qs("#fcStage").hidden = false;
     renderReview();

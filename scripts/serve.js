@@ -102,7 +102,11 @@ function synthTo(voice, rate, pitch, text, file) {
     await t.ttsPromise(text, tmp);
     if (!fs.existsSync(tmp) || fs.statSync(tmp).size < 512) {
       try { fs.unlinkSync(tmp); } catch (e) {}
-      throw new Error("合成结果为空");
+      /* 服务端「成功」但一个字节都没给：实测是这款音色念不出这段文字
+         （英文音色 + 纯中文正文必现）。标 empty，让前端把原因说成「念不出」而不是「没响应」。 */
+      const err = new Error("该音色念不出这段文本（返回空音频）");
+      err.empty = true;
+      throw err;
     }
     fs.renameSync(tmp, file);
   })();
@@ -134,7 +138,15 @@ function serveTTS(req, res) {
         "Access-Control-Allow-Origin": "*"
       });
     });
-  }).catch((e) => send(res, 502, JSON.stringify({ code: 502, message: "合成失败 · " + ((e && e.message) || e) }), { "Content-Type": "application/json; charset=utf-8" }));
+  }).catch((e) => {
+    /* 状态码沿用 502（前端 fetchClip 只认 ok与否，不因此改变行为）；
+       body 里带 empty 标志，把「这款音色念不出」与「服务没响应」区分开 —— 两者的处置完全不同。 */
+    const empty = !!(e && e.empty);
+    send(res, 502, JSON.stringify({
+      code: 502, empty: empty,
+      message: empty ? String((e && e.message) || "返回空音频") : "合成失败 · " + ((e && e.message) || e)
+    }), { "Content-Type": "application/json; charset=utf-8" });
+  });
 }
 
 const MIME = {
@@ -348,6 +360,73 @@ function serveGeo(req, res) {
     _geoCache = { at: now, data: d };
     send(res, 200, JSON.stringify({ code: 0, data: d }), jh);
   });
+}
+
+/* ------------------------------------------------------------
+   /api/llm · OpenAI 兼容端点的本机透传（v2.23）
+   —— 成品里 main.js 会给所有响应补 Access-Control-Allow-Origin，浏览器没有这层：
+      直连 api.openai.com 这类服务时请求发得出去、响应读不回来，界面却把它说成
+      「连通失败」。开发态与静态托管因此和成品不一致，这里由本机代取一次对齐行为。
+   —— 三条硬约束：
+      ① 只接受本机回环发起的请求 —— /api/store 对局域网开放是双端同步的物理前提，
+         透传不能跟着开放，否则这台机器就成了任意内网请求的跳板；
+      ② Key 只随请求体进来、只写进上游的 Authorization 头：不落盘、不打日志、不缓存；
+      ③ 上游状态码与字节原样回吐（含 SSE 流），本路由零本地状态 ——
+         既写不进快照，也进不了同步。
+   ------------------------------------------------------------ */
+function llmPeerLocal(req) {
+  const a = String((req.socket && req.socket.remoteAddress) || "").replace(/^::ffff:/, "");
+  return a === "127.0.0.1" || a === "::1" || /^127\./.test(a);
+}
+function llmTarget(cfg) {
+  let base;
+  try { base = new URL(String(cfg.baseUrl || "")); } catch (e) { return null; }
+  if (base.protocol !== "https:" && base.protocol !== "http:") return null;
+  if (!base.hostname || base.username || base.password) return null;
+  const sub = String(cfg.path || "");
+  /* 白名单死守三个端点：透传不是通用代理，路径由不得前端随意给 */
+  if (!/^\/(models|chat\/completions|embeddings)$/.test(sub)) return null;
+  return {
+    mod: base.protocol === "https:" ? https : http,
+    host: base.hostname,
+    port: base.port || (base.protocol === "https:" ? 443 : 80),
+    path: base.pathname.replace(/\/+$/, "") + sub
+  };
+}
+function serveLlm(req, res) {
+  const jh = { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
+  const bad = (code, msg) => send(res, code, JSON.stringify({ code, message: msg }), jh);
+  if (!llmPeerLocal(req)) return bad(403, "llm 透传只对本机开放");
+  if (req.method === "GET" || req.method === "HEAD") {
+    return send(res, 200, JSON.stringify({ code: 0, data: { ok: true, via: "api/llm" } }), jh);
+  }
+  if (req.method !== "POST") return bad(405, "method not allowed");
+  readBody(req, 8 * 1024 * 1024).then((buf) => {
+    let cfg;
+    try { cfg = JSON.parse(buf.toString("utf8")) || {}; } catch (e) { return bad(400, "JSON 不合法"); }
+    const t = llmTarget(cfg);
+    if (!t) return bad(400, "接口地址或路径不合法（只代取 /models、/chat/completions、/embeddings）");
+    const payload = cfg.body ? JSON.stringify(cfg.body) : null;
+    const heads = {
+      Authorization: "Bearer " + String(cfg.key || ""),
+      Accept: "*/*", "User-Agent": "Mozilla/5.0 InkRead"
+    };
+    if (payload) { heads["Content-Type"] = "application/json"; heads["Content-Length"] = Buffer.byteLength(payload); }
+    const method = String(cfg.method || (payload ? "POST" : "GET")).toUpperCase();
+    const up = t.mod.request({ host: t.host, port: t.port, path: t.path, method, headers: heads, timeout: 120000 }, (r) => {
+      const out = { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
+      if (r.headers["content-type"]) out["Content-Type"] = r.headers["content-type"];
+      res.writeHead(r.statusCode, out);
+      r.pipe(res);
+    });
+    up.on("error", () => {
+      if (res.headersSent) return res.end();
+      bad(502, "上游不可达（地址、端口或网络问题）");
+    });
+    up.setTimeout(120000, () => up.destroy(new Error("llm upstream timeout")));
+    if (payload) up.write(payload);
+    up.end();
+  }).catch(() => bad(413, "请求体过大"));
 }
 
 /* ------------------------------------------------------------
@@ -1907,6 +1986,10 @@ function createServer() {
     }
     if (u.indexOf("/api/mossapi/") === 0) {
       return serveMossApi(req, res);
+    }
+    /* LLM 透传自带方法判断（GET 探测 / POST 代取），放在守卫之前 */
+    if (u.indexOf("/api/llm") === 0) {
+      return serveLlm(req, res);
     }
     if (u.indexOf("/api/parse/") === 0) {
       return serveParse(req, res);

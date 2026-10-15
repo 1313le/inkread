@@ -69,8 +69,7 @@ body[data-page="ai"] .chat-input-row .field:focus {
     0 0 0 3px var(--accent-wash);
 }
 
-/* ---------- C. 快捷条：溢出收成单行横扫，不折行、不错落 ---------- */
-body[data-page="ai"] .chat-quick { flex-wrap: nowrap; overflow-x: auto; }
+/* ---------- C. 快捷条：窄了折到下一行，不出横滚 ---------- */
 body[data-page="ai"] .chat-quick > * { flex: none; }
 
 /* ---------- B1. 上下两区统一列模板：中缝走同一条垂直线 ---------- */
@@ -329,10 +328,11 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
 
       <label class="field-label" for="mName">模型名称</label>
       <div class="key-row">
-        <input class="field" id="mName" list="mNameList" spellcheck="false" autocomplete="off" placeholder="deepseek-chat">
-        <datalist id="mNameList"></datalist>
+        <input class="field" id="mName" spellcheck="false" autocomplete="off" placeholder="deepseek-chat"
+               role="combobox" aria-expanded="false" aria-controls="mNameList" aria-autocomplete="list">
         <button class="btn btn-ghost btn-sm" id="mPull">拉取列表</button>
       </div>
+      <p class="field-hint" id="mNameHint">可直接敲字筛选，也可点「拉取列表」从该接口取回真实模型名。</p>
 
       <div class="hr"></div>
       <div class="adv-head">
@@ -376,6 +376,15 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
       <button class="btn btn-primary" id="modelOk">保存</button>
     </div>
   </div>
+</div>
+
+<!-- 模型候选：自绘可搜索列表。原生 <datalist> 三条做不到 —— 不随主题换色、
+     无法标注「当前值不在可用列表」、键盘上下与点击不统一。面板挂在 body 下而不是
+     .modal 里：.modal 的进场动画带 transform，会把 fixed 后代的定位祖先改成它自己，
+     再被弹层容器的 overflow 裁掉。 -->
+<div class="mdd" id="mNamePop" hidden>
+  <div class="ikp-list" id="mNameList" role="listbox" aria-label="模型候选列表"></div>
+  <div class="mdd-foot" id="mNameFoot"></div>
 </div>
 
 <div class="toast-root" id="toastRoot" aria-live="polite" aria-atomic="false"></div>
@@ -440,7 +449,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
       state.ctxDoc = sel.value || "";
       if (window.Brain) Brain.setDoc(state.ctxDoc || null);
       renderChatSub();
-      toast(state.ctxDoc ? "上下文 · 聚焦《" + (Brain.docTitle(state.ctxDoc) || "") + "》" : "上下文 · 全部书架", "brain");
+      toast(state.ctxDoc ? "上下文 · 聚焦《" + (Brain.docTitle(state.ctxDoc) || "未收录文档") + "》" : "上下文 · 全部书架", "brain");
     });
   }
 
@@ -759,11 +768,35 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   var MC = null;        /* 已保存的配置 */
   var draft = null;     /* 弹层草稿，取消即丢弃 */
   var mask = qs("#modelMask");
+  var POOL = [];        /* 当前模型候选：预设给的常用名，或刚从接口拉回来的真实列表 */
+  var POOL_FROM = "";   /* 候选从哪来，写进面板脚注 —— 「12 个」得说清是谁给的 */
+  var poolRows = [];    /* 面板里按输入过滤后渲染出来的行 */
+  var poolSel = -1;     /* 键盘高亮行（-1 = 没有） */
+  /* 过滤词只由「敲字」产生。输入框里已有值不等于在筛选：点「拉取列表」回来的
+     第一件事是把首个模型名填进框里，若拿它当过滤词，12 个候选会当场塌成 2 个，
+     用户看到的是「列表拉不到几个」而不是「已选好一个」。 */
+  var poolQ = "";
+  var LAST_OK = 0;      /* 最近一次测通的时刻 */
 
+  /* 服务商识别走归一化 host：多一个 /v1、大写、尾斜杠都不该掉成「自定义」——
+     一旦掉下去，预设高亮没了、候选也空了，用户只看到「要自己敲地址」。 */
   function providerOf(cfg) {
     var ps = (cfg && cfg.presets) || [];
-    var hit = ps.filter(function (p) { return p.baseUrl && p.baseUrl === cfg.baseUrl; })[0];
+    var k = API.modelPresetKey(cfg && cfg.baseUrl);
+    var hit = k && ps.filter(function (p) { return p.k === k; })[0];
     return hit || { k: "custom", name: "自定义", baseUrl: "", models: [] };
+  }
+
+  /* 失败分类 → 下一步做什么。只报一个 HTTP 状态码等于没报。 */
+  var KIND_HINT = {
+    auth: "密钥与接口地址不匹配：确认这把 Key 属于该服务商，复制时别带空格或换行。",
+    network: "地址或端口不通：本地 Ollama 请先确认已在运行；云端请核对 Base URL 的结尾。",
+    cors: "浏览器直连被跨域拦截：改用桌面版墨读，或用 node scripts/serve.js 起开发服务（自带本机透传）。",
+    unsupported: "该服务没有 /models 列表端点：手填模型名即可，「测试连接」会改用一次最小对话验证连通。"
+  };
+  function testedAgo() {
+    var m = Math.round((Date.now() - LAST_OK) / 60000);
+    return m < 1 ? "刚刚测通" : m < 60 ? m + " 分钟前测通" : Math.round(m / 60) + " 小时前测通";
   }
   function presetOf(k) {
     return (MC.presets || []).filter(function (p) { return p.k === k; })[0] ||
@@ -782,7 +815,9 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
       '<div class="mm-row"><span class="mm-k">接口</span><span class="mm-v">' + esc(MC.baseUrl || "未填写") + "</span></div>" +
       '<div class="mm-row"><span class="mm-k">模型</span><span class="mm-v">' + esc(MC.model || "未填写") + "</span></div>" +
       '<div class="mm-row"><span class="mm-k">密钥</span><span class="mm-v">' + esc(maskKey(MC.key)) + "</span></div>";
-    qs("#mmHint").textContent = MC.key ? "密钥只存本机" : "尚未填写 API Key";
+    qs("#mmHint").textContent = !MC.key ? "尚未填写 API Key"
+      : LAST_OK ? "已保存 · " + (MC.model || "未填写") + " · " + testedAgo() + " · 密钥只存本机"
+      : "密钥只存本机";
     qs("#chatSub").innerHTML = icon("cloud", 12) + esc(p.name + " · " + (MC.model || "未配置")) + " · 记忆已接入";
   }
 
@@ -795,12 +830,10 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
       b.addEventListener("click", function () { usePreset(b.dataset.pv); });
     });
     var cur = presetOf(draft.preset);
-    qs("#mNameList").innerHTML = (cur.models || []).map(function (m) {
-      return '<option value="' + esc(m) + '"></option>';
-    }).join("");
     qs("#pvNote").textContent = (draft.preset === "custom" || !cur.baseUrl)
       ? "自定义：接口地址、密钥、模型名都由你填写。"
       : cur.name + "：接口地址已填好，密钥与模型名请自行确认。";
+    if (!qs("#mNamePop").hidden) renderPool();
   }
 
   /* 点预设只补地址与候选模型名；已填过的地址不覆盖，免得抹掉用户手改的内容 */
@@ -808,12 +841,125 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     var p = presetOf(k);
     draft.preset = k;
     if (p.baseUrl) { draft.baseUrl = p.baseUrl; qs("#mBase").value = p.baseUrl; }
+    setPool(p.models || [], "预设 " + p.name + " 常用模型");
     var typed = qs("#mName").value.trim();
     if (p.models && p.models.length && p.models.indexOf(typed) < 0) {
       draft.model = p.models[0];
       qs("#mName").value = p.models[0];
     }
     paintChips();
+  }
+
+  /* 地址是用户从服务商官网粘来的 —— 认得出是谁，就把规范化地址、预设高亮、
+     常用模型名一次补齐（force 时才改写输入框，敲字中途不动它）。
+     认不出也必须说实话：把地址从 DeepSeek 改成自家网关/本地 Ollama 之后，
+     卡片上还写着「DeepSeek」比写着「自定义」更误导人。 */
+  function syncProvider(force) {
+    var k = API.modelPresetKey(qs("#mBase").value) || "custom";
+    if (!draft) return "";
+    if (k !== draft.preset) {
+      draft.preset = k;
+      var p = presetOf(k);
+      setPool(p.models || [], "预设 " + p.name + " 常用模型");
+      if (!qs("#mName").value.trim() && p.models && p.models.length) qs("#mName").value = p.models[0];
+    }
+    if (force && k !== "custom") {
+      var pb = presetOf(k).baseUrl;
+      if (pb) { draft.baseUrl = pb; qs("#mBase").value = pb; }
+    }
+    paintChips();
+    return k;
+  }
+
+  function setPool(list, from) {
+    POOL = (list || []).filter(function (m) { return typeof m === "string" && m; });
+    POOL_FROM = from || "";
+    poolSel = -1;
+    poolQ = "";
+    if (!qs("#mNamePop").hidden) renderPool();
+  }
+  function inPool(v) {
+    var s = String(v || "").trim().toLowerCase();
+    return !!s && POOL.some(function (m) { return m.toLowerCase() === s; });
+  }
+
+  /* ============ 模型候选面板 ============
+     自绘可搜索列表：随主题换色、键盘上下与点击同一套行样式（借 .ikp-item），
+     并且能如实标出「当前值不在可用列表」再给一枚「改用」—— datalist 三样都做不到。 */
+  function hi(m) {
+    var q = poolQ.trim();
+    if (!q) return esc(m);
+    var i = m.toLowerCase().indexOf(q.toLowerCase());
+    if (i < 0) return esc(m);
+    return esc(m.slice(0, i)) + '<span class="mdd-mark">' + esc(m.slice(i, i + q.length)) + "</span>" + esc(m.slice(i + q.length));
+  }
+  function renderPool() {
+    var cur = qs("#mName").value.trim();
+    var q = poolQ.trim().toLowerCase();
+    poolRows = POOL.filter(function (m) { return !q || m.toLowerCase().indexOf(q) >= 0; });
+    if (poolSel >= poolRows.length) poolSel = poolRows.length - 1;
+    var html = "";
+    if (cur && !inPool(cur)) {
+      html += '<div class="mdd-cur">' + icon("alert-triangle", 13) +
+        "<span>当前值 <b>" + esc(cur) + "</b> 不在可用列表</span>" +
+        (POOL[0] ? '<button type="button" class="mdd-use" data-m="' + esc(POOL[0]) + '">改用 ' + esc(POOL[0]) + "</button>" : "") +
+        "</div>";
+    }
+    html += poolRows.map(function (m, i) {
+      return '<div class="ikp-item' + (i === poolSel ? " on" : "") + '" role="option" data-m="' + esc(m) +
+        '" aria-selected="' + (i === poolSel) + '"><span class="ikp-t">' + hi(m) + "</span>" +
+        (m.toLowerCase() === cur.toLowerCase() ? icon("check", 13) : "") + "</div>";
+    }).join("");
+    if (!html) html = '<div class="ikp-empty">没有匹配的模型 —— 直接手填也行</div>';
+    qs("#mNameList").innerHTML = html;
+    qs("#mNameFoot").textContent = POOL.length
+      ? POOL_FROM + " · 共 " + POOL.length + " 个 · ↑↓ 选择 · Enter 确认 · Esc 关闭"
+      : "尚无候选 · 点「拉取列表」从接口取回真实模型名，或直接手填";
+  }
+  function placePool() {
+    var pop = qs("#mNamePop");
+    var r = qs("#mName").getBoundingClientRect();
+    var w = Math.max(Math.round(r.width), 260);
+    pop.style.width = w + "px";
+    var h = pop.offsetHeight || 0;
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    var top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);  /* 底下放不下就朝上开 */
+    pop.style.left = left + "px";
+    pop.style.top = Math.round(top) + "px";
+  }
+  function openPool() {
+    if (mask.style.display !== "grid" || !qs("#mNamePop").hidden) return;
+    renderPool();
+    qs("#mNamePop").hidden = false;
+    placePool();
+    qs("#mName").setAttribute("aria-expanded", "true");
+  }
+  function closePool() {
+    if (qs("#mNamePop").hidden) return;
+    qs("#mNamePop").hidden = true;
+    qs("#mName").setAttribute("aria-expanded", "false");
+    poolSel = -1;
+  }
+  function moveSel(d) {
+    if (qs("#mNamePop").hidden) openPool();
+    if (!poolRows.length) return;
+    poolSel = (poolSel + d + poolRows.length) % poolRows.length;
+    renderPool();
+    var list = qs("#mNameList");
+    var it = list.querySelectorAll(".ikp-item")[poolSel];
+    if (!it) return;
+    if (it.offsetTop < list.scrollTop) list.scrollTop = it.offsetTop;
+    else if (it.offsetTop + it.offsetHeight > list.scrollTop + list.clientHeight)
+      list.scrollTop = it.offsetTop + it.offsetHeight - list.clientHeight;
+  }
+  /* 选中一个模型名：改完立刻落盘（前提是这轮已经测通过），
+     否则卡片上写的和候选里点的会各说一套。 */
+  function pickPool(m) {
+    qs("#mName").value = m;
+    poolQ = "";
+    closePool();
+    if (LAST_OK) saveTested(readForm());
   }
 
   function openModel() {
@@ -842,11 +988,14 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     qs("#ttsKey").placeholder = tc.hasKey ? "已保存（重新输入可覆盖）" : "留空则只用本机声线";
     qs("#ttsModel").value = tc.model || "moss-tts-1.5-flash";
     qs("#ttsState").textContent = tc.hasKey ? "已配置 · 云音色可用" : "未配置 · 仅本机声线";
+    var pv = providerOf(MC);
+    setPool(pv.models || [], "预设 " + pv.name + " 常用模型");
+    qs("#mNameHint").textContent = "可直接敲字筛选，也可点「拉取列表」从该接口取回真实模型名。";
     paintChips();
     mask.style.display = "grid";
     qs("#mBase").focus();
   }
-  function closeModel() { mask.style.display = "none"; draft = null; }
+  function closeModel() { mask.style.display = "none"; closePool(); draft = null; }
 
   function readForm() {
     return {
@@ -860,6 +1009,17 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     };
   }
 
+  /* 落盘这一份配置并刷新卡片：测通与点「改用」都走它，卡片与表单不会各说一套。
+     三项必填缺一律不写 —— 半成品配置落进去，别处读到的就是「已配置」的假象。 */
+  async function saveTested(cfg) {
+    if (!cfg.baseUrl || !cfg.key || !cfg.model) return null;
+    await API.saveModelConfig(cfg);
+    MC = (await API.fetchModelConfig()).data;
+    if (draft) draft.model = cfg.model;
+    renderModelCard();
+    return MC;
+  }
+
   async function testCfg(cfg, btn) {
     var box = qs("#mTest");
     box.hidden = false;
@@ -870,17 +1030,68 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     if (btn) btn.disabled = false;
     var d = r.data || {};
     if (d.ok) {
-      box.className = "mtest ok";
-      box.innerHTML = icon("circle-check", 13) + "连通正常 · " + d.latency + "ms · 可用模型 " +
-        ((d.models || []).length) + ' 个<span class="mtest-note">' + esc(d.note || "") + "</span>";
-      /* 拉回来的模型名直接进候选，省得手敲 */
+      /* 测通即存：以前测完还得再点一次「保存」，用户理解成「测好就算配好了」，
+         关掉弹层才发现一项都没落盘（问题一的第 ③④ 条根因）。 */
       if (d.models && d.models.length) {
-        qs("#mNameList").innerHTML = d.models.map(function (m) { return '<option value="' + esc(m) + '"></option>'; }).join("");
+        setPool(d.models, "从接口拉取 · " + d.models.length + " 个");
         if (!qs("#mName").value.trim()) qs("#mName").value = d.models[0];
       }
+      var final = readForm();
+      var k = API.modelPresetKey(final.baseUrl);
+      if (k) final.preset = k;
+      await API.saveModelConfig(final);
+      MC = (await API.fetchModelConfig()).data;
+      /* 读回比对：setModelCfg 里 localStorage 写失败是会静静吞掉的（配额满 / 隐私模式），
+         不比对就只能对着没落盘的配置说「已保存」—— 问题一第 ④ 条的另一半。 */
+      var wrote = !!(MC && MC.baseUrl === final.baseUrl && MC.key === final.key && MC.model === final.model);
+      draft = Object.assign(draft || {}, final);
+      LAST_OK = wrote ? Date.now() : 0;
+      paintChips();
+      renderModelCard();
+      var off = final.model && POOL.length && !inPool(final.model);
+      if (wrote) {
+        box.className = "mtest ok";
+        box.innerHTML = icon("circle-check", 13) + "已保存 · " + esc(final.model) + " · 刚刚测通 · " +
+          d.latency + 'ms<span class="mtest-note">' + esc(d.note || "") +
+          (off ? " · 模型名不在拉回来的列表里，可在候选上方点「改用」" : "") + "</span>";
+        qs("#mNameHint").textContent = "已保存到本机 · 改了地址或密钥再测一次即覆盖。";
+      } else {
+        box.className = "mtest err";
+        box.innerHTML = icon("alert-triangle", 13) + "连通成功，但没能存进本机 · " + d.latency +
+          'ms<span class="mtest-note">本机存储写不进去（配额已满或浏览器隐私模式）。清出空间或换普通窗口，' +
+          '再点一次「测试连接」即会自动保存。</span>';
+        qs("#mNameHint").textContent = "未保存 · 上面这条是存不进去，不是模型的问题。";
+      }
     } else {
+      /* 失败不落盘：半成品留在草稿里，下次打开还在，但不伪装成已配置 */
       box.className = "mtest err";
-      box.innerHTML = icon("alert-triangle", 13) + esc(d.reason || "连通失败，请检查地址与密钥");
+      box.innerHTML = icon("alert-triangle", 13) + esc(d.reason || "连通失败，请检查地址与密钥") +
+        (KIND_HINT[d.kind] ? '<span class="mtest-note">' + esc(KIND_HINT[d.kind]) + "</span>" : "");
+      qs("#mNameHint").textContent = "未保存 · 按上面这条改好再测。";
+    }
+    if (!qs("#mNamePop").hidden) renderPool();
+  }
+
+  /* 只拉列表、不兼职测连通：成功就把真实模型名交给候选面板，
+     失败按 kind 给下一步 —— 拉不到列表和连不上是两件事。 */
+  async function pullModels() {
+    var btn = qs("#mPull");
+    var hint = qs("#mNameHint");
+    btn.disabled = true; btn.textContent = "拉取中…";
+    var r = await API.fetchModels(readForm());
+    btn.disabled = false; btn.textContent = "拉取列表";
+    var d = r.data || {};
+    if (d.ok && d.models.length) {
+      setPool(d.models, "从接口拉取 · " + d.models.length + " 个");
+      if (!qs("#mName").value.trim()) qs("#mName").value = d.models[0];
+      openPool();
+      var cur = qs("#mName").value.trim();
+      hint.textContent = "已拉到 " + d.models.length + " 个真实模型名（" + d.latency + "ms）。" +
+        (cur && !inPool(cur) ? "当前值不在列表里，已在候选上方标出。" : "");
+    } else if (d.ok) {
+      hint.textContent = "该接口不提供模型列表端点 · 手填模型名即可，「测试连接」会用一次最小对话验证连通。";
+    } else {
+      hint.textContent = (d.reason || "拉取失败") + (KIND_HINT[d.kind] ? " —— " + KIND_HINT[d.kind] : "");
     }
   }
 
@@ -890,6 +1101,43 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   qs("#modelCancel").addEventListener("click", closeModel);
   mask.addEventListener("click", function (e) { if (e.target === mask) closeModel(); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && mask.style.display === "grid") closeModel(); });
+
+  /* 候选面板交互：mousedown 拦默认 —— 点行不抢输入框焦点，面板才不会先被 blur 关掉。
+     Esc 只收面板不收整窗（stopPropagation 挡住上面的整窗 Esc）。 */
+  qs("#mName").addEventListener("input", function () {
+    poolQ = this.value;
+    poolSel = -1;
+    if (qs("#mNamePop").hidden) openPool(); else renderPool();
+  });
+  /* 重新把光标放回输入框 = 重新看全部候选（上一次的筛选词作废） */
+  qs("#mName").addEventListener("focus", function () { if (POOL.length) { poolQ = ""; openPool(); } });
+  qs("#mName").addEventListener("keydown", function (e) {
+    if (e.key === "ArrowDown") { e.preventDefault(); moveSel(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveSel(-1); }
+    else if (e.key === "Enter") {
+      if (!qs("#mNamePop").hidden && poolSel >= 0 && poolRows[poolSel]) { e.preventDefault(); pickPool(poolRows[poolSel]); }
+    } else if (e.key === "Escape") {
+      if (!qs("#mNamePop").hidden) { e.preventDefault(); e.stopPropagation(); closePool(); }
+    }
+  });
+  qs("#mNameList").addEventListener("mousedown", function (e) {
+    if (e.target.closest && e.target.closest(".ikp-item, .mdd-use")) e.preventDefault();
+  });
+  qs("#mNameList").addEventListener("click", function (e) {
+    var use = e.target.closest && e.target.closest(".mdd-use");
+    if (use && use.dataset.m) { pickPool(use.dataset.m); return; }
+    var it = e.target.closest && e.target.closest(".ikp-item");
+    if (it && it.dataset.m) pickPool(it.dataset.m);
+  });
+  /* 地址一改就认服务商：敲字过程中只更新高亮与候选（force=false 不动输入框），
+     失焦时再把地址规范成标准写法 —— 一边打字一边改写用户的输入框是另一回事。 */
+  qs("#mBase").addEventListener("input", function () { syncProvider(false); });
+  qs("#mBase").addEventListener("change", function () { syncProvider(true); });
+  document.addEventListener("mousedown", function (e) {
+    if (qs("#mNamePop").hidden || !e.target.closest) return;
+    if (!e.target.closest("#mNamePop, #mName, #mPull")) closePool();
+  });
+  window.addEventListener("resize", function () { if (!qs("#mNamePop").hidden) placePool(); });
 
   qs("#mKeyEye").addEventListener("click", function () {
     var inp = qs("#mKey");
@@ -911,13 +1159,22 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   });
 
   qs("#mTestBtn").addEventListener("click", function () { testCfg(readForm(), qs("#mTestBtn")); });
-  qs("#mPull").addEventListener("click", function () { testCfg(readForm(), qs("#mPull")); });
+  /* 拉列表只拉列表：它不该顺带做一次「连通测试」，更不该在服务商没有 /models 时
+     把一次 ping 的结论当成模型列表（问题一的头一条根因就是两个按钮同走一条路）。 */
+  qs("#mPull").addEventListener("click", function () { pullModels(); });
   qs("#mmTest").addEventListener("click", async function () {
     var b = qs("#mmTest");
     b.disabled = true; b.textContent = "测试中…";
     var r = await API.testModel(MC);
     b.disabled = false; b.textContent = "测试连接";
-    toast(r.data && r.data.ok ? "连通正常 · " + r.data.latency + "ms" : (r.data && r.data.reason) || "连通失败", "zap");
+    var d = r.data || {};
+    if (d.ok) {
+      LAST_OK = Date.now();
+      renderModelCard();
+      toast("连通正常 · " + d.latency + "ms · " + (d.models && d.models.length ? "可用模型 " + d.models.length + " 个" : "已记为刚刚测通"), "zap");
+    } else {
+      toast((d.reason || "连通失败") + (KIND_HINT[d.kind] ? " —— " + KIND_HINT[d.kind] : ""), "alert-triangle");
+    }
   });
 
   qs("#ttsPull").addEventListener("click", async function () {

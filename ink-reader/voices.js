@@ -28,11 +28,27 @@
     "xiaoxiao", "xiaoyi", "tingting", "xiaomeng", "meijia", "lili",
     "female", "woman", "女"];
 
-  function hitAny(hay, keys) {
-    for (var i = 0; i < keys.length; i++) {
-      if (hay.indexOf(String(keys[i]).toLowerCase()) >= 0) return true;
+  /* 声线名里的性别判定 —— 必须整词命中，不能用子串。
+     「female」里嵌着「male」、「alexandra」里嵌着「alex」、「woman」里嵌着「man」：
+     子串判定会把女声认成男声。这不是理论风险，Google 系声线的正式名就叫
+     “Google UK English Female / Male”，Windows 上真有 “Alexandra”。
+     判不出性别的名字返回 ""，交给上层当「未标性别」的中性兜底 —— 
+     宁可不知道，也不能知道错。 */
+  function sexOf(hay) {
+    hay = String(hay || "").toLowerCase();
+    /* 拉丁按词切，CJK 按字切（关键词里的「男」「女」是单字） */
+    var toks = hay.match(/[a-z0-9]+|[^\x00-\xff]/g) || [];
+    function whole(keys) {
+      for (var j = 0; j < toks.length; j++) {
+        for (var i = 0; i < keys.length; i++) if (toks[j] === String(keys[i]).toLowerCase()) return j;
+      }
+      return -1;
     }
-    return false;
+    var mi = whole(MALE), fi = whole(FEMALE);
+    if (mi < 0 && fi < 0) return "";
+    if (mi < 0) return "f";
+    if (fi < 0) return "m";
+    return mi <= fi ? "m" : "f";      /* 极少见：名字里两种性别词都有，按先出现的那个判 */
   }
   /* 文本语言：假名 > 汉字 > 拉丁 —— 日文含汉字，必须先判假名 */
   function langOf(text) {
@@ -49,11 +65,32 @@
     if (p === "ja") return list.filter(function (x) { return /^zh/i.test(x.lang || ""); });
     return [];
   }
+  /* 神经端点的实测行为（v2.23 取证，非推测）：非中日韩音色拿到「一个拉丁字母都没有」的正文时，
+     服务端不报错，直接回 0 字节空音频。于是 32 款目录里的 17 款英文音色在中文书上「静静失败」，
+     界面只能写成「神经合成未响应」—— 读者以为是服务器挂了，其实是选了念不出中文的音色。
+     中英混排是能念的（实测 16KB），所以判据只看「这段有没有该音色能发的音素」，
+     不看语言标签是否严格相等：宁可按实测边界判，不按下拉框里的名字判。 */
+  function canSpeak(v, text) {
+    var s = String(text || "");
+    if (!s.trim()) return false;
+    var fam = String((v && v.lang) || (v && v.id) || "").toLowerCase().slice(0, 2);
+    if (fam === "zh" || fam === "ja" || fam === "ko") return true;   /* 汉字／假名都念得出，中英混排实测有声 */
+    return /[A-Za-z]/.test(s);                                        /* 其余音色没有拉丁字母就只剩静音 */
+  }
+  /* 兜底声线按「正文语言」挑，不按所选音色的语言 ——
+     读的是中文书、手上却选了款英文音色时，要的是「能把这段念出来的人」，
+     不是「和那款音色同语言、同样念不出的人」。试听路径两者等价（样文本就是该语言写的），
+     所以这条只改朗读侧的行为。 */
+  function wantLang(v, text) {
+    var s = String(text || "");
+    if (/[A-Za-z\u3040-\u30ff\u4e00-\u9fff]/.test(s)) return langOf(s);
+    return (v && v.lang) || "en";        /* 整段一个字母/汉字都没有（纯数字标点）→ 回落到音色自己的语言 */
+  }
   /* 挑声线：返回 {voice, exact}。exact=false 表示本机没有该语言的声线 */
   function pickSys(v, text, voices) {
     var list = voices || (window.speechSynthesis && window.speechSynthesis.getVoices()) || [];
     if (!list.length) return { voice: null, exact: false };
-    var want = (v && v.lang) || langOf(text);
+    var want = wantLang(v, text);
     var pool = langPool(list, want);
     if (!pool.length) {
       /* 本机没有目标语言的声线：只允许「同为拉丁语系」的兜底，绝不拿中文声线硬念英文 */
@@ -79,25 +116,35 @@
         }
       }
     }
-    var keys = (v && v.gender === "m") ? MALE : FEMALE;
-    var bySex = pool.filter(function (x) {
-      var h = (String(x.name || "") + " " + String(x.voiceURI || "")).toLowerCase();
-      return hitAny(h, keys);
+    var want = (v && v.gender === "m") ? "m" : "f";
+    var bySex = [], unlabeled = [];
+    pool.forEach(function (x) {
+      var s = sexOf(String(x.name || "") + " " + String(x.voiceURI || ""));
+      if (s === want) bySex.push(x);
+      else if (!s) unlabeled.push(x);
     });
-    return { voice: bySex[0] || pool[0], exact: exact };
+    /* 性别绝不跨：宁可返回 null 让上层如实说「本机没有这款性别的声线」，
+       也不拿标了另一性别的声音顶上去 —— 旧版这里的 pool[0] 兜底，
+       正是用户反馈「男声念成女声」的直接来源。没标性别的声线不算跨。 */
+    return { voice: bySex[0] || unlabeled[0] || null, exact: exact };
   }
-  /* 候选声线序列：主选 + 同池同性别的其它声线（主选哑火时挨个试） */
+  /* 候选声线序列：主选 + 同池同性别的其它声线 + 未标性别的（主选哑火时挨个试）。
+     明确标了另一性别的声线一律不进候选 —— 跨性别不是「兜底」，是「读错了」。 */
   function candidates(v, text, voices) {
     var list = voices || (window.speechSynthesis && window.speechSynthesis.getVoices()) || [];
     var out = [];
     function push(x) { if (x && out.indexOf(x) < 0) out.push(x); }
-    var p = pickSys(v, text, list);
-    push(p.voice);
-    var pool = langPool(list, (v && v.lang) || langOf(text));
-    var keys = (v && v.gender === "m") ? MALE : FEMALE;
-    pool.filter(function (x) { return hitAny((String(x.name || "") + " " + String(x.voiceURI || "")).toLowerCase(), keys); })
-      .forEach(push);
-    pool.forEach(push);
+    var pool = langPool(list, wantLang(v, text));
+    var want = (v && v.gender === "m") ? "m" : "f";
+    var bySex = [], unlabeled = [];
+    pool.forEach(function (x) {
+      var s = sexOf(String(x.name || "") + " " + String(x.voiceURI || ""));
+      if (s === want) bySex.push(x);
+      else if (!s) unlabeled.push(x);
+    });
+    push(pickSys(v, text, list).voice);
+    bySex.forEach(push);
+    unlabeled.forEach(push);
     return out;
   }
 
@@ -367,7 +414,7 @@
     list: list, meta: meta, all: allVoices,
     pairFor: pairFor, pairName: pairName, usedBy: usedBy,
     /* 声线挑选：api.js 与试听共用 */
-    langOf: langOf, pickSys: pickSys, candidates: candidates,
+    langOf: langOf, pickSys: pickSys, candidates: candidates, sexOf: sexOf, canSpeak: canSpeak,
     /* 神经合成地址 */
     ttsUrl: ttsUrl, ttsUrlOf: ttsUrlOf,
     /* 云音色（Moss） */
