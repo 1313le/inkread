@@ -24,6 +24,10 @@
        否则 pointerdown 里的立即捕获会把页签/按钮的 click 一并劫走。
      · 吸附动画用 WAAPI（不写 transition 属性）—— 免得被宿主样式表的
        transition 声明覆盖（页内样式的特异性更高，改不动）。
+     · 「浮起 → 停靠」那一下叠一层液桥剪影（v2.23.2）：目标边先凝一滴候着，窗前沿伸出
+       另一滴，两滴互相拉长、触到后并成一条颈 —— 整层套 feGaussianBlur + α 阈值。
+       filter 只许落在这层一次性剪影上，窗体本身绝不进滤镜 —— filter 会造包含块，
+       窗内 position:fixed 当场被关住。
 
    用法：
      var d = InkDock.create(qs("#notesWin"), {
@@ -183,6 +187,25 @@
   }
   function clamp(v, a, b) { return Math.max(a, Math.min(v, b)); }
 
+  /* ---------- 液桥滤镜（全篇一份，随首次吸附注入） ----------
+     feGaussianBlur 把剪影的硬边化开，feColorMatrix 只改 alpha：A' = 25A − 12.5
+     → 阈值落在 A=0.5，也就是**原边位置**：直边不缩不涨，只有两形之间的凹角被填成颈缩。
+     color-interpolation-filters 必须写 sRGB —— 默认 linearRGB 会先把颜色搬到线性空间，
+     阈值点跟着漂移，剪影边缘会莫名胖一圈。 */
+  var GOO_SIG = 9;
+  function gooDef() {
+    if (document.getElementById("inkGoo")) return;
+    var w = document.createElement("div");
+    w.setAttribute("aria-hidden", "true");
+    w.style.cssText = "position:absolute;width:0;height:0;overflow:hidden";
+    w.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><defs>'
+      + '<filter id="inkGoo" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">'
+      + '<feGaussianBlur in="SourceGraphic" stdDeviation="' + GOO_SIG + '" result="b"/>'
+      + '<feColorMatrix in="b" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 25 -12.5"/>'
+      + '</filter></defs></svg>';
+    document.body.appendChild(w);
+  }
+
   function create(el, opts) {
     if (!el) return null;
     opts = opts || {};
@@ -218,6 +241,10 @@
     var GAP = 8;                                   /* 浮动态离边最小距离 */
     var narrow = opts.narrow || function () { return false; };
     var maxTop = opts.maxTop || function () { return 0; };
+    /* 停靠态自己的上边界。maxTop 说的是「铺满 / 窄屏时让开本页界栏」，量的是容器里那一行；
+       全局顶栏不在任何容器内，而视口宿主的 box 原点就是屏幕左上，
+       停靠若不让出这一条，顶栏右端的最小化/最大化/关闭与外观设置会被整个盖住。 */
+    var dockTop = opts.dockTop || function () { return 0; };
     /* 只有真容器才需要「让正文让位」的记账；视口宿主跳过（见 viewportHost）。
        nodeType 是这里唯一的判别 —— 假容器没有 DOM 身份。
        opts.claim 让 fixed 浮层把「让位记账」挂到真容器上：贴边常驻时正文照旧让开，
@@ -281,8 +308,8 @@
       }
       if (st.state === "max") return { x: 0, y: t, w: b.W, h: Math.max(minH, b.H - t), mode: "max" };
       if (st.state === "docked") {
-        var w = dockWNow();
-        return { x: st.side === "right" ? b.W - w : 0, y: 0, w: w, h: b.H, mode: "docked" };
+        var w = dockWNow(), dt = dockTop();
+        return { x: st.side === "right" ? b.W - w : 0, y: dt, w: w, h: Math.max(minH, b.H - dt), mode: "docked" };
       }
       var f = st.f;
       f.w = Math.round(clamp(f.w, minW, Math.max(minW, b.W - GAP * 2)));
@@ -317,6 +344,7 @@
       ck.__inkDocks = list;
     }
     var lastKey = "";
+    var prevMode = "";            /* 上一次落地的形态：液桥只认「不是停靠 → 停靠」这一条边 */
     /* 面板被宿主收起时（批注 data-notes=closed / 草稿纸 data-open=off，都走 visibility:hidden）
        不能再占边：停靠会在宿主上挂 data-dock-* 与 --dock-w-* 让正文让位，面板一收，
        那份让位就成了正文旁边一条「关不掉的空栏」。
@@ -368,6 +396,7 @@
       var props = contentH ? ["left", "top", "width"] : ["left", "top", "width", "height"];
       if (contentH) el.style.height = "";
       var changed = props.some(function (p) { return el.style[p] !== want[p]; });
+      var run = null;
       /* 刚由 hidden 转可见时 getBoundingClientRect 全是 0，拿它当动画起点会演出
          「从左上角长出来」—— 那种时刻直接落到位，不要补间。 */
       if (anim && changed && !reduceMotion() && from.width > 0 && from.height > 0) {
@@ -377,8 +406,13 @@
         var k0 = {}, k1 = {};
         props.forEach(function (p) { k0[p] = Math.round(now[p]) + "px"; k1[p] = want[p]; el.style[p] = want[p]; });
         try {
-          el.animate([k0, k1], { duration: ANIM, easing: "cubic-bezier(.2,.8,.3,1)" });
-        } catch (e) {}
+          run = el.animate([k0, k1], { duration: ANIM, easing: "cubic-bezier(.2,.8,.3,1)" });
+        } catch (e) { run = null; }
+        /* 液桥只认「浮着 → 停靠」这一条边：脱开、铺满都不是融合，硬套只会让手感变黏。
+           剪影层读的就是上面这条动画的 progress（缓动已含），与窗体同源补间，不会各走各的。 */
+        if (run && g.mode === "docked" && prevMode !== "docked") {
+          snapGoo(run, from, { l: hb.left + g.x, t: hb.top + g.y, w: g.w, h: g.h }, st.side);
+        }
       } else {
         props.forEach(function (p) { el.style[p] = want[p]; });
       }
@@ -389,7 +423,129 @@
         if (opts.onState) opts.onState({ state: g.mode, side: st.side, w: g.w, h: g.h });
       }
       if (opts.onLayout) opts.onLayout({ state: g.mode, side: st.side, w: g.w, h: g.h });
+      prevMode = g.mode;
       syncBar();
+    }
+
+    /* ---------- 停靠融合：剪影层液桥（v2.23.2） ----------
+       观感目标：贴边那一下不像「一块矩形滑进槽里」，而像两滴水互相拉扯后并成一滴。
+       四块剪影同处一层，全部由「窗前沿离目标边还有多远」这一个量驱动：
+         g-mv  窗前沿的一条供块（藏在实窗底下，只负责往接缝外漏一点 α）
+         g-a   目标边伸出的那一滴（起手就有，越近伸得越长）
+         g-b   窗前沿伸出的那一滴（两沿相距 ≤ TWIN 才出现，否则隔得太远只是两条无关的墨）
+         g-an  目标角上的一截水珠桩（给 a 一个落点，免得液桥在屏幕边被硬切成断面）
+       整层套 #inkGoo（模糊 σ + α 阈值）→ 两滴触到后中间自动凹出颈缩，先分后合。
+       三条红线：
+         ① filter 只落在这层一次性剪影上，窗体本身绝不进滤镜 —— 见 styles.css 同段注释。
+         ② 剪影层每帧按四块的并集 + 3σ 重算方框（并夹在宿主内），不是整块宿主：
+            模糊的成本就是面积，通高一条带是 854×200，收紧后约 280×150。
+         ③ 时长与吸附动画同寿（ANIM），走完自己摘除；reduceMotion 时整段不进这里。
+       两个数是从消融里量出来的，不是拍的：
+         · 细过 ~18px 的条在 σ=9 下峰值 α≈0.21 < 0.5，阈值直接抹掉 → 最细 16 起步，
+           靠 prox 长粗；
+         · 剪影填充必须不透明，材质透明度只能放在 filter 之后当图层 opacity（CSS 顺序：
+           filter → clip → mask → opacity）。
+       补间进度读窗体那条 WAAPI 动画的 getComputedTiming().progress（缓动已含），
+       剪影与窗体因此同源；读不到就退回按墙钟线性，误差只在桥的长短上，看不出来。 */
+    var PAD = GOO_SIG * 3, AW = 26, TWIN = 260, FADE = 40;
+    var gooNode = null, gooRaf = 0;
+    function killGoo() {
+      if (gooRaf) { cancelAnimationFrame(gooRaf); gooRaf = 0; }
+      if (gooNode && gooNode.parentNode) gooNode.parentNode.removeChild(gooNode);
+      gooNode = null;
+    }
+    function snapGoo(anim, srcRect, tgt, side) {
+      killGoo();
+      gooDef();
+      var s = { l: srcRect.left, t: srcRect.top, w: srcRect.width, h: srcRect.height };
+      var right = side !== "left";
+      var parent = el.parentElement;
+      if (!parent) return;
+      var hb = host.getBoundingClientRect();
+      var layer = document.createElement("div");
+      layer.className = "dock-goo";
+      layer.dataset.goo = id;
+      layer.setAttribute("aria-hidden", "true");
+      layer.style.position = inView ? "fixed" : "absolute";
+      layer.style.zIndex = String(Math.max(1, rec.slot - 1));   /* 永远压在窗体底下：实窗是主角 */
+      layer.innerHTML = '<i class="g-mv"></i><i class="g-a"></i><i class="g-b"></i><i class="g-an"></i>';
+      parent.appendChild(layer);
+      /* 剪影层与窗体同一个定位上下文：absolute 的原点是 offsetParent 的 padding 边
+         （与 originDelta() 同一把尺），fixed 的原点就是视口。 */
+      var ox = 0, oy = 0;
+      if (!inView && layer.offsetParent) {
+        var op = layer.offsetParent, ocs = getComputedStyle(op), ob = op.getBoundingClientRect();
+        ox = ob.left + (+parseFloat(ocs.borderLeftWidth) || 0);
+        oy = ob.top + (+parseFloat(ocs.borderTopWidth) || 0);
+      }
+      var cs = layer.children;
+      function box(n, l, t, w, h) {
+        n.style.left = Math.round(l) + "px"; n.style.top = Math.round(t) + "px";
+        n.style.width = Math.round(w) + "px"; n.style.height = Math.round(h) + "px";
+      }
+      var start = performance.now();
+      function frame(now) {
+        gooRaf = 0;
+        if (!gooNode) return;
+        var p = clamp((now - start) / ANIM, 0, 1);
+        if (anim) {
+          try {
+            var cp = anim.effect.getComputedTiming().progress;
+            if (typeof cp === "number" && isFinite(cp)) p = clamp(cp, 0, 1);
+          } catch (e) {}
+        }
+        var L = s.l + (tgt.l - s.l) * p, T = s.t + (tgt.t - s.t) * p,
+            W = s.w + (tgt.w - s.w) * p, H = s.h + (tgt.h - s.h) * p;
+        var outX = right ? tgt.l + tgt.w : tgt.l;          /* 目标外沿＝宿主那条边 */
+        var lead = right ? L + W : L;                      /* 窗的前沿 */
+        var face = right ? outX - AW : outX + AW;          /* 水珠桩朝向窗的那一面 */
+        var gap = right ? face - lead : lead - face;
+        var oT = Math.max(T, tgt.t), oB = Math.min(T + H, tgt.t + tgt.h), oh = oB - oT;
+        /* 进场 22% 淡入、收尾 FADE 淡出：两头都不能硬切，尤其收尾那一下 —— 桩子还露在
+           屏幕边上，一撤就是一次闪烁。 */
+        var op = gap > 4 && oh > 8 ? clamp(p / 0.22, 0, 1) * clamp((gap - 4) / FADE, 0, 1) : 0;
+        layer.style.opacity = String(op);
+        if (op > 0) {
+          var prox = clamp(1 - gap / TWIN, 0, 1);          /* 就近程度：越近越长越粗 */
+          var th = Math.min(oh, 16 + 30 * prox);
+          var len = Math.min(gap * 0.62, 130 * prox);
+          var mid = (oT + oB) / 2, sh = Math.min(oh, th * 2.4);
+          var rs = [
+            /* 供块只在「窗侧那一滴已经伸出来」时才要：它唯一的作用是让那滴从窗上长出来，
+               两沿还隔着老远时摆这么一块只会把方框撑大（实测 663px 宽 vs 收紧后 53px）。 */
+            gap <= TWIN ? { l: right ? lead - PAD * 2 : lead, t: mid - th, w: PAD * 2, h: th * 2 } : null,
+            { l: right ? face - len : face - 8, t: mid - th / 2, w: len + 8, h: th },
+            gap <= TWIN ? { l: right ? lead - 8 : lead - len - 6, t: mid - th / 2, w: len + 14, h: th } : null,
+            { l: right ? face : face - AW, t: mid - sh / 2, w: AW, h: sh },
+          ];
+          var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, n = 0;
+          for (var i = 0; i < rs.length; i++) {
+            var r = rs[i];
+            if (!r || r.w < 0.5 || r.h < 0.5) { cs[i].style.display = "none"; continue; }
+            cs[i].style.display = "block";
+            x0 = Math.min(x0, r.l); x1 = Math.max(x1, r.l + r.w);
+            y0 = Math.min(y0, r.t); y1 = Math.max(y1, r.t + r.h);
+            n++;
+          }
+          if (n) {
+            x0 = Math.max(hb.left, x0 - PAD); x1 = Math.min(hb.right, x1 + PAD);
+            y0 = Math.max(hb.top, y0 - PAD);  y1 = Math.min(hb.bottom, y1 + PAD);
+            if (x1 - x0 >= 8 && y1 - y0 >= 8) {
+              box(layer, x0 - ox, y0 - oy, x1 - x0, y1 - y0);
+              for (var k = 0; k < rs.length; k++) {
+                if (cs[k].style.display === "none") continue;
+                box(cs[k], rs[k].l - x0, rs[k].t - y0, rs[k].w, rs[k].h);
+              }
+            } else {
+              layer.style.opacity = "0";
+            }
+          }
+        }
+        if (p >= 1) { killGoo(); return; }
+        gooRaf = requestAnimationFrame(frame);
+      }
+      gooNode = layer;
+      gooRaf = requestAnimationFrame(frame);
     }
 
     /* ---------- 停靠引导（吸附前预告落点，VS 的阴影预览） ---------- */
@@ -401,8 +557,8 @@
     function showGuide(side, w) {
       guide.setAttribute("data-side", side);
       /* 上边缘的落点是整块可用区，不量宽；左右才谈宽度 */
-      if (side === "max") guide.style.width = "";
-      else guide.style.width = (w || dockWNow()) + "px";
+      if (side === "max") { guide.style.width = ""; guide.style.top = ""; }
+      else { guide.style.width = (w || dockWNow()) + "px"; guide.style.top = dockTop() + "px"; }
       guide.classList.add("on");
     }
     function hideGuide() { guide.classList.remove("on"); }

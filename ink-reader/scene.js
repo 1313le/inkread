@@ -346,12 +346,14 @@
      （v2.16 删掉了第三层 .sc-art-rim：反相 + 冷调重染的边缘光是霓虹语汇，
        纸不会那样反光 —— 详见 styles.css 的「纸绢反光」段）
      --sc-art / --sc-art-pos 由内联 style 下发；取景框随画卷不同而微调。 */
-  /* lift = 这一幅的「展厅射灯」：渲染带实测均值低于 §四 地板（亮 150）时按实测补到 156 上下。
+  /* lift = 这一幅的「展厅射灯」：渲染带实测均值低于 §四 地板（亮 150）时按实测补到同档 peers 一带。
      为什么按幅而不是全局加亮 —— 富春 192 与 清明 135 同屏，全局一提要么富春过曝
-     要么清明仍暗；博物馆本来也是逐幅调灯的。数值来自 verify-v219-art.js 的 A3 实测。 */
+     要么清明仍暗；博物馆本来也是逐幅调灯的。数值来自 verify-v219-art.js 的 A3 实测。
+     曲线：+0.01 lift ≈ +0.60 静置均值（probe 实测）；清明 1.21 静置 149.9 → 1.26 得 152.8，
+     与 双松 153.1 / 秋色 153.1 / 四花雨 152.3 齐平。 */
   var ART = {
     fuchun:         { src: "assets/scene-fuchun.jpg",         pos: "50% 56%" },
-    qingming:       { src: "assets/scene-qingming.jpg",       pos: "50% 50%", lift: 1.21 },
+    qingming:       { src: "assets/scene-qingming.jpg",       pos: "50% 50%", lift: 1.26 },
     shuangsong:     { src: "assets/scene-shuangsong.jpg",     pos: "50% 50%", lift: 1.03 },
     wanlijiangshan: { src: "assets/scene-wanlijiangshan.jpg", pos: "50% 50%" },
     qiuse:          { src: "assets/scene-qiuse.jpg",          pos: "50% 50%", lift: 1.06 },

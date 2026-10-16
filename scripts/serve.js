@@ -87,6 +87,34 @@ function EdgeTTS() {
 function ttsKey(voice, rate, pitch, text) {
   return crypto.createHash("sha1").update([voice, rate, pitch, text].join("\u0001")).digest("hex");
 }
+/* ------------------------------------------------------------
+   瞬态失败原地重试：微软端点会零星回 429（probe 实测：28 次冷合成里 2 次
+   「Unexpected server response: 429」，成功耗时稳定在 0.9~1.5s，紧邻的下一次
+   请求通常就成功）。旧版一次不成就 502，前端一次失败就整本退到机械音 ——
+   一次上游抖动毁掉一整晚的听书。重试基调 400/900/1800ms（±25% 抖动）。
+   只重试瞬态错；「空音频」是这款音色念不出这段文字的确定性结果，不重试。
+   ------------------------------------------------------------ */
+const TTS_TRIES = 4;
+const TTS_BACKOFF = [400, 900, 1800];
+const TTS_RETRYABLE = /\b(408|429|5\d\d)\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket hang up|Timed out/;
+function isTransientTtsErr(e) {
+  const m = String((e && e.message) || e || "");
+  return TTS_RETRYABLE.test(m);
+}
+async function ttsWithRetry(once) {
+  let last;
+  for (let i = 0; i < TTS_TRIES; i++) {
+    try { return await once(); }
+    catch (e) {
+      last = e;
+      if (e && e.empty) throw e;
+      if (i === TTS_TRIES - 1 || !isTransientTtsErr(e)) throw e;
+      await new Promise((r) => setTimeout(r, Math.round(TTS_BACKOFF[i] * (0.75 + Math.random() * 0.5))));
+    }
+  }
+  throw last;
+}
+let _ttsRetries = 0;              /* 运行计数：真跑过几次重试，供验收闸取正证 */
 const _ttsBusy = new Map();       /* 同键并发只合成一次，其余请求等这一份 */
 function synthTo(voice, rate, pitch, text, file) {
   if (fs.existsSync(file)) return Promise.resolve(file);
@@ -98,16 +126,23 @@ function synthTo(voice, rate, pitch, text, file) {
   const job = (async () => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = file + "." + process.pid + ".part";
-    const t = new T({ voice, rate: rate || "default", pitch: pitch || "default", timeout: 25000 });
-    await t.ttsPromise(text, tmp);
-    if (!fs.existsSync(tmp) || fs.statSync(tmp).size < 512) {
+    let attempt = 0;
+    await ttsWithRetry(async () => {
+      if (attempt++) _ttsRetries++;
+      /* 上一次尝试可能留下半截 .part：不先删，重试若在「连上之前」就失败，
+         renameSync 会把这份残骸当成品收下（旧版没有重试所以碰不到，加了重试就必须删）。 */
       try { fs.unlinkSync(tmp); } catch (e) {}
-      /* 服务端「成功」但一个字节都没给：实测是这款音色念不出这段文字
-         （英文音色 + 纯中文正文必现）。标 empty，让前端把原因说成「念不出」而不是「没响应」。 */
-      const err = new Error("该音色念不出这段文本（返回空音频）");
-      err.empty = true;
-      throw err;
-    }
+      const t = new T({ voice, rate: rate || "default", pitch: pitch || "default", timeout: 25000 });
+      await t.ttsPromise(text, tmp);
+      if (!fs.existsSync(tmp) || fs.statSync(tmp).size < 512) {
+        try { fs.unlinkSync(tmp); } catch (e) {}
+        /* 服务端「成功」但一个字节都没给：实测是这款音色念不出这段文字
+           （英文音色 + 纯中文正文必现）。标 empty，让前端把原因说成「念不出」而不是「没响应」。 */
+        const err = new Error("该音色念不出这段文本（返回空音频）");
+        err.empty = true;
+        throw err;
+      }
+    });
     fs.renameSync(tmp, file);
   })();
   _ttsBusy.set(key, job);
@@ -2033,7 +2068,9 @@ function start(port, host) {
   });
 }
 
-module.exports = { start, createServer, ROOT };
+/* ttsInternals：重试策略是纯逻辑，验收闸直接调它做确定性断言
+   （真网络只能做统计性抽查：28 次里约 2 次 429，靠跑批碰运气不算证据）。 */
+module.exports = { start, createServer, ROOT, ttsInternals: { ttsWithRetry, isTransientTtsErr, retries: () => _ttsRetries } };
 
 if (require.main === module) {
   const wanted = process.argv[2] ? Number(process.argv[2]) : 8765;

@@ -1561,6 +1561,7 @@
       handle: ".inkw-bar", x: "#trClose", title: "翻译",
       f: { w: 320, h: 260 }, min: { w: 272, h: 160 },
       dock: { min: 272, max: 520, width: 320 }, snap: 20,
+      dockTop: window.InkTopBand,        /* 同上：停靠态让出顶栏那一条 */
       shown: function () { return !pop.hidden; },
       onClose: function () { pop.hidden = true; }
     });

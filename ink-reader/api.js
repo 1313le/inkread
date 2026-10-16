@@ -297,8 +297,10 @@
     var urls = chunks.map(function (c) { return InkVoice.ttsUrl(v, c); });
     stopNeural();                       /* 上一轮还在放：先收声，再认领本轮代际 */
     var my = _neuralGen;
-    /* 先取第一段：拿不到就整体放弃，交给本机声线（不做半截朗读） */
+    /* 先取第一段：拿不到就整体放弃，交给本机声线（不做半截朗读）。
+       失败先原地重试一次 —— 上游 429 是零星抖动，隔一秒就过去的事。 */
     var cur = await fetchClip(urls[0]);
+    if (!cur) { await delay(900); cur = await fetchClip(urls[0]); }
     if (!cur) return null;
     var next = urls.length > 1 ? fetchClip(urls[1]) : Promise.resolve(null);
     for (var i = 0; i < urls.length; i++) {
@@ -328,12 +330,17 @@
     r = Math.max(-50, Math.min(100, r));
     return (r >= 0 ? "+" : "") + r + "%";
   }
+  /* 断网兜底开关（默认关）：神经合成拿不到声时，是否允许退到本机系统声线。
+     默认关 —— 用户要的是「要么神经语音、要么说清为什么没有」，不是悄悄换个机械音。
+     真离线（飞机上 / 静态托管没有 /api/tts 路由）时，打开它就能继续听。 */
+  var K_SYSFB = "inkread.tts.sysfallback.v1";
+  function sysFallbackOn() { try { return localStorage.getItem(K_SYSFB) === "1"; } catch (e) { return false; } }
 /*__ENGINE_SLOT__*/
   function ttsEngine() {
     /* gen = 代际令牌：start / seekIdx / 换速换嗓都会令旧队列的全部 pending
        恢复后 halt(id) 为真而自行退出，杜绝新旧两条队列并行抢声卡的竞态。 */
     var st = { units: [], i: 0, speed: 1, voice: "", dead: true, paused: false, gen: 0,
-               stopAt: 0, stopBi: null, sysLock: null, noNeural: false, neuralWhy: "" };
+               stopAt: 0, stopBi: null, sysLock: null, neuralWhy: "" };
     var ev = { onSegment: null, onTick: null, onState: null, onMode: null };
     function emit(name, a, b) { try { if (ev[name]) ev[name](a, b); } catch (e) {} }
     function curVoice() {
@@ -396,7 +403,6 @@
         st.neuralWhy = "这款音色念不出正文语言";
         return false;
       }
-      if (st.noNeural) { st.neuralWhy = "神经合成未响应"; return false; }
       var chunks = neuralChunks(text);
       var url = function (t) {
         return "/api/tts?voice=" + encodeURIComponent(v.id) +
@@ -405,9 +411,18 @@
           "&text=" + encodeURIComponent(String(t == null ? "" : t));
       };
       var urls = chunks.map(url);
+      /* 首段取声：原地重试一次（隔 1.2s）。上游 429 是零星抖动
+         （服务端已有 4 次退避重试，这里再兜一道），隔一秒就过去的事，
+         不该让整段朗读吃亏 —— 旧版在这里置永久 noNeural，一次抖动毁掉整本书。 */
       var first = await fetchClip(urls[0]);
       if (halt(id)) return true;
-      if (!first) { st.noNeural = true; st.neuralWhy = "神经合成未响应"; return false; }  /* 第一句都拿不到 → 本队列放弃神经链路，后续段不再逐段付一次失败往返 */
+      if (!first) {
+        await delay(1200);
+        if (halt(id)) return true;
+        first = await fetchClip(urls[0]);
+        if (halt(id)) return true;
+      }
+      if (!first) { st.neuralWhy = "神经合成未响应"; return false; }
       var next = urls.length > 1 ? fetchClip(urls[1]) : Promise.resolve(null);
       for (var i = 0; i < urls.length; i++) {
         var src = i === 0 ? first : await next;
@@ -426,7 +441,15 @@
     async function playSegment(text, id) {
       var okNeural = await neuralSegment(text, id);
       if (halt(id)) return;
-      if (!okNeural) await sysSegment(text, id);
+      if (okNeural) return;
+      /* 神经链路没拿到声：默认就此停住并把原因说清。
+         悄悄换成系统机械音顶替，是「名字不同听着一样、全是冰冷机器音」的病根，
+         读者甚至察觉不到自己在听降级音，只会觉得「这个软件音色就是这么差」。
+         只有用户显式打开「本机声线兜底」才走系统声线（离线 / 静态托管时的活路）。 */
+      if (sysFallbackOn()) { await sysSegment(text, id); return; }
+      st.dead = true; st.paused = false;
+      emit("onState", "done", (st.neuralWhy || "神经合成未响应") +
+        " · 朗读已停止；离线时可在「语速」弹层里打开本机声线兜底");
     }
     async function run(id) {
       while (st.i < st.units.length) {
@@ -451,7 +474,7 @@
         st.units = units || [];
         st.i = Math.max(0, Math.min(st.units.length - 1, fromIdx || 0));
         st.dead = false; st.paused = false; st.stopAt = 0; st.stopBi = null;
-        st.sysLock = null; st.noNeural = false;
+        st.sysLock = null;
         if (!st.voice && window.InkVoice) st.voice = window.InkVoice.current();
         _ttsAbort = false;
         emit("onState", "playing");
@@ -487,7 +510,6 @@
         try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
         st.i = Math.max(0, Math.min(st.units.length - 1, i || 0));
         st.dead = false; st.paused = false; _ttsAbort = false;
-        st.noNeural = false;   /* 跳段 / 换速 / 换嗓都是用户主动动作：给神经链路一次重试机会 */
         emit("onState", "playing");
         run(st.gen);
       },
@@ -589,7 +611,11 @@
          这类「任务页分组要用、DB.tasks 里有」的字段静默洗掉。 */
       var c = Object.assign({ kind: "daily", week: "", time: "", anchor: "", docId: "",
                               src: "本地导入", assignee: "", month: "", monthLabel: "", phase: "" }, r);
-      c.id = id; c.title = r.x; c.quote = r.x; c.today = !!r.today;
+      /* 标题在出口再过一次去符号：抽取期洗过一遍是幂等的，但库里躺着的是 v2.23 之前
+         写入的裸 markdown（- [ ] 与 ** 都还在字里），老用户的清单不能等到重导一次才干净。
+         过的是同一条链（先剥前缀再拆标记），否则显示层与抽取层会给出两种标题。 */
+      var title = taskTitle(stripTaskPrefix(r.x));
+      c.id = id; c.title = title; c.quote = title; c.today = !!r.today;
       out.push(c);
     });
     return out;
@@ -604,8 +630,34 @@
     if (/[。！？!?…]$/.test(s)) return true;
     return (s.match(/[，,；;、]/g) || []).length >= 3;
   }
+  /* 列表前缀可以叠（`> - 1. …`），GFM 的复选框紧跟其后（`- [ ] 背书`）。
+     一次剥干净，别把 `[ ]` 留在标题里当字 —— 读者要的是「背完第一遍词汇」这一句。 */
+  var TASK_PREFIX = /^(?:\s*>+\s*|\s*[-*+]\s+|\s*\d+[.、)]\s*)+/;
+  var TASK_MARK = /^\s*\[( |x|X)\]\s+/;
   function stripTaskPrefix(s) {
-    return String(s || "").replace(/^(?:\s*[-*+]\s+|\s*\d+[.、)]\s*)+/, "").trim();
+    return String(s || "").replace(TASK_PREFIX, "").trim();
+  }
+  /* 复选框行的身份不靠关键词：勾没勾都是「作者明确列的一条」，比动词命中更硬。 */
+  function taskMarkOf(s) {
+    var m = TASK_MARK.exec(String(s || ""));
+    return m ? (m[1] === " " ? 0 : 1) : null;
+  }
+  /* 标题去符号：只拆「确定是标记」的结构，不做 MD.plain 那种字符级扫射 ——
+     plain() 把 #>*_~- 一律换成空格，2024-11-05 提交 会被洗成 2024 11 05 提交，
+     而任务标题里最常见的恰恰是日期。所以宁可少拆几样，也不能吃掉内容。 */
+  function taskTitle(s) {
+    var t = String(s || "").replace(/\s+/g, " ").trim();
+    t = t.replace(TASK_MARK, "");
+    t = t.replace(/`([^`]*)`/g, "$1");                       /* 行内代码 */
+    t = t.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");          /* 图片 → alt */
+    t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");           /* 链接 → 锚字（[1] 这类裸编号不动） */
+    t = t.replace(/<\/?(?:br|span|b|i|em|strong|u|s|code|kbd|sub|sup)\b[^>]*>/gi, " ");
+    t = t.replace(/(\*\*\*|___)(?=\S)([\s\S]*?\S)\1/g, "$2")
+         .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+         .replace(/(^|[\s(（《「『【])([*_])(?=\S)([^*_]*?\S)\2(?=[\s)）》」』】，。、；：！？,.!?;:|$])/g, "$1$3")
+         .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "$1");
+    t = t.replace(/\\([\\`*_{}\[\]()#+\-.!>~|])/g, "$1");    /* 反斜杠转义 */
+    return t.replace(/\s+/g, " ").trim();
   }
   /* 月份只在标题行里认：条目正文的「近 12 月」「每月」是数量与频率，不是时点，
      从条目猜日期会把计划读乱，宁缺毋滥。 */
@@ -625,9 +677,11 @@
     var m = String(head || "").match(/[一-龥]{2,4}阶段/);
     return m ? m[0] : "";
   }
+  /* 一次抽取给出 { tasks, checked }：勾掉的条目不当待办导入（清单里混着已完成的，
+     读者第一件事是删），但也不静默丢 —— 条数在导入预览里如实报出来。 */
   function extractTasks(text, fileName) {
     var lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
-    var out = [], inFence = false, n = 0, defYear = new Date().getFullYear();
+    var out = [], checked = 0, inFence = false, n = 0, defYear = new Date().getFullYear();
     var ctx = { month: "", monthLabel: "", phase: "" };
     lines.forEach(function (raw) {
       var line = String(raw).trim();
@@ -646,9 +700,13 @@
         }
         return;
       }
-      var body = stripTaskPrefix(line);
+      var bare = stripTaskPrefix(line);
+      var mark = taskMarkOf(bare);
+      if (mark === 1) { checked++; return; }
+      var body = taskTitle(bare);
       if (body.length < 8 || body.length > 60) return;
-      var isItem = /^([-*+]|\d+[.、)])\s+/.test(line);
+      /* 复选框行和列表行一样，是作者明确列出的条目，无条件算；关键词命中只服务非条目行。 */
+      var isItem = mark !== null || TASK_PREFIX.test(line);
       if (!isItem && !TASK_KW.test(body)) return;
       if (!isItem && isProseLine(body)) return;
       n++;
@@ -656,7 +714,7 @@
       if (ctx.month) { t.kind = "monthly"; t.month = ctx.month; t.monthLabel = ctx.monthLabel; t.phase = ctx.phase; }
       out.push(t);
     });
-    return out;
+    return { tasks: out, checked: checked };
   }
 
   /* ------------------------------------------------------------
@@ -1272,7 +1330,7 @@
     async parseDocument(fileName, text, onStep) {
       var steps = [
         { name: "读取文档结构", note: "按行扫描 · 跳过代码块与空行" },
-        { name: "识别条目前缀", note: "- / * / 1. 列表行" },
+        { name: "识别条目前缀", note: "- / * / 1. 列表行 · - [ ] 复选框" },
         { name: "匹配动词与时间词", note: "完成 · 复习 · 提交 · 每日 / 每周 / 每月" },
         { name: "归组生成清单", note: "命中条数在下方如实给出" }
       ];
@@ -1281,8 +1339,8 @@
         await delay(560 + Math.random() * 300);
         onStep && onStep(i, "done");
       }
-      var tasks = extractTasks(text, fileName);
-      return { code: 0, data: { fileName: fileName, tasks: tasks, count: tasks.length } };
+      var ex = extractTasks(text, fileName);
+      return { code: 0, data: { fileName: fileName, tasks: ex.tasks, count: ex.tasks.length, checked: ex.checked } };
     },
 
     /* POST /api/docs/import —— 导入文档
@@ -1577,7 +1635,10 @@
         }
       }
 
-      /* ③ 本机声线：好声线优先 + 候选封顶 4 条；只在一句都没读出来时才换声线 */
+      /* ③ 本机声线：好声线优先 + 候选封顶 4 条；只在一句都没读出来时才换声线。
+         默认不走到这里 —— 机械音顶替神经音读者察觉不到，等于「音色坏了」；
+         只有显式打开断网兜底才用它（离线 / 静态托管的活路）。 */
+      if (!sysFallbackOn()) return { code: 0, data: { mode: "none", voice: "", note: "神经合成未响应 · 可在朗读设置里开本机声线兜底" } };
       var synth = window.speechSynthesis;
       var U = window.SpeechSynthesisUtterance;
       if (!synth || typeof U !== "function") return simulateSpeech(body, onTick, v);
@@ -1606,6 +1667,13 @@
 
     /* GET /api/tts/engine —— 听书引擎（段落队列，见 ttsEngine 注释） */
     ttsEngine: ttsEngine,
+
+    /* GET/POST /api/tts/sysfallback —— 断网兜底开关（见 sysFallbackOn 注释） */
+    ttsSysFallback(on) {
+      if (on === undefined) return sysFallbackOn();
+      try { on ? localStorage.setItem(K_SYSFB, "1") : localStorage.removeItem(K_SYSFB); } catch (e) {}
+      return sysFallbackOn();
+    },
 
     /* 等系统声线列出来（首次取常是空数组）—— 试听与朗读共用这一份实现 */
     waitVoices: waitVoices,
@@ -1878,7 +1946,9 @@
        id 在这里生成，不接受调用方自带 —— 让外面塞 id 等于允许它写进别人的键。 */
     async saveTask(task) {
       await delay(200);
-      var title = String((task && (task.x || task.title)) || "").trim().slice(0, 120);
+      /* 助手回的是模型写的字符串，常带 `- ` 与 **：先按导入那条路同款洗一遍再落库，
+         否则任务页标题里就留着裸符号。 */
+      var title = taskTitle(stripTaskPrefix(String((task && (task.x || task.title)) || ""))).slice(0, 120);
       if (!title) return { code: 1, msg: "empty-title" };
       var all = taskStoreGet();
       var now = new Date();

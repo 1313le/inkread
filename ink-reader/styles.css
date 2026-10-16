@@ -5746,6 +5746,28 @@ html[data-reduce="on"] .dock-guide { transition: none; }
 /* v2.23 W2 · 上边缘的落点＝整块可用区：铺满的预告纸影就是全幅，不量宽 */
 .dock-guide[data-side="max"] { left: 0; right: 0; }
 
+/* ---------- v2.23.2 · 停靠融合液桥（浮窗贴边那一下，两滴水并成一滴） ----------
+   四块一次性剪影（窗前沿供块 / 桩侧一滴 / 窗侧一滴 / 目标水珠桩）套同一个「模糊 + α 阈值」
+   滤镜：模糊把硬边化开，feColorMatrix 再把 alpha 重新压回硬边 —— 两滴之间便凹出颈缩。
+   filter 只允许落在这层剪影上，绝不落到窗体本身：filter 会造包含块，
+   窗内的 position:fixed 会被就地关住（停靠态贴边定位当场错位）。
+   填充必须**不透明**：α 阈值把半透明当噪声吃掉（σ=9 下 α.16 的墨整条被抹平），
+   材质透明度只能放在 filter 之后当图层 opacity 用。取 --line 而不取 --paper-2：
+   纸色叠纸色等于没画（实测最大通道差 9/255），且 --line 在 29 套主题里都自洽。
+   几何与生命周期归 dock.js（只活一次吸附的 170ms，结束即摘除）。 */
+.dock-goo {
+  overflow: hidden; opacity: 0;
+  pointer-events: none;
+  filter: url(#inkGoo);
+  contain: strict;
+}
+.dock-goo i {
+  display: block; position: absolute;
+  background: var(--line);
+}
+/* JS 已经按 reduceMotion 整段跳过；这道是运行中改开关的兜底 */
+html[data-reduce="on"] .dock-goo { display: none; }
+
 /* ---------- v2.23 W2 · 浮层形态钮（InkWin 注入，所有侧栏与悬浮窗共用） ----------
    规格沿用页头既有按钮：28×28 与 .mp-x / .mpd-x 同档，按下态走 --accent-*
    ——「当前停靠在哪个形态」和「当前页签」本来就是同一个语义家族，不该有两个长相。

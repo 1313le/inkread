@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "2.23.0";
+window.InkVersion = "2.24.0";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -1100,6 +1100,18 @@ window.InkDate = (function () {
   function watch() { paint(); if (!timer) timer = setInterval(tick, 60000); }
   return { text: text, paint: paint, tick: tick, watch: watch };
 })();
+
+/* 全局顶栏占掉的那一条高度（给视口宿主的停靠窗让位用，见 dock.js 的 dockTop）。
+   必须量**实测渲染高度**：沉浸态、body.nw、触屏横屏矮窗口这三种情况下顶栏是
+   display:none 的，写死 --tb-h 会在顶栏本就不在的时候留一条谁也点不到的死带。 */
+window.InkTopBand = function () {
+  var tb = document.getElementById("inkTopbar");
+  if (!tb) return 0;
+  var cs = getComputedStyle(tb);
+  if (cs.display === "none" || cs.visibility === "hidden") return 0;
+  var h = tb.getBoundingClientRect().height;
+  return h > 0 ? Math.round(h) : 0;
+};
 
 /* ============================================================
    一体化外壳 · 公共顶栏 + 公共导航（全站唯一来源）

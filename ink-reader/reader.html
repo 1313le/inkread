@@ -585,7 +585,37 @@ html[data-reduce="on"] .tk-gear { transition: none; }
   align-self: flex-start; padding: 7px 10px; color: var(--ink-2);
   background: var(--paper); border: 1px solid var(--line-2);
   border-radius: var(--r-md) var(--r-md) var(--r-md) 2px;
+  white-space: normal;   /* 回答里现在是真块级元素：留着 pre-wrap 会把源码换行再算一遍，行距凭空翻倍 */
 }
+/* 回答的 markdown 排版：全局 .md-* 那套是按正文 16px 的宽栏定的，直接搬进
+   396px 的窗里松得像三张卡叠着 —— 这里只收间距与字号，配色一律继续吃 token，
+   29 套主题不用另配。 */
+.ar-row.bot > :first-child { margin-top: 0; }
+.ar-row.bot > :last-child { margin-bottom: 0; }
+.ar-row.bot p { margin: 0 0 .5em; }
+.ar-row.bot .md-list { margin: .18em 0 .5em 1.25em; }
+.ar-row.bot .md-list li { margin: .16em 0; }
+.ar-row.bot h1, .ar-row.bot h2, .ar-row.bot h3,
+.ar-row.bot h4, .ar-row.bot h5, .ar-row.bot h6 {
+  margin: .62em 0 .26em; font-size: 13.5px; line-height: 1.5;
+  color: var(--ink); letter-spacing: 0; text-indent: 0;
+}
+.ar-row.bot strong { color: var(--ink); font-weight: 700; }
+.ar-row.bot em { font-style: italic; }
+.ar-row.bot code {
+  font-family: var(--font-mono); font-size: 12px; padding: .06em .3em;
+  background: var(--paper-3); border: 1px solid var(--line); border-radius: 3px;
+}
+.ar-row.bot .md-code, .ar-row.bot .md-tablebox { margin: .46em 0; }
+.ar-row.bot .md-code pre, .ar-row.bot .md-gut { padding-top: 7px; padding-bottom: 7px; line-height: 1.6; }
+.ar-row.bot .md-tablebox .md-table { font-size: 12px; line-height: 1.6; }
+.ar-row.bot .md-tablebox th, .ar-row.bot .md-tablebox td { padding: 3px 7px; }
+.ar-row.bot blockquote {
+  margin: .46em 0; padding: .1em 0 .1em 9px;
+  border-left: 2px solid var(--accent); color: var(--ink-3);
+}
+.ar-row.bot .md-hr { margin: .7em 0; }
+.ar-row.bot .md-fns { margin: .7em 0 0; padding-top: .4em; }
 .ar-row.sys { align-self: center; font-size: 11.5px; color: var(--ink-3); text-align: center; }
 .ar-row.err { align-self: flex-start; font-size: 12px; color: var(--accent-ink); border: 1px dashed var(--accent); border-radius: var(--r-sm); padding: 5px 9px; }
 .ar-tag {
@@ -797,7 +827,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
               <span id="icVoice"></span>
               <select id="ttsVoice" aria-label="朗读音色"></select>
             </label>
-            <button class="tool-btn tts-ctl" id="ttsSpeed" title="语速">1.0×</button>
+            <button class="tool-btn tts-ctl" id="ttsSpeed" title="朗读设置（语速 / 兜底）">1.0×</button>
             <button class="tool-btn tts-ctl" id="ttsTimer" title="定时停止" aria-label="定时停止"><span id="icTtsTimer"></span></button>
             <button class="tool-btn" id="ttsStop" title="停止" aria-label="停止"><span id="icStop"></span></button>
           </div>
@@ -807,6 +837,10 @@ html[data-reduce="on"] .ar-p { transition: none; }
             <div class="tmp-row tmp-presets">
               <button data-sp="0.75">0.75×</button><button data-sp="1">1×</button><button data-sp="1.25">1.25×</button><button data-sp="1.5">1.5×</button><button data-sp="2">2×</button><button data-sp="3">3×</button>
             </div>
+            <label class="tmp-row" title="默认关：神经合成拿不到声时停下并说明原因，绝不悄悄换成机械音。离网 / 静态托管时才需要打开。">
+              <b>本机声线兜底</b>
+              <input type="checkbox" id="ttsSysFb" aria-label="神经合成失败时改用本机声线">
+            </label>
           </div>
           <div class="tts-mini-pop" id="ttsTimerPop" hidden>
             <button data-timer="0">不定时</button>
@@ -3230,6 +3264,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
     handle: "#auxHead", bar: "#auxHead", x: "#auxX",
     title: "辅助阅读", f: { w: 344, h: 300 },
     min: { w: 288, h: 168 }, dock: { min: 288, max: 560, width: 344 }, snap: 20,
+    dockTop: window.InkTopBand,          /* 停靠别让全局顶栏被盖住（顶栏右端是窗口三颗钮） */
     shown: function () { return !auxCard.hidden; },
     onClose: hideAux
   });
@@ -4606,6 +4641,16 @@ html[data-reduce="on"] .ar-p { transition: none; }
       if (TTS.eng && TTS.eng.playing()) TTS.eng.setSpeed(TTS.speed);
     });
   });
+  /* 本机声线兜底开关：默认关（api.js 的 sysFallbackOn 是唯一真源，这里只做镜像） */
+  (function () {
+    var box = qs("#ttsSysFb");
+    if (!box || !window.API || !API.ttsSysFallback) return;
+    box.checked = !!API.ttsSysFallback();
+    box.addEventListener("change", function () {
+      API.ttsSysFallback(box.checked);
+      toast(box.checked ? "神经合成失败时改用本机声线" : "只保留特色音色：失败就停下并说明原因", "audio-lines");
+    });
+  })();
   /* 定时弹层：不定时 / 读完本章 / 10 / 30 分钟（对齐起点读书） */
   function paintTimerBtn() {
     qs("#ttsTimer").title = "定时停止 · " + TTS.timerLabel;
@@ -5817,6 +5862,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
     handle: "#arHead", bar: "#arHead", x: "#arX",
     title: "AI 助手", f: { w: 396, h: 560 }, min: { w: 300, h: 320 },
     dock: { min: 300, max: 620, width: 396 }, snap: 20,
+    dockTop: window.InkTopBand,          /* 同上：停靠态让出顶栏那一条 */
     shown: function () { return !ar.hidden; }, onClose: arClose
   });
 
@@ -5845,18 +5891,46 @@ html[data-reduce="on"] .ar-p { transition: none; }
     arStream.scrollTop = arStream.scrollHeight;
     return el;
   }
-  /* [3] 只有在这轮真的把第 3 段交给模型时才做成按钮；编号越界就原样留着，
-     不做点了没反应的假链接 —— 读者点一次没动静，以后所有编号他都不信了。 */
+  /* 回答正文走 MD.render —— 与 ai.html 的 AI 气泡同一条渲染路（那边 2.13 起就在用，
+     列表 / 粗体 / 表格 / 代码都是真部件）。v2.23 新写这扇助手窗时漏接了它，
+     自己写了个 esc + \n→<br>，于是模型一按 markdown 分点答，窗里就是满屏的 ** 和 - 。 */
   function arRich(txt, refs) {
-    var s = esc(String(txt || ""));
-    if (refs && refs.length) {
-      s = s.replace(/\[(\d{1,2})\]/g, function (all, n) {
-        var i = Number(n) - 1;
-        if (i < 0 || i >= refs.length) return all;
-        return '<button class="ar-ref" type="button" data-ref="' + i + '" title="跳回原文 · ' + esc(refs[i].label) + '">' + all + "</button>";
-      });
-    }
-    return s.replace(/\n/g, "<br>");
+    var box = document.createElement("div");
+    box.innerHTML = MD.render(String(txt || ""));
+    if (refs && refs.length) arLinkRefs(box, refs);
+    return box.innerHTML;
+  }
+  /* [3] 只有在这轮真的把第 3 段交给模型时才做成按钮；编号越界就原样留着，
+     不做点了没反应的假链接 —— 读者点一次没动静，以后所有编号他都不信了。
+     只能在**渲染后的 DOM** 上换：渲染前对着字符串正则，会把代码块里的 [1]、
+     链接 href 里的 [1] 一并做成按钮，点下去跳去不相干的地方。 */
+  function arLinkRefs(root, refs) {
+    var tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        var p = n.parentElement;
+        return p && p.closest("code,pre,.ar-ref") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [], tn;
+    while ((tn = tw.nextNode())) nodes.push(tn);
+    nodes.forEach(function (node) {
+      var parts = String(node.nodeValue).split(/\[(\d{1,2})\]/);
+      if (parts.length < 2) return;
+      var frag = document.createDocumentFragment(), buf = "";
+      for (var k = 0; k < parts.length; k++) {
+        if (k % 2 === 0) { buf += parts[k]; continue; }
+        var i = Number(parts[k]) - 1;
+        if (i < 0 || i >= refs.length) { buf += "[" + parts[k] + "]"; continue; }
+        if (buf) { frag.appendChild(document.createTextNode(buf)); buf = ""; }
+        var b = document.createElement("button");
+        b.className = "ar-ref"; b.type = "button"; b.dataset.ref = i;
+        b.title = "跳回原文 · " + refs[i].label;
+        b.textContent = "[" + parts[k] + "]";
+        frag.appendChild(b);
+      }
+      if (buf) frag.appendChild(document.createTextNode(buf));
+      node.parentNode.replaceChild(frag, node);
+    });
   }
   /* 流式重画：每来一片都重建整条回答的 HTML 会把主线程占满（翻页动画当场掉帧），
      用 rAF 合帧 —— 一帧最多画一次。 */
@@ -5946,6 +6020,11 @@ html[data-reduce="on"] .ar-p { transition: none; }
     }
     var sys = "你是墨读里的阅读助手，正陪着读者读这一本书。回答贴着下面给出的原文，别泛泛而谈；"
       + "原文里没有的就直说没有，不要编。" + (arRefs.length ? "引到某段时在该句末尾标它的编号，例如「[2]」；只给结论也要标出处。" : "")
+      /* 排版约束：这扇窗只有 396px 宽、正文 13px。模型默认按「一页文档」的写法答，
+         三级标题套大表格在窄栏里必然挤成一团 —— 让它按一栏的尺子写，比事后用 CSS 硬压有效。 */
+      + "回答是贴在书页旁的一小段话，不是整篇文章：控制在几句之内，"
+      + "要列举就用一层短列表，一条一句；不要多级标题、不要表格、不要代码块（读者点名要除外）；"
+      + "术语解释用「术语：解释」这样的行，别另起标题。"
       + "\n\n" + arMaterial(pack, sel);
     try { if (window.Brain && Brain.preamble) sys += "\n\n" + Brain.preamble("chat"); } catch (e) {}
     arCtl = window.AbortController ? new AbortController() : null;

@@ -605,31 +605,44 @@
       toast("试听 " + tag + " · Moss 真合成…", "audio-lines");
       API.cloudAudition(text, v).then(function (r) {
         if (r || gen !== _audGen) return;
-        toast("云合成未出声（检查密钥 / 网络 / 余额）· 退回本机声线", "alert-triangle");
-        webSpeak(v, tag);
+        if (window.API && API.ttsSysFallback && API.ttsSysFallback()) {
+          toast("云合成未出声 · 退回本机声线", "alert-triangle");
+          webSpeak(v, tag);
+          return;
+        }
+        toast("云合成未出声（检查密钥 / 网络 / 余额）", "alert-triangle");
       });
       return;
     }
     /* ① 神经语音（本地 /api/tts）：与「朗读」同源，真·神经语音、有感情起伏 */
     if (v.edge && InkVoice.ttsUrl) {
       var url = InkVoice.ttsUrl(v, text);
-      var a = new Audio(url);
-      _aud = a;
-      var fell = false;
-      var fallback = function () {
-        if (fell || gen !== _audGen) return;
-        fell = true;
-        if (_aud === a) _aud = null;
-        if (cloudReady()) { toast("试听 " + tag + " · 云音色", "audio-lines"); API.speak(text, { voice: v.k }); return; }
-        webSpeak(v, tag);
+      var round = 0;
+      var attempt = function () {
+        if (gen !== _audGen) return;
+        var a = new Audio(url);
+        _aud = a;
+        var done = false;
+        var giveUp = function () {
+          if (done || gen !== _audGen) return;
+          done = true;
+          if (_aud === a) _aud = null;
+          /* 上游 429 是零星抖动（实测约 14 次冷合成里 1 次）：服务端已退避重试过，
+             这里原样再取一遍多半就成 —— 「来回点几次才恢复」的观感该由程序自己吃掉。 */
+          if (++round < 2) { toast("试听 " + tag + " · 合成未响应，正在重试…", "audio-lines"); setTimeout(attempt, 900); return; }
+          if (cloudReady()) { toast("试听 " + tag + " · 云音色", "audio-lines"); API.speak(text, { voice: v.k }); return; }
+          if (window.API && API.ttsSysFallback && API.ttsSysFallback()) { webSpeak(v, tag); return; }
+          toast("试听 " + tag + " · 神经合成未响应（已重试）· 稍后再点一次", "alert-triangle");
+        };
+        a.onerror = giveUp;
+        a.onended = function () { if (_aud === a) _aud = null; };
+        a.onplay = function () { if (gen === _audGen) toast("试听 " + tag + " · 神经语音", "audio-lines"); };
+        /* 8s 还没出声（离线 / 静态托管没有该路由）—— 同样先重试一轮 */
+        var guard = setTimeout(function () { if (!done && a.paused) giveUp(); }, 8000);
+        a.addEventListener("playing", function () { clearTimeout(guard); });
+        try { a.play().catch(giveUp); } catch (e) { giveUp(); }
       };
-      a.onerror = fallback;
-      a.onended = function () { if (_aud === a) _aud = null; };
-      a.onplay = function () { if (gen === _audGen) toast("试听 " + tag + " · 神经语音", "audio-lines"); };
-      /* 8s 还没出声（离线 / 静态托管没有该路由）—— 退回本机声线 */
-      var guard = setTimeout(function () { if (!fell && a.paused) fallback(); }, 8000);
-      a.addEventListener("playing", function () { clearTimeout(guard); });
-      try { a.play().catch(fallback); } catch (e) { fallback(); }
+      attempt();
       return;
     }
     /* ② 云端音色自带样音（Moss 等上传录音） */
@@ -652,7 +665,8 @@
       return;
     }
     if (cloudReady()) { toast("试听 " + tag + " · 云音色", "audio-lines"); API.speak(text, { voice: v.k }); return; }
-    webSpeak(v, tag);
+    if (window.API && API.ttsSysFallback && API.ttsSysFallback()) { webSpeak(v, tag); return; }
+    toast("试听 " + tag + " · 没有可用的合成链路（填云密钥，或在朗读设置里开本机声线兜底）", "alert-triangle");
   }
   window.addEventListener("pagehide", stopAudition);
   /* 兜底：本机声线，按语言池 + 性别挑，哑火就换下一条 */

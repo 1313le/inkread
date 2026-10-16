@@ -1394,7 +1394,9 @@
     if (impEncoding && impEncoding !== "utf-8") {
       enc = /损坏/.test(impEncoding) ? " · " + impEncoding : " · " + impEncoding.toUpperCase() + " 转码";
     }
-    qs("#resNote").textContent = "来源：" + (d.fileName || "文档") + " · 共 " + tasks.length + " 项" + enc;
+    /* 原文里已勾掉的条目不进清单，但要说清去了哪儿：不说，读者会以为抽取漏了。 */
+    var skip = d.checked ? " · 另有 " + d.checked + " 项在原文里已勾选完成，未加入清单" : "";
+    qs("#resNote").textContent = "来源：" + (d.fileName || "文档") + " · 共 " + tasks.length + " 项" + enc + skip;
     if (!tasks.length) {
       qs("#resList").innerHTML = '<div class="card-note" style="padding:14px 0">' +
         icon("info", 14) + ' 未识别到任务条目 · 文档仍会作为藏书导入' + (impText == null ? "（此文件不含可解析文本）" : "") + '</div>';
