@@ -844,6 +844,13 @@ html[data-reduce="on"] .ar-p { transition: none; }
               <b>本机声线兜底</b>
               <input type="checkbox" id="ttsSysFb" aria-label="神经合成失败时改用本机声线">
             </label>
+            <label class="tmp-row" title="默认关。开启后：旁白用你选的音色，对白按角色分声（识别不准可在角色表里手改）。">
+              <b>多角色朗读</b>
+              <input type="checkbox" id="ttsCast" aria-label="本书启用多角色朗读">
+            </label>
+            <div class="tmp-row">
+              <button class="btn btn-ghost btn-sm" id="ttsCastOpen" style="width:100%;justify-content:center">角色表 · 谁说什么声…</button>
+            </div>
           </div>
           <div class="tts-mini-pop" id="ttsTimerPop" hidden>
             <button data-timer="0">不定时</button>
@@ -1083,6 +1090,15 @@ html[data-reduce="on"] .ar-p { transition: none; }
   <span class="card-note" id="immHint">点击纸面中央呼出 / 隐藏控件　·　Esc 退出</span>
 </div>
 
+<!-- 多角色朗读 · 角色表（v2.24.2）：复用版式 sheet 的形态与样式（.aa.aa-sheet） -->
+<aside class="aa aa-sheet" id="castPanel" hidden role="dialog" aria-label="多角色朗读角色表">
+  <header class="aa-head">
+    <b>角色表 · 多角色朗读</b>
+    <button class="aa-x" id="castX" aria-label="收起角色表"><span id="icCastX"></span></button>
+  </header>
+  <div class="aa-body" id="castBody"></div>
+</aside>
+
 <!-- 选中浮动工具条 -->
 <div class="sel-bar" id="selBar" style="display:none">
   <span class="sel-dot" data-color="accent" style="background:var(--accent)"></span>
@@ -1225,6 +1241,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
 <script src="md.js"></script>
 <script src="voices-data.js"></script>
 <script src="voices.js"></script>
+<script src="cast.js"></script>
 <script src="dock.js"></script>
 <!-- srs.js：闪卡调度纯函数（ymd/isDueSt/isSusp/sm2Update/RATE/makeCloze）的单一事实源，
      闪卡页与阅读页共用（v2.10 起 modes.js 不再自带一份）。必须在 modes.js 之前加载。 -->
@@ -1276,7 +1293,9 @@ html[data-reduce="on"] .ar-p { transition: none; }
     /* v2.20 新增：自动翻页（更多入口 / 控制条；播放位由 autoPaint 随态改写） */
     icAuto: "chevrons-right", icAutoPlay: "pause", icAutoDown: "minus", icAutoUp: "plus", icAutoStop: "x",
     /* v2.21 新增：出纸两个入口（文案随能力改写，图标不用改 —— 打印机就是打印机） */
-    icExport: "download", icPrint: "printer"
+    icExport: "download", icPrint: "printer",
+    /* v2.24.2：多角色角色表 */
+    icCastX: "x"
   };
   Object.keys(IC).forEach(function (id) {
     var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16);
@@ -4205,8 +4224,13 @@ html[data-reduce="on"] .ar-p { transition: none; }
     if (tocOpen || tk.open || tOpen) return "panel";
     var rd = qs("#reader");
     if (rd.dataset.notes === "open" || rd.dataset.side === "open") return "panel";
+    /* 只有**正文里**的划词才算「读者正在标注」—— 页眉书名、侧栏、顶栏日期上的选区与他无关：
+       旧版只要页面上有任何一处非空选区就停，实测选中页眉的「卷」也会显示「已暂停（划词选中）」。 */
     var s = window.getSelection ? window.getSelection() : null;
-    if (s && String(s).trim()) return "sel";
+    if (s && !s.isCollapsed && String(s).trim()) {
+      var n = s.anchorNode, selEl = n && (n.nodeType === 1 ? n : n.parentElement);
+      if (selEl && selEl.closest && selEl.closest("#doc")) return "sel";
+    }
     return null;
   }
   var AUTO_WHY = { hidden: "不在前台", panel: "面板打开", sel: "划词选中", edit: "修改正文" };
@@ -4601,7 +4625,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
     e.on("onMode", function (m) {
       var b = qs("#ttsEng");
       if (!b || !m) return;
-      var base = m.mode === "neural" ? "神经语音 · " + (m.voice || "")
+      var base = m.mode === "neural" ? "神经语音 · " + (m.voice || "") + (m.cast ? " · " + m.cast : "")
         : m.mode === "cloud" ? "云音色 · " + (m.voice || "")
         : m.mode === "speech" ? "本机声线 · " + (m.voice || "")
         : m.mode === "none" ? "未出声 · " + (m.note || "本机没有可用声线")
@@ -4617,6 +4641,9 @@ html[data-reduce="on"] .ar-p { transition: none; }
     e.on("onState", function (s, why) {
       if (s === "done") { ttsCleanup(); toast(why || "朗读结束", "volume-2"); }
       else if (s === "stopped") ttsCleanup();
+      /* 「这台音色念不出这段」的停机：**只把播放键拨回 ▶，条子与音色下拉原地留着** ——
+         条子一关，换音色的入口就没了，用户只能拿同一款音色再错一次（实测复现过）。 */
+      else if (s === "halted") { paintPlayBtn(false); toast(why || "朗读已停止", "alert-triangle"); }
       else if (s === "paused") paintPlayBtn(false);
       else if (s === "playing") paintPlayBtn(true);
     });
@@ -4639,7 +4666,14 @@ html[data-reduce="on"] .ar-p { transition: none; }
     startTTS(blockAt(curOffset()));
   });
   qs("#ttsStop").addEventListener("click", function () { if (TTS.eng) TTS.eng.stop(); });
-  qs("#ttsPlay").addEventListener("click", function () { if (TTS.eng) TTS.eng.toggle(); });
+  /* ▶ 两义：正在播 → 暂停/继续；停过之后（含「念不出这段」的停机）→ 从当前段重起。
+     没有这一义，「换一款音色再点朗读」就只剩再跑一趟「更多 → 朗读」那条远路。 */
+  qs("#ttsPlay").addEventListener("click", function () {
+    if (!TTS.eng) return;
+    if (TTS.eng.playing()) { TTS.eng.toggle(); return; }
+    var u = SPEAK_UNITS[TTS.eng.idx()];
+    startTTS(u ? u.bi : blockAt(curOffset()));
+  });
   qs("#ttsPrev").addEventListener("click", function () { if (TTS.eng) TTS.eng.seekIdx(TTS.eng.idx() - 1); });
   qs("#ttsNext").addEventListener("click", function () { if (TTS.eng) TTS.eng.seekIdx(TTS.eng.idx() + 1); });
 
@@ -4684,6 +4718,196 @@ html[data-reduce="on"] .ar-p { transition: none; }
       if (TTS.eng && TTS.eng.playing()) TTS.eng.setSpeed(TTS.speed);
     });
   });
+  /* ============================================================
+     多角色朗读（v2.24.2）：角色表 · 分段音色 · 模型归属
+     —— 识别算法在 cast.js（纯函数，夹具闸 verify-v226-cast.js 逐条钉死）；
+        这里只管三件事：读写**本书**的角色表、把角色映射成播放单元的音色、
+        角色表面板的交互（含 L2 模型重认）。
+     —— 默认关：只在用户对某一本书显式打开后生效（方案 §5.5 的拍板）。
+     ============================================================ */
+  var CAST_KEY = "inkread.cast.v1";
+  function castAll() { try { return JSON.parse(localStorage.getItem(CAST_KEY) || "{}") || {}; } catch (e) { return {}; } }
+  function castPut(book) {
+    var all = castAll();
+    if (book) all[docId] = book; else delete all[docId];
+    try { localStorage.setItem(CAST_KEY, JSON.stringify(all)); } catch (e) {}
+  }
+  var CAST = castAll()[docId] || { on: false, chars: {}, lines: [] };
+  CAST.on = !!CAST.on;
+  /* 角色音色的候选池：**先把自己（旁白）那款排除掉** —— 旁白用用户选的音色，
+     角色若也分到同一款，听起来就是「换了半天等于没换」（首跑实测正是如此）。
+     池子小到只剩一款时只好全体共用（宁可用，不可空）。 */
+  function castPool() {
+    var cur = window.InkVoice ? InkVoice.current() : "";
+    var all = (window.InkVoice ? InkVoice.list() : []).filter(function (v) { return v.installed && v.edge; });
+    var rest = all.filter(function (v) { return v.k !== cur; });
+    return rest.length >= 2 ? rest : all;
+  }
+  var SPEAK_UNITS_PLAIN = SPEAK_UNITS;      /* 原始单元（无角色）；开了多角色才换成带角色的那份 */
+
+  /* 重识别（L1）：把上一版角色表传进去，用户的音色指派与手改归属不会被冲掉 */
+  function castScan() {
+    var keep = (CAST && CAST.chars && Object.keys(CAST.chars).length) ? { chars: CAST.chars, lines: CAST.lines } : null;
+    var next = window.InkCast ? InkCast.build(blocks, keep) : null;
+    if (!next) return;
+    next.on = !!CAST.on;
+    InkCast.assignVoices(next.chars, castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }));
+    CAST = next;
+    castPut(CAST);
+  }
+  /* 按角色表重建播放单元：旁白 null（用户选的音色），台词带角色名与角色音色 */
+  function castUnits() {
+    if (!CAST.on || !CAST.lines || !CAST.lines.length || !window.InkCast) return null;
+    return InkCast.unitsFor(blocks, CAST).map(function (u) {
+      var c = u.cast ? CAST.chars[u.cast] : null;
+      return { bi: u.bi, text: u.text, cast: u.cast || "", voiceK: (c && c.voiceK) || "" };
+    });
+  }
+  function castApplyUnits() {
+    SPEAK_UNITS = castUnits() || SPEAK_UNITS_PLAIN;
+    if (CAST.on && !CAST.lines.length) castScan();      /* 开了但还没识别过：先按 L1 认一遍 */
+    if (!CAST.on) SPEAK_UNITS = SPEAK_UNITS_PLAIN;
+  }
+  /* 面板：角色行（性别 + 音色）与对白行（改归属） */
+  function castRender() {
+    var body = qs("#castBody");
+    if (!body) return;
+    var names = Object.keys(CAST.chars || {});
+    var pool = castPool();
+    var h = [];
+    h.push('<label class="tmp-row"><b>本书启用多角色</b><input type="checkbox" id="castOn"' + (CAST.on ? " checked" : "") + "></label>");
+    h.push('<div class="tmp-row" style="gap:6px">' +
+      '<button class="btn btn-ghost btn-sm" id="castScan">重新识别</button>' +
+      '<button class="btn btn-ghost btn-sm" id="castModel"' + (window.API && API.hasModel && API.hasModel() ? "" : " disabled title=\"先在「主脑 · 模型配置」里填好模型\"") + ">用模型重认</button>" +
+      '<button class="btn btn-ghost btn-sm" id="castClear">清空</button></div>');
+    if (!names.length) {
+      h.push('<div class="ap-hint">还没有识别到角色。点「重新识别」：先按对白提示语（「张三道：“…”」）认，再看两人轮转。判不出的一律算旁白。</div>');
+      body.innerHTML = h.join("");
+      castWire();
+      return;
+    }
+    h.push('<section class="ap-sec"><h4>角色<span class="ap-sec-note">音色默认按性别自动配</span></h4>');
+    names.sort(function (a, b) { return (CAST.chars[b].count || 0) - (CAST.chars[a].count || 0); }).forEach(function (n) {
+      var c = CAST.chars[n];
+      h.push('<div class="ap-row"><span class="ap-k">' + esc(n) + ' <em class="ap-sec-note">×' + c.count + "</em></span>" +
+        '<span class="ap-c">' +
+        '<select class="ap-sel" data-cast-gender="' + esc(n) + '" aria-label="' + esc(n) + " 的性别\">" +
+        [["", "未知"], ["m", "男"], ["f", "女"]].map(function (g) { return '<option value="' + g[0] + '"' + ((c.gender || "") === g[0] ? " selected" : "") + ">" + g[1] + "</option>"; }).join("") +
+        "</select>" +
+        '<select class="ap-sel" data-cast-voice="' + esc(n) + '" aria-label="' + esc(n) + " 的音色\">" +
+        '<option value="">按性别自动</option>' +
+        pool.map(function (v) { return '<option value="' + v.k + '"' + (c.voiceK === v.k ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") +
+        "</select></span></div>");
+    });
+    h.push("</section>");
+    var lines = (CAST.lines || []);
+    if (lines.length) {
+      h.push('<section class="ap-sec"><h4>对白归属<span class="ap-sec-note">手改一次即写回本书角色表</span></h4>');
+      lines.slice(0, 300).forEach(function (l, i) {
+        h.push('<div class="ap-row"><span class="ap-k" style="max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(l.text) + '">“' + esc(String(l.text).slice(0, 16)) + "”</span>" +
+          '<span class="ap-c"><select class="ap-sel" data-cast-line="' + i + '" aria-label="第 ' + (i + 1) + ' 句对白是谁说的">' +
+          '<option value="">旁白</option>' +
+          names.map(function (n) { return '<option value="' + esc(n) + '"' + (l.speaker === n ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("") +
+          "</select></span></div>");
+      });
+      h.push("</section>");
+    }
+    body.innerHTML = h.join("");
+    castWire();
+  }
+  function castWire() {
+    var body = qs("#castBody");
+    var on = qs("#castOn");
+    if (on) on.addEventListener("change", function () {
+      CAST.on = on.checked;
+      if (CAST.on && !(CAST.lines || []).length) castScan();
+      castPut(CAST); castApplyUnits(); castRender();
+      var box = qs("#ttsCast"); if (box) box.checked = CAST.on;
+      toast(CAST.on ? "多角色朗读：已开启（旁白仍用你选的音色）" : "多角色朗读：已关闭", "users");
+      if (TTS.eng && TTS.eng.playing()) TTS.eng.seekIdx(TTS.eng.idx());
+    });
+    var sc = qs("#castScan");
+    if (sc) sc.addEventListener("click", function () { castScan(); castApplyUnits(); castRender(); toast("已按对白重新识别角色", "users"); });
+    var cl = qs("#castClear");
+    if (cl) cl.addEventListener("click", function () { CAST = { on: false, chars: {}, lines: [] }; castPut(null); castApplyUnits(); castRender(); var b = qs("#ttsCast"); if (b) b.checked = false; toast("本书角色表已清空", "rotate-ccw"); });
+    var mo = qs("#castModel");
+    if (mo) mo.addEventListener("click", function () { castModel(); });
+    body.querySelectorAll("[data-cast-gender]").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var c = CAST.chars[sel.dataset.castGender]; if (!c) return;
+        c.gender = sel.value; c.locked = !!sel.value;
+        InkCast.assignVoices(CAST.chars, castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }));
+        castPut(CAST); castApplyUnits(); castRender();
+      });
+    });
+    body.querySelectorAll("[data-cast-voice]").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var c = CAST.chars[sel.dataset.castVoice]; if (!c) return;
+        if (sel.value) { c.voiceK = sel.value; c.locked = true; } else { delete c.voiceK; c.locked = false; }
+        castPut(CAST); castApplyUnits(); castRender();
+      });
+    });
+    body.querySelectorAll("[data-cast-line]").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var l = CAST.lines[Number(sel.dataset.castLine)]; if (!l) return;
+        l.speaker = sel.value; l.user = true;
+        castPut(CAST); castApplyUnits();
+      });
+    });
+  }
+  /* L2：让模型按上下文判归属。白名单在本地（cast.js 的 applyModel），模型点的新名字不写进角色表。 */
+  async function castModel() {
+    if (!(window.API && API.hasModel && API.hasModel()) || !API.llm) { toast("要先在「主脑 · 模型配置」里填好模型", "alert-triangle"); return; }
+    if (!(CAST.lines || []).length) castScan();
+    var names = Object.keys(CAST.chars || {});
+    if (names.length < 2) { toast("先认出两个以上角色再让模型判", "info"); return; }
+    toast("正在让模型判对白归属…", "brain");
+    var lines = CAST.lines.slice(0, 120);
+    var list = lines.map(function (l, i) { return (i + 1) + ". " + String(l.text).slice(0, 80); }).join("\n");
+    var sys = "你是中文小说的对白归属标注器。只输出 JSON 数组，不要解释、不要代码块。";
+    var usr = "已知角色：" + names.join("、") + "\n下面是按顺序出现的对白。给每一句判一个说话人；判不出就用 null。\n" +
+      "输出格式：[{\"i\":1,\"speaker\":\"角色名\"},…]（i 从 1 开始，对应下面的序号）\n\n" + list;
+    try {
+      var txt = String(await API.llm(usr, sys, { temp: 0.1, maxTokens: 1200, timeout: 45000 }) || "");
+      var m = txt.match(/\[[\s\S]*\]/);
+      var arr = m ? JSON.parse(m[0]) : null;
+      if (!Array.isArray(arr)) { toast("模型没给出可用的 JSON，保留规则识别结果", "alert-triangle"); return; }
+      var pairs = arr.map(function (x) { return { i: Number(x && x.i) - 1, speaker: x && x.speaker }; }).filter(function (x) { return x.i >= 0; });
+      InkCast.applyModel(CAST, pairs);
+      castPut(CAST); castApplyUnits(); castRender();
+      toast("模型归属已并入（" + pairs.length + " 句）", "circle-check");
+    } catch (e) {
+      toast("模型判归属失败，保留规则结果：" + String((e && e.message) || e).slice(0, 40), "alert-triangle");
+    }
+  }
+  (function castBind() {
+    var box = qs("#ttsCast");
+    if (box) {
+      box.checked = !!CAST.on;
+      box.addEventListener("change", function () {
+        CAST.on = box.checked;
+        if (CAST.on && !(CAST.lines || []).length) castScan();
+        castPut(CAST); castApplyUnits();
+        toast(CAST.on ? "多角色朗读：已开启" : "多角色朗读：已关闭", "users");
+        if (TTS.eng && TTS.eng.playing()) TTS.eng.seekIdx(TTS.eng.idx());
+      });
+    }
+    var open = qs("#ttsCastOpen");
+    if (open) open.addEventListener("click", function () {
+      hideSpeedPop();
+      if (!(CAST.lines || []).length) castScan();
+      castRender();
+      var p = qs("#castPanel");
+      if (p) { p.hidden = false; requestAnimationFrame(function () { p.classList.add("on"); }); }
+    });
+    var x = qs("#castX");
+    if (x) x.addEventListener("click", function () {
+      var p = qs("#castPanel");
+      if (p) { p.classList.remove("on"); setTimeout(function () { p.hidden = true; }, 240); }
+    });
+  })();
+  castApplyUnits();
+
   /* 本机声线兜底开关：默认关（api.js 的 sysFallbackOn 是唯一真源，这里只做镜像） */
   (function () {
     var box = qs("#ttsSysFb");

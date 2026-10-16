@@ -392,16 +392,24 @@
       }
       await simSegment(text, id, cands.length ? "本机声线全部哑火" : "本机没有该语言或性别的声线");
     }
-    async function neuralSegment(text, id) {
-      var v = curVoice();
+    async function neuralSegment(text, id, u) {
+      /* 多角色朗读：单元自带 voiceK 时用它（角色音），否则用用户选的音色（旁白） */
+      var v = (u && u.voiceK && window.InkVoice && InkVoice.meta(u.voiceK)) || curVoice();
       st.neuralWhy = "";
       if (!v || !v.edge || !v.id) return false;   /* 这款音色本来就没有神经版本，不算故障 */
       /* 音色念不出这段正文时，端点不报错、直接回 0 字节空音频（实测：英文音色 + 纯中文段落）。
          先在本机判掉：省一次注定为空的往返，更把原因说准 ——
          「这款音色念不出中文」是可以换个音色解决的，「神经合成未响应」会让读者去查网络。 */
+      var swappedFrom = "";
       if (window.InkVoice && InkVoice.canSpeak && !InkVoice.canSpeak(v, text)) {
-        st.neuralWhy = "这款音色念不出正文语言";
-        return false;
+        /* 先找替身：用户选的是「一位朗读者」，不是「一种语言」。
+           中文书里夹一段英文、或者随手点了一款日文音色，都该自己找到念得出来的人继续读，
+           而不是停下来报错（那是「选了错音色就一直报错」的病根）。
+           多语种音色优先 —— 一款能念几十种语言。段落语言切回时天然切回原音色（每段都重算）。 */
+        var alt = InkVoice.pickForText ? InkVoice.pickForText(text, v) : null;
+        if (!alt) { st.neuralWhy = "这款音色念不出正文语言"; return false; }
+        swappedFrom = v.name;
+        v = alt;
       }
       var chunks = neuralChunks(text);
       var url = function (t) {
@@ -435,11 +443,13 @@
         emit("onTick", (st.i + (i + 1) / chunks.length) / st.units.length);
         if (halt(id)) return true;
       }
-      emit("onMode", { mode: "neural", voice: v.name });
+      emit("onMode", { mode: "neural", voice: v.name, cast: (u && u.cast) || "",
+        note: swappedFrom ? "该段语言与所选音色不同 · 已自动换声（原音色：" + swappedFrom + "）" : "" });
       return true;
     }
-    async function playSegment(text, id) {
-      var okNeural = await neuralSegment(text, id);
+    async function playSegment(u, id) {
+      var text = String((u && u.text) || "");
+      var okNeural = await neuralSegment(text, id, u);
       if (halt(id)) return;
       if (okNeural) return;
       /* 神经链路没拿到声：默认就此停住并把原因说清。
@@ -447,9 +457,12 @@
          读者甚至察觉不到自己在听降级音，只会觉得「这个软件音色就是这么差」。
          只有用户显式打开「本机声线兜底」才走系统声线（离线 / 静态托管时的活路）。 */
       if (sysFallbackOn()) { await sysSegment(text, id); return; }
+      /* 与音色有关的停机：**不关朗读条**。条子一关，换音色的下拉跟着消失，
+         用户只能重按朗读、拿同一款念不出的音色再错一次（实测复现过）。
+         改发 halted：徽标留下原因、播放键拨回 ▶，换一款音色再点 ▶ 即续读。 */
       st.dead = true; st.paused = false;
-      emit("onState", "done", (st.neuralWhy || "神经合成未响应") +
-        " · 朗读已停止；离线时可在「语速」弹层里打开本机声线兜底");
+      emit("onMode", { mode: "none", note: st.neuralWhy || "神经合成未响应" });
+      emit("onState", "halted", (st.neuralWhy || "神经合成未响应") + " · 换一款音色再点播放");
     }
     async function run(id) {
       while (st.i < st.units.length) {
@@ -457,7 +470,7 @@
         if (st.stopBi != null && st.units[st.i].bi >= st.stopBi) { finish("本章读完"); return; }
         if (st.stopAt && Date.now() >= st.stopAt) { finish("定时时间到"); return; }
         emit("onSegment", st.units[st.i].bi, st.i);
-        await playSegment(st.units[st.i].text, id);
+        await playSegment(st.units[st.i], id);
         if (halt(id)) return;
         st.i++;
       }

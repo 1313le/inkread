@@ -73,9 +73,33 @@
   function canSpeak(v, text) {
     var s = String(text || "");
     if (!s.trim()) return false;
+    /* 多语种音色（名字里带 Multilingual）一款能念几十种语言 —— 别按它挂靠的 locale 拦死。
+       实测（真打 /api/tts）：en-US-AndrewMultilingualNeural 念 中/日/韩/法/德/西/俄/意/葡 全部有声，
+       而普通音色喂外语只回 0 字节。 */
+    if (/Multilingual/i.test(String((v && v.id) || ""))) return true;
     var fam = String((v && v.lang) || (v && v.id) || "").toLowerCase().slice(0, 2);
     if (fam === "zh" || fam === "ja" || fam === "ko") return true;   /* 汉字／假名都念得出，中英混排实测有声 */
     return /[A-Za-z]/.test(s);                                        /* 其余音色没有拉丁字母就只剩静音 */
+  }
+  /* 给一段「当前音色念不出」的正文找一位念得出来的人：
+     ① 多语种音色（一款能念几十种语言，正是为这种场面造的）→ ② 同语言的音色；
+     性别尽量跟着原音色（找不到就退回不挑性别）；已装的优先 —— 用户装过谁就先用谁。
+     段落语言换回来时无需回切：朗读引擎每一段都重算这一次，选定的音色天然接着生效。 */
+  function pickForText(text, v) {
+    var lang = langOf(text);
+    var pool = (VOICES || []).filter(function (x) { return x.edge && x.id; });
+    var inst = installed();
+    function best(list) {
+      var cands = list.filter(function (x) { return x.k !== (v && v.k); });
+      if (!cands.length) return null;
+      var on = cands.filter(function (x) { return inst.indexOf(x.k) >= 0; });
+      var use = on.length ? on : cands;
+      var g = (v && v.gender) || "";
+      var byG = use.filter(function (x) { return !g || x.gender === g; });
+      return byG[0] || use[0];
+    }
+    return best(pool.filter(function (x) { return /Multilingual/i.test(x.id); }))
+        || best(pool.filter(function (x) { return x.lang === lang && !/Multilingual/i.test(x.id); }));
   }
   /* 兜底声线按「正文语言」挑，不按所选音色的语言 ——
      读的是中文书、手上却选了款英文音色时，要的是「能把这段念出来的人」，
@@ -303,7 +327,12 @@
     yang:  { id: "zh-CN-YunyangNeural" },    /* 播音男声 */
     ava:   { id: "en-US-AvaNeural" },        /* 温暖女声 */
     guy:   { id: "en-US-GuyNeural" },        /* 激昂男声 */
-    sonia: { id: "en-GB-SoniaNeural" }       /* 英音优雅女声 */
+    sonia: { id: "en-GB-SoniaNeural" },      /* 英音优雅女声 */
+    /* 全能音色（v2.24.2）：多语种音色一款能念几十种语言（实测 中/日/韩/法/德/西/俄/意/葡 全有声），
+       中文书夹英文段、外文原著都用得上 —— 预装一男一女两款，读者在下拉里直接挑得到。
+       它们同时也是「所选音色念不出这段」时的自动替身（见 InkVoice.pickForText）。 */
+    andrew:   { id: "en-US-AndrewMultilingualNeural" },   /* 多语沉稳男声 */
+    avamulti: { id: "en-US-AvaMultilingualNeural" }       /* 多语温暖女声 */
   };
   var AKEY = {};
   Object.keys(ALIAS).forEach(function (a) {
@@ -415,6 +444,7 @@
     pairFor: pairFor, pairName: pairName, usedBy: usedBy,
     /* 声线挑选：api.js 与试听共用 */
     langOf: langOf, pickSys: pickSys, candidates: candidates, sexOf: sexOf, canSpeak: canSpeak,
+    pickForText: pickForText,
     /* 神经合成地址 */
     ttsUrl: ttsUrl, ttsUrlOf: ttsUrlOf,
     /* 云音色（Moss） */
