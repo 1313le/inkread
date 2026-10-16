@@ -2,7 +2,7 @@
 <html lang="zh-CN" data-theme="paper">
 <head>
 <meta charset="UTF-8">
-<script>try{var D=document.documentElement,S=sessionStorage;if(S.getItem("inkread.boot.v1"))D.classList.add("boot-skip");if(S.getItem("inkread.nav.v1")){S.removeItem("inkread.nav.v1");D.classList.add("nav-in")}try{var V=new CSSStyleSheet();V.replaceSync("@view-transition{navigation:auto}");if(V.cssRules.length)D.classList.add("vt")}catch(v){}}catch(e){}</script>
+<script>try{var D=document.documentElement,S=sessionStorage;if(S.getItem("inkread.boot.v1"))D.classList.add("boot-skip");if(S.getItem("inkread.nav.v1")){S.removeItem("inkread.nav.v1");D.classList.add("nav-in")}try{var V=new CSSStyleSheet();V.replaceSync("@view-transition{navigation:auto}");if(V.cssRules.length)D.classList.add("vt")}catch(v){}if(D.classList.contains("nav-in")&&D.classList.contains("vt")){var K=document.createElement("i");K.className="nav-seal-live";K.setAttribute("aria-hidden","true");K.textContent="墨";D.appendChild(K);setTimeout(function(){K.remove()},900)}}catch(e){}</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>墨读 InkRead · 阅读</title>
 <link rel="icon" href="data:,">
@@ -743,6 +743,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
               <button class="more-item" role="menuitem" id="tAuto"><span id="icAuto"></span><span class="mi-k">自动翻页</span><em>按你的速度推进</em></button>
               <button class="more-item" role="menuitem" data-appearance><span id="icAppearance"></span><span class="mi-k">外观与阅读设置</span><em>主题 · 强度 · 时间</em></button>
               <button class="more-item" role="menuitem" data-more="mode"><span id="icMoreMode"></span><span class="mi-k">阅读模式…</span><em>书籍 / 文献 / 学习 / 漫画</em></button>
+              <button class="more-item" role="menuitem" id="tReadSet" aria-haspopup="dialog" aria-controls="readSet"><span id="icReadSet"></span><span class="mi-k">阅读设置</span><em>翻页 · 朗读 · 排版</em></button>
               <!-- 翻译三态收在一处：关闭 / 段落对照 / 悬停译。划词翻译不受此开关影响，随时可用 -->
               <div class="more-item as-group" role="group" aria-label="翻译方式">
                 <span id="icMoreTrans"></span><span class="mi-k">翻译</span><em>划词随时可用</em>
@@ -840,6 +841,8 @@ html[data-reduce="on"] .ar-p { transition: none; }
             <div class="tmp-row tmp-presets">
               <button data-sp="0.75">0.75×</button><button data-sp="1">1×</button><button data-sp="1.25">1.25×</button><button data-sp="1.5">1.5×</button><button data-sp="2">2×</button><button data-sp="3">3×</button>
             </div>
+            <div class="tmp-row"><b>音量</b><output id="ttsVolVal">100%</output></div>
+            <input type="range" id="ttsVolRange" min="0" max="1" step="0.05" value="1" aria-label="朗读音量">
             <label class="tmp-row" title="默认关：神经合成拿不到声时停下并说明原因，绝不悄悄换成机械音。离网 / 静态托管时才需要打开。">
               <b>本机声线兜底</b>
               <input type="checkbox" id="ttsSysFb" aria-label="神经合成失败时改用本机声线">
@@ -1082,6 +1085,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
   <button class="tool-btn wide" data-aa-toggle title="排版 · 边读边调（A）" aria-expanded="false" aria-controls="aaPanel"><span id="immIcAa"></span>排版</button>
   <button class="tool-btn wide" id="immSpeak" title="朗读 · 从当前页开始读"><span id="immIcSpeak"></span>朗读</button>
   <button class="tool-btn wide" id="immAuto" title="自动翻页（R）" aria-pressed="false"><span id="immIcAuto"></span>自动翻页</button>
+  <button class="tool-btn wide" id="immSet" title="阅读设置（翻页 · 朗读 · 排版）"><span id="immIcSet"></span>设置</button>
   <span class="ib-sep"></span>
   <button class="tool-btn" id="immPrev" title="上一页" aria-label="上一页"><span id="immIcPrev"></span></button>
   <span class="ib-ind" id="immPage">1 / 1</span>
@@ -1097,6 +1101,48 @@ html[data-reduce="on"] .ar-p { transition: none; }
     <button class="aa-x" id="castX" aria-label="收起角色表"><span id="icCastX"></span></button>
   </header>
   <div class="aa-body" id="castBody"></div>
+</aside>
+
+<!-- 阅读设置（v2.25.1 · 方案 B）：散落的阅读相关设置收成一处 —— 翻页 / 朗读 / 排版转发。
+     与角色表同范式：复用版式 sheet 的形态与样式（.aa.aa-sheet），静态 markup + 自制开合。 -->
+<aside class="aa aa-sheet" id="readSet" hidden role="dialog" aria-label="阅读设置">
+  <header class="aa-head">
+    <b>阅读设置</b>
+    <button class="aa-x" id="setX" aria-label="收起阅读设置"><span id="icSetX"></span></button>
+  </header>
+  <div class="aa-body">
+    <section class="ap-sec"><h4>翻页<span class="ap-sec-note">自动翻页 · 速度与开关</span></h4>
+      <div class="ap-row"><span class="ap-k">速度</span>
+        <span class="seg seg-xs" id="rsAutoSeg" role="group" aria-label="自动翻页速度">
+          <button class="seg-btn" data-rsa="0.6">0.6×</button>
+          <button class="seg-btn" data-rsa="0.8">0.8×</button>
+          <button class="seg-btn" data-rsa="1">1.0×</button>
+          <button class="seg-btn" data-rsa="1.3">1.3×</button>
+          <button class="seg-btn" data-rsa="1.6">1.6×</button>
+        </span></div>
+      <div class="ap-hint" id="rsAutoHint"></div>
+      <div class="ap-row"><span class="ap-k">自动翻页</span>
+        <button class="switch" id="rsAutoSw" aria-pressed="false" aria-label="自动翻页开关"></button></div>
+    </section>
+    <section class="ap-sec"><h4>朗读<span class="ap-sec-note">语速 · 音量 · 音色</span></h4>
+      <div class="ap-row"><span class="ap-k">语速</span>
+        <span class="ap-range"><input type="range" id="rsSpd" min="0.5" max="3" step="0.25" value="1" aria-label="朗读语速"><output id="rsSpdVal">1×</output></span></div>
+      <div class="ap-row"><span class="ap-k">音量</span>
+        <span class="ap-range"><input type="range" id="rsVol" min="0" max="1" step="0.05" value="1" aria-label="朗读音量"><output id="rsVolVal">100%</output></span></div>
+      <div class="ap-row"><span class="ap-k">音色</span>
+        <span class="ap-c"><select class="ap-sel" id="rsVoice" aria-label="朗读音色"></select></span></div>
+      <div class="ap-row"><span class="ap-k">本机声线兜底</span>
+        <button class="switch" id="rsFb" aria-pressed="false" aria-label="神经合成失败时改用本机声线"></button></div>
+      <div class="ap-row"><span class="ap-k">多角色朗读</span>
+        <button class="switch" id="rsCast" aria-pressed="false" aria-label="本书启用多角色朗读"></button></div>
+      <div class="ap-hint">多角色的角色表在朗读条「1.0×」弹层里打开；语速/音色与朗读条同源同键。</div>
+    </section>
+    <section class="ap-sec"><h4>排版<span class="ap-sec-note">字号 · 行高 · 字体</span></h4>
+      <div class="ap-row"><span class="ap-k">正文版式</span>
+        <span class="ap-c"><button class="btn btn-ghost btn-sm" id="rsAa"><span id="icRsAa"></span>打开版式面板…</button></span></div>
+      <div class="ap-hint">版式改动即时生效，可边读边调。</div>
+    </section>
+  </div>
 </aside>
 
 <!-- 选中浮动工具条 -->
@@ -1295,7 +1341,9 @@ html[data-reduce="on"] .ar-p { transition: none; }
     /* v2.21 新增：出纸两个入口（文案随能力改写，图标不用改 —— 打印机就是打印机） */
     icExport: "download", icPrint: "printer",
     /* v2.24.2：多角色角色表 */
-    icCastX: "x"
+    icCastX: "x",
+    /* v2.25.1：阅读设置（方案 B）—— 更多项 / 沉浸底栏 / 面板收起与版式转发 */
+    immIcSet: "settings", icReadSet: "settings", icSetX: "x", icRsAa: "type"
   };
   Object.keys(IC).forEach(function (id) {
     var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16);
@@ -2291,13 +2339,17 @@ html[data-reduce="on"] .ar-p { transition: none; }
 
   /* ------------------------------------------------------------
      v2.19.3 C：一键推荐疏密 —— 把五档各试排一遍，按实测选档
-     为什么不给云端模型判：好坏只取决于这本书在本机的真实块高、表行数与视口页高，
-     而这些是可测量的；模型只能按文体猜。猜错的代价读者看得见（就是最初那半页空白），
-     测出来的代价是「第几页剩几像素」。所以走本地实测试排，报告里也照实写没调模型。
+     为什么本地实测是主角：好坏只取决于这本书在本机的真实块高、表行数与视口页高，
+     而这些是可测量的；测出来的代价是「第几页剩几像素」，猜错的代价读者看得见。
      评分 cost = 页底空白率 + 0.5 × 跨页拆分率
        · 页底空白率：除末页外每页剩余高度的均值（末页空白是文章结尾，不是排版缺陷）
        · 跨页拆分率：被拆到跨页的结构单元数 / 块数（长段、长表、长列表各算一处）
      两档成本相差不到 1% 时保持读者当前档，不做「你以为你想要疏」的擅自改动。
+
+     v2.25.1（#91）：云端判 + 本地实测双轨 —— 各自做各自最擅长的：
+     本地试排出「这本书五档下的真实账」，已配模型时把账 + 内容特征一起交给主脑做文体取舍
+     （严格 JSON {den, reason}，本地白名单校验）；未配 / 超时 / 非法一律静默退回本地。
+     Key 仍只留本机、不进同步、不进仓库。报告写明走的哪条路 + 云端理由 + 本地账。
      ------------------------------------------------------------ */
   var DEN_TRIAL_CAP = 400;   /* 试排块数上限：长篇小说只取前 400 块，报告里明说是抽样 */
 
@@ -2344,19 +2396,58 @@ html[data-reduce="on"] .ar-p { transition: none; }
     return out;
   }
 
+  /* v2.25.1（#91）：云端那一半 —— 把五档实测表 + 内容特征交给主脑做文体取舍。
+     严格 JSON + 本地白名单；未配 / 超时 / 非法一律返回 null，调用方静默退回本地。 */
+  function denModelAsk(out) {
+    if (!(window.API && API.hasModel && API.hasModel()) || !API.llm) return Promise.resolve(null);
+    var types = {}, i, t;
+    for (i = 0; i < blocks.length && i < 1500; i++) { t = blocks[i].type || "p"; types[t] = (types[t] || 0) + 1; }
+    var sum = 0, cnt = 0;
+    for (i = 0; i < BLOCK_TEXT.length && i < 1500; i++) { t = BLOCK_TEXT[i]; if (t) { sum += t.length; cnt++; } }
+    var table = out.map(function (o) {
+      return "- " + o.k + "（" + InkTheme.DEN_NAME[o.k] + "）：" + o.pages + " 页 · 页底空白率 " +
+        Math.round(o.blank * 100) + "% · 跨页拆分 " + o.splitN + " 处 · 成本 " + (Math.round(o.cost * 1000) / 10);
+    }).join("\n");
+    var sys = "你是中文书刊的排版顾问。读者点「一键推荐疏密」时，你会拿到这本书在本机五档疏密下的实测排版表。"
+      + "档位键从紧到疏：" + InkTheme.DEN_ORDER.join(" / ") + "。只可从这些键里选一个。"
+      + "取舍原则：页底空白率越低越好、跨页拆分越少越好；两档成本差在 1% 内时取接近适中的一档；"
+      + "再结合文体（对话密集偏紧凑、散文诗歌偏疏朗）。"
+      + "严格输出一行 JSON，不要任何多余文字：{\"den\":\"档位键\",\"reason\":\"一句话中文理由（不超过 40 字）\"}";
+    var usr = "《" + (doc.title || "未命名") + "》· 文体 " + (doc.type || "book") + " · 共 " + blocks.length +
+      " 块（本次量了 " + out.n + (out.sampled ? "，抽样" : "") + "）· 块型分布 " + JSON.stringify(types) +
+      " · 平均块长 " + (cnt ? Math.round(sum / cnt) : 0) + " 字\n实测表（成本 = 空白率 + 0.5×拆分率）：\n" + table;
+    return API.llm(sys, usr, { temp: 0.2, maxTokens: 200, timeout: 15000 }).then(function (txt) {
+      var m = String(txt || "").match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      var j = null;
+      try { j = JSON.parse(m[0]); } catch (e) { return null; }
+      if (!j || InkTheme.DEN_ORDER.indexOf(j.den) < 0) return null;   /* 白名单：越界一律不认 */
+      return { den: j.den, reason: String(j.reason || "").slice(0, 60) };
+    }).catch(function () { return null; });
+  }
+
   /* 给读者看的账：量了什么、按什么判、为什么是这一档，三句话全说清 */
-  function denReportTxt(out, pick, curK, tie) {
+  function denReportTxt(out, pick, curK, tie, path) {
     var pc = function (v) { return Math.round(v * 100) + "%"; };
     var each = out.map(function (o) { return InkTheme.DEN_NAME[o.k] + " " + pc(o.blank); }).join(" · ");
-    return "本地实测试排（未调用云端模型）" + (out.sampled ? "，取本书前 " + out.n + " 块" : "，全书 " + out.n + " 块") +
+    var mode = (path && path.mode) || "local";
+    var head = mode === "cloud" ? "云端建议采纳 · 理由：" + (path.reason || "—") + "。"
+      : mode === "fallback" ? "云端未采纳（返回不合规或超时），按本地实测试排。"
+      : "本地实测试排（未配置模型；在「主脑 · 模型配置」里填好后可让云端判）。";
+    return head + (out.sampled ? "取本书前 " + out.n + " 块" : "全书 " + out.n + " 块") +
       "。页底空白率：" + each + "。" +
       "已用「" + InkTheme.DEN_NAME[pick.k] + "」：" + pick.pages + " 页 · 页底空白 " + pc(pick.blank) +
       " · 跨页拆分 " + pick.splitN + " 处" +
-      (pick.k === curK ? "（与你原档一致，未改动）" : tie ? "（与你的档并列，取接近适中的一档）" : "（成本最低）") +
-      "。档只改字号·行高·段距三值，栏宽与字体不动；同分 1% 以内不改你已有的设置。";
+      (pick.k === curK ? "（与你原档一致，未改动）"
+        : mode === "cloud" ? "（云端所判）"
+        : tie ? "（与你的档并列，取接近适中的一档）" : "（成本最低）") +
+      (mode === "cloud" && path.localBest && path.localBest !== pick.k
+        ? "。本地成本最低的是「" + InkTheme.DEN_NAME[path.localBest] + "」，与云端所判不同档。" : "") +
+      (mode === "cloud" ? "。档只改字号·行高·段距三值，栏宽与字体不动。"
+        : "。档只改字号·行高·段距三值，栏宽与字体不动；同分 1% 以内不改你已有的设置。");
   }
 
-  window.inkDenAI = function () {
+  window.inkDenAI = async function () {
     var out = denTrial();
     if (!out) { toast("竖向浏览没有页底可量，切到横向翻页再试", "info"); return; }
     var curK = InkTheme.denKey(InkTheme.read());
@@ -2364,19 +2455,34 @@ html[data-reduce="on"] .ar-p { transition: none; }
     out.forEach(function (o) { if (o.cost < min) min = o.cost; });
     /* 并列（成本差 < 1%）里不选最疏的，选离「适中」最近的：几个档一样好时，
        默认档是读者最熟悉的观感，也不至于把字号悄悄推到 18px。 */
-    var midI = InkTheme.DEN_ORDER.indexOf("mid"), pick = null, pickGap = Infinity;
+    var midI = InkTheme.DEN_ORDER.indexOf("mid"), localPick = null, pickGap = Infinity;
     out.forEach(function (o) {
       if (o.cost - min >= 0.01) return;
       var gap = Math.abs(InkTheme.DEN_ORDER.indexOf(o.k) - midI);
-      if (gap < pickGap) { pickGap = gap; pick = o; }
+      if (gap < pickGap) { pickGap = gap; localPick = o; }
     });
-    /* 当前档已在并列里 → 原地不动，不因一次点击就改掉读者的版面 */
+    /* 当前档已在并列里 → 原地不动，不因一次点击就改掉读者的版面（本地路上生效） */
     var keep = null;
     out.forEach(function (o) { if (o.k === curK && o.cost - min < 0.01) keep = o; });
-    if (keep) pick = keep;
+    if (keep) localPick = keep;
+
+    /* 双轨：配了模型 → 云端在实测账上做文体取舍；未配 / 失败 → 本地实测（见 §文件头） */
+    var hasModel = !!(window.API && API.hasModel && API.hasModel() && API.llm);
+    var path = { mode: hasModel ? "fallback" : "nomodel" };
+    var pick = localPick;
+    if (hasModel) {
+      toast("本地实测完成 · 正在请主脑判…", "sparkles");
+      var cloud = await denModelAsk(out);
+      var cloudPick = null;
+      if (cloud) out.forEach(function (o) { if (o.k === cloud.den) cloudPick = o; });
+      if (cloudPick) {
+        pick = cloudPick;
+        path = { mode: "cloud", reason: cloud.reason, localBest: localPick.k };
+      }
+    }
     if (pick.k !== curK) InkTheme.commit({ den: pick.k });
-    InkTheme.setDenReport(denReportTxt(out, pick, curK, pick.cost > min + 1e-9));
-    toast("已按实测选「" + InkTheme.DEN_NAME[pick.k] + "」：" + pick.pages + " 页 · 页底空白 " +
+    InkTheme.setDenReport(denReportTxt(out, pick, curK, pick.cost > min + 1e-9, path));
+    toast((path.mode === "cloud" ? "云端建议「" : "已按实测选「") + InkTheme.DEN_NAME[pick.k] + "」：" + pick.pages + " 页 · 页底空白 " +
       Math.round(pick.blank * 100) + "% · 拆分 " + pick.splitN + " 处", "sparkles");
   };
 
@@ -4221,6 +4327,9 @@ html[data-reduce="on"] .ar-p { transition: none; }
     /* 「更多」里全是要先读完才能选的字，页在底下自己翻等于抢答 */
     var mp = document.getElementById("morePop");
     if (mp && !mp.hidden) return "panel";
+    /* 阅读设置面板同理：调完翻页速度/音量再继续翻才合读者的预期 */
+    var rs = document.getElementById("readSet");
+    if (rs && !rs.hidden) return "panel";
     if (tocOpen || tk.open || tOpen) return "panel";
     var rd = qs("#reader");
     if (rd.dataset.notes === "open" || rd.dataset.side === "open") return "panel";
@@ -4678,6 +4787,17 @@ html[data-reduce="on"] .ar-p { transition: none; }
   qs("#ttsNext").addEventListener("click", function () { if (TTS.eng) TTS.eng.seekIdx(TTS.eng.idx() + 1); });
 
   /* 语速弹层（起点读书 0.5~3×；偏好持久化，换速从当前段重合成） */
+  /* 音量：唯一真源在 API.ttsVol（本机键 inkread.tts.vol.v1）；弹层与阅读设置两处滑杆都从这里同步 */
+  function paintVolUI() {
+    var v = (window.API && API.ttsVol) ? API.ttsVol() : 1;
+    var pc = Math.round(v * 100) + "%";
+    var r1 = qs("#ttsVolRange"), o1 = qs("#ttsVolVal");
+    if (r1) r1.value = v;
+    if (o1) o1.textContent = pc;
+    var r2 = qs("#rsVol"), o2 = qs("#rsVolVal");
+    if (r2) r2.value = v;
+    if (o2) o2.textContent = pc;
+  }
   function paintSpeedUI() {
     qs("#ttsSpeed").textContent = TTS.speed + "×";
     qs("#ttsSpeedVal").textContent = TTS.speed + "×";
@@ -4685,6 +4805,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
     qsa("#ttsSpeedPop .tmp-presets button").forEach(function (b) {
       b.classList.toggle("on", parseFloat(b.dataset.sp) === TTS.speed);
     });
+    paintVolUI();
   }
   function hideSpeedPop() { qs("#ttsSpeedPop").hidden = true; }
   function hideTimerPop() { qs("#ttsTimerPop").hidden = true; }
@@ -4868,7 +4989,8 @@ html[data-reduce="on"] .ar-p { transition: none; }
     var usr = "已知角色：" + names.join("、") + "\n下面是按顺序出现的对白。给每一句判一个说话人；判不出就用 null。\n" +
       "输出格式：[{\"i\":1,\"speaker\":\"角色名\"},…]（i 从 1 开始，对应下面的序号）\n\n" + list;
     try {
-      var txt = String(await API.llm(usr, sys, { temp: 0.1, maxTokens: 1200, timeout: 45000 }) || "");
+      /* API.llm 的签名是 (sys, user) —— 别按变量名顺序顺手写反（v2.25.0 首版就反过一次） */
+      var txt = String(await API.llm(sys, usr, { temp: 0.1, maxTokens: 1200, timeout: 45000 }) || "");
       var m = txt.match(/\[[\s\S]*\]/);
       var arr = m ? JSON.parse(m[0]) : null;
       if (!Array.isArray(arr)) { toast("模型没给出可用的 JSON，保留规则识别结果", "alert-triangle"); return; }
@@ -4907,6 +5029,117 @@ html[data-reduce="on"] .ar-p { transition: none; }
     });
   })();
   castApplyUnits();
+
+  /* ------------------------------------------------------------
+     v2.25.1 · 阅读设置（方案 B）：翻页（自动翻页档位）/ 朗读（语速·音量·音色·兜底·多角色）/
+     排版（转发 Aa）。与各既有控件同源：同键、同 setter —— 开面板先同步现况，
+     这里改一处，朗读条弹层下次打开即同值。
+     ------------------------------------------------------------ */
+  (function () {
+    var sheet = qs("#readSet");
+    if (!sheet) return;
+    function setSync() {
+      qsa("#rsAutoSeg .seg-btn").forEach(function (b) {
+        b.classList.toggle("on", Math.abs(parseFloat(b.dataset.rsa) - AUTO.mult) < 1e-9);
+      });
+      var ah = qs("#rsAutoHint");
+      if (ah) ah.textContent = "现档 " + AUTO.mult + "× · " + autoReadTxt();
+      var asw = qs("#rsAutoSw");
+      if (asw) { asw.classList.toggle("on", !!AUTO.on); asw.setAttribute("aria-pressed", String(!!AUTO.on)); }
+      var sp = qs("#rsSpd");
+      if (sp) sp.value = TTS.speed;
+      var spv = qs("#rsSpdVal");
+      if (spv) spv.textContent = TTS.speed + "×";
+      paintVolUI();
+      var sel = qs("#rsVoice");
+      if (sel && window.InkVoice) {
+        var on = InkVoice.list().filter(function (v) { return v.installed && v.edge; });
+        sel.innerHTML = on.map(function (v) {
+          return '<option value="' + v.k + '">' + esc(v.name) + "</option>";
+        }).join("");
+        sel.value = InkVoice.current();
+      }
+      var fb = qs("#rsFb");
+      var fbon = !!(window.API && API.ttsSysFallback && API.ttsSysFallback());
+      if (fb) { fb.classList.toggle("on", fbon); fb.setAttribute("aria-pressed", String(fbon)); }
+      var cst = qs("#rsCast");
+      if (cst) { cst.classList.toggle("on", !!CAST.on); cst.setAttribute("aria-pressed", String(!!CAST.on)); }
+    }
+    function setOpen() {
+      hideSpeedPop();
+      if (morePop && !morePop.hidden) closeMore();
+      var t = qs("#tAa2");
+      if (t && t.classList.contains("active")) t.click();   /* 同时只留一张 sheet：版式开着就让位 */
+      setSync();
+      sheet.hidden = false;
+      requestAnimationFrame(function () { sheet.classList.add("on"); });
+    }
+    function setClose() {
+      sheet.classList.remove("on");
+      setTimeout(function () { sheet.hidden = true; }, 240);
+    }
+    qs("#tReadSet").addEventListener("click", function () { closeMore(); setOpen(); });
+    var ims = qs("#immSet");
+    if (ims) ims.addEventListener("click", function () { setOpen(); });
+    qs("#setX").addEventListener("click", function () { setClose(); });
+    /* Esc 先关面板（capture 置 __inkEscHandled，免得同一键又触发沉浸态退出） */
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !sheet.hidden && !e.__inkEscHandled) {
+        e.preventDefault(); e.__inkEscHandled = true; setClose();
+      }
+    }, true);
+    /* 翻页：档位直写 AUTO.mult（与 autoStep 同一套存档/重定时） */
+    qsa("#rsAutoSeg .seg-btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        AUTO.mult = parseFloat(b.dataset.rsa) || 1;
+        autoSave(); autoPaint(); autoRetime(); setSync();
+      });
+    });
+    qs("#rsAutoSw").addEventListener("click", function () { autoToggle(); setSync(); });
+    /* 朗读：语速 —— 与 #ttsSpeedRange 同一写入（TTS.speed + 同键 + 播放中即换） */
+    qs("#rsSpd").addEventListener("change", function () {
+      TTS.speed = Math.max(0.5, Math.min(3, parseFloat(this.value) || 1));
+      try { localStorage.setItem("inkread.tts.speed.v1", String(TTS.speed)); } catch (e) {}
+      paintSpeedUI(); setSync();
+      if (TTS.eng && TTS.eng.playing()) TTS.eng.setSpeed(TTS.speed);
+    });
+    /* 音量 —— API.ttsVol 唯一真源（写键 + 正在放的那条音频当场改） */
+    function applyVol(v) {
+      if (window.API && API.ttsVol) API.ttsVol(v);
+      paintVolUI();
+    }
+    qs("#rsVol").addEventListener("input", function () { applyVol(this.value); });
+    var tvo = qs("#ttsVolRange");
+    if (tvo) tvo.addEventListener("input", function () { applyVol(this.value); });
+    qs("#rsVoice").addEventListener("change", function () {
+      InkVoice.setCurrent(this.value);
+      if (TTS.eng) TTS.eng.setVoice(this.value);
+      paintVoiceSel();
+      toast("朗读音色： " + InkVoice.meta(this.value).name, "audio-lines");
+    });
+    qs("#rsFb").addEventListener("click", function () {
+      var on = this.getAttribute("aria-pressed") !== "true";
+      API.ttsSysFallback(on);
+      this.classList.toggle("on", on); this.setAttribute("aria-pressed", String(on));
+      var box = qs("#ttsSysFb"); if (box) box.checked = on;
+      toast(on ? "神经合成失败时改用本机声线" : "只保留特色音色：失败就停下并说明原因", "audio-lines");
+    });
+    qs("#rsCast").addEventListener("click", function () {
+      var on = this.getAttribute("aria-pressed") !== "true";
+      CAST.on = on;
+      if (CAST.on && !(CAST.lines || []).length) castScan();
+      castPut(CAST); castApplyUnits();
+      var box = qs("#ttsCast"); if (box) box.checked = on;
+      this.classList.toggle("on", on); this.setAttribute("aria-pressed", String(on));
+      toast(on ? "多角色朗读：已开启" : "多角色朗读：已关闭", "users");
+      if (TTS.eng && TTS.eng.playing()) TTS.eng.seekIdx(TTS.eng.idx());
+    });
+    /* 排版：转发 Aa 面板（先收起自己，等滑动动画起步再叫版式） */
+    qs("#rsAa").addEventListener("click", function () {
+      setClose();
+      setTimeout(function () { var t = qs("#tAa2"); if (t) t.click(); }, 120);
+    });
+  })();
 
   /* 本机声线兜底开关：默认关（api.js 的 sysFallbackOn 是唯一真源，这里只做镜像） */
   (function () {

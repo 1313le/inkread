@@ -116,6 +116,7 @@
       u.lang = (sys && sys.lang) || (v && v.lang === "en" ? "en-US" : v && v.lang === "ja" ? "ja-JP" : "zh-CN");
       u.rate = Math.max(0.5, Math.min(3, (v && v.rate) || 1));
       u.pitch = Math.max(0.1, Math.min(2, (v && v.pitch) || 1));
+      u.volume = ttsVol();
       var done = false, started = false, t = null;
       var fin = function (ok, why) {
         if (done) return; done = true;
@@ -176,6 +177,7 @@
     return new Promise(function (resolve) {
       try { if (_cloudAudio) { _cloudAudio.pause(); _cloudAudio = null; } } catch (e) {}
       var a = new Audio(src);
+      a.volume = ttsVol();
       _cloudAudio = a;
       var settled = false;
       var fin = function () { if (settled) return; settled = true; if (_cloudAudio === a) _cloudAudio = null; resolve(); };
@@ -273,6 +275,7 @@
       if (prev) { try { prev.pause(); } catch (e) {} }
       if (prevFin) { try { prevFin(); } catch (e) {} }
       var a = new Audio(src);
+      a.volume = ttsVol();
       _neuralAudio = a;
       var settled = false, began = false;
       var fin = function () {
@@ -334,6 +337,21 @@
      默认关 —— 用户要的是「要么神经语音、要么说清为什么没有」，不是悄悄换个机械音。
      真离线（飞机上 / 静态托管没有 /api/tts 路由）时，打开它就能继续听。 */
   var K_SYSFB = "inkread.tts.sysfallback.v1";
+  var K_VOL = "inkread.tts.vol.v1";
+  /* 朗读音量（0–1，缺省 1）：只留本机、不进同步 —— 音量是这台设备/这副耳机的事。
+     神经（Edge）与云声线（Moss）走 Audio.volume，本机声线走 utterance.volume，三路同一真源。 */
+  function ttsVol() {
+    try {
+      var v = parseFloat(localStorage.getItem(K_VOL));
+      return isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
+    } catch (e) { return 1; }
+  }
+  function ttsVolSet(v) {
+    v = Math.max(0, Math.min(1, parseFloat(v)));
+    if (!isFinite(v)) v = 1;
+    try { localStorage.setItem(K_VOL, String(v)); } catch (e) {}
+    return v;
+  }
   function sysFallbackOn() { try { return localStorage.getItem(K_SYSFB) === "1"; } catch (e) { return false; } }
 /*__ENGINE_SLOT__*/
   function ttsEngine() {
@@ -1686,6 +1704,16 @@
       if (on === undefined) return sysFallbackOn();
       try { on ? localStorage.setItem(K_SYSFB, "1") : localStorage.removeItem(K_SYSFB); } catch (e) {}
       return sysFallbackOn();
+    },
+
+    /* GET/POST /api/tts/volume —— 朗读音量（0–1，缺省 1；仅本机，不进同步）。
+       写值时顺手把「正在放的那条」也改掉 —— 否则要等下一段才生效，读长段落时会像「没反应」。 */
+    ttsVol(v) {
+      if (v === undefined) return ttsVol();
+      var nv = ttsVolSet(v);
+      try { if (_cloudAudio) _cloudAudio.volume = nv; } catch (e) {}
+      try { if (_neuralAudio) _neuralAudio.volume = nv; } catch (e) {}
+      return nv;
     },
 
     /* 等系统声线列出来（首次取常是空数组）—— 试听与朗读共用这一份实现 */

@@ -2434,6 +2434,29 @@ html.nav-in:not(.vt) body::after {
   62%  { opacity: 1; transform: scale(1) rotate(0deg); }
   100% { opacity: 0; transform: scale(1) rotate(0deg); }
 }
+/* v2.25.1 · 印章回主路径（#92）：快照层盖住一切 live 的 fixed 装饰（v2.19.4 实测定论），
+   解法不是推迟动画，而是让这枚印成为「快照的一部分」：新文档放一枚
+   view-transition-name: ink-seal 的元素（app.js 在 nav 到达时注入），浏览器为它单开一个
+   快照组，::view-transition-new(ink-seal) 在 top layer 里播盖印 —— 不再被旧页快照盖压。
+   时间账：live 元素 0–200ms 恒为全印（快照图源必须是完整一枚印），落地收干；
+   快照组自 t=0 盖印、200ms 末帧收干 —— 两者在同一收尾窗口交接，之后不再有动作。
+   降级路径不注入此元素，印仍由上面的 body::after 盖；减少动效下不注入（无 at-rule 路径）。 */
+.nav-seal-live {
+  position: fixed; left: 50%; top: 50%; margin: -23px 0 0 -23px;
+  width: 46px; height: 46px; display: grid; place-items: center;
+  background: var(--accent); color: var(--on-accent); border-radius: 8px;
+  font-family: var(--font-kai); font-size: 26px; line-height: 1; font-style: normal;
+  pointer-events: none; opacity: 0; z-index: 942;
+}
+html.nav-in .nav-seal-live {
+  view-transition-name: ink-seal;
+  opacity: 1;
+  /* 收干对到快照组末帧（200ms）：80ms 内落定，不给转场留二次动作 */
+  animation: sealDry .08s linear .2s both;
+}
+@keyframes sealDry { from { opacity: 1; } to { opacity: 0; } }
+::view-transition-new(ink-seal) { z-index: 3; animation: navSeal .2s cubic-bezier(.2, 0, 0, 1) both; }
+
 /* 新页不做入场淡入：它的「到达」由揭纸（或快照层的掀走）负责。
    nav-landed 是 v2.19.4 补的钉子 —— app.js 在 260ms 摘掉 nav-in，只靠 nav-in 压制的话，
    类一走 appIn 就重新上膛，落地的页面自己再淡一遍（根因 A）。两条并存才堵得住。
