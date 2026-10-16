@@ -41,6 +41,8 @@
 }
 #ttsBar .tts-eng.warn { color: var(--amber-ink); border-color: var(--amber); }
 #ttsBar .bar { flex: 0 0 76px; min-width: 0; }
+/* v2.24.1：空进度底槽不显形 —— 播放前它既不可点也不显示状态，只会在界面上留一条谁都看不懂的白条 */
+#ttsBar.no-prog .bar { visibility: hidden; }
 #ttsBar .tts-ctl { font-family: var(--font-mono); font-size: 11.5px; min-width: 52px; }
 /* 播放键：主操作朱砂描边提示「正在听书」 */
 #ttsBar #ttsPlay { border-color: var(--mark); color: var(--mark-ink); border-radius: 50%; width: 34px; padding: 0; }
@@ -86,8 +88,9 @@
   box-shadow: 0 0 0 4px var(--accent-wash);
   border-radius: 3px;
 }
-/* 沉浸阅读时面板让位（听书继续播，不打断） */
-body.immersive #ttsBar, body.immersive .tts-mini-pop { display: none !important; }
+/* 沉浸阅读时面板让位（听书继续播，不打断）。
+   v2.24.1：朗读条与它的迷你弹层在沉浸态**放行** —— 沉浸底栏新增了「听书」入口，
+   再藏就等于点开一个开不了的条子。条子仍在文档流里、由 ttsSyncBook 重排，不压正文。 */
 /* v2.14 沉浸态：阅读底栏一并让位（顶栏/侧栏由 styles.css 的 immersive 规则收起；
    呼出全靠悬浮球，进面板仍是浮层滑入） */
 body.immersive .reader-dock { display: none !important; }
@@ -1070,6 +1073,8 @@ html[data-reduce="on"] .ar-p { transition: none; }
 </div>
 <div class="immerse-bar bottom hide" id="immBot">
   <button class="tool-btn wide" data-aa-toggle title="排版 · 边读边调（A）" aria-expanded="false" aria-controls="aaPanel"><span id="immIcAa"></span>排版</button>
+  <button class="tool-btn wide" id="immSpeak" title="朗读 · 从当前页开始读"><span id="immIcSpeak"></span>朗读</button>
+  <button class="tool-btn wide" id="immAuto" title="自动翻页（R）" aria-pressed="false"><span id="immIcAuto"></span>自动翻页</button>
   <span class="ib-sep"></span>
   <button class="tool-btn" id="immPrev" title="上一页" aria-label="上一页"><span id="immIcPrev"></span></button>
   <span class="ib-ind" id="immPage">1 / 1</span>
@@ -1251,6 +1256,8 @@ html[data-reduce="on"] .ar-p { transition: none; }
     icPalette: "palette", icAppearance: "palette",
     icFull: "maximize", immIcMark: "highlighter", immIcNotes: "notebook-pen", immIcExit: "minimize",
     immIcAppearance: "palette", immIcAa: "type",
+    /* v2.24.1：沉浸底栏补两枚 —— 全屏里也要能开听书、能开自动翻页 */
+    immIcSpeak: "volume-2", immIcAuto: "chevrons-right",
     immIcPrev: "chevron-left", immIcNext: "chevron-right",
     /* v9 新增：更多菜单 / 翻译 / 模式 / 全屏目录 */
     icMore: "ellipsis", icMoreMode: "wand-2", icMoreTrans: "languages", icStore2: "grid-2x2",
@@ -3638,6 +3645,9 @@ html[data-reduce="on"] .ar-p { transition: none; }
   }
   fwd("#tDir2", "#tDir");
   fwd("#tSpeak2", "#tSpeak");
+  /* 沉浸底栏的「听书」同样转发；「自动翻页」直接调 autoToggle（它要的是开/关两态，
+     转发到 #tAuto 只能在开的方向上有效）。开合状态由 autoPaint 同步到按钮上。 */
+  fwd("#immSpeak", "#tSpeak");
   /* 顶栏书签钮：打开覆盖侧栏并切到「书签」页（与更多里 #tSide 同一面板） */
   qs("#tBookmark").addEventListener("click", function () {
     setSide(true);
@@ -4205,6 +4215,18 @@ html[data-reduce="on"] .ar-p { transition: none; }
     var bar = qs("#autoBar");
     if (!bar) return;
     bar.hidden = !AUTO.on;
+    immBarPad();
+    /* 沉浸底栏那枚「自动翻页」开合两态都要跟着走：关着时它是入口，开着时它是状态。
+       不能放在下面那句 `if (!AUTO.on) return;` 之后 —— 那样关掉之后按钮永远停在「开」的样子。 */
+    var ia = qs("#immAuto");
+    if (ia) {
+      var ipaused = AUTO.manual || !!AUTO.blocked;
+      ia.classList.toggle("active", !!AUTO.on && !ipaused);
+      ia.setAttribute("aria-pressed", String(!!AUTO.on));
+      /* 文案跟 #autoPlay 同一口径：开着时再点是「暂停 / 继续」，不是「停止」——
+         停止归自动翻页条上那枚 ✕（与 #tAuto 的既有语义一致，别在这里另立一套）。 */
+      ia.title = !AUTO.on ? "自动翻页（R）" : (ipaused ? "继续自动翻页（R）" : "暂停自动翻页（R）");
+    }
     if (!AUTO.on) return;
     var paused = AUTO.manual || !!AUTO.blocked;
     qs("#icAutoPlay").innerHTML = icon(paused ? "play" : "pause", 16);
@@ -4361,6 +4383,8 @@ html[data-reduce="on"] .ar-p { transition: none; }
   qs("#autoDown").addEventListener("click", function () { autoStep(-1); });
   qs("#autoUp").addEventListener("click", function () { autoStep(1); });
   qs("#tAuto").addEventListener("click", function () { autoToggle(); });
+  var immAutoBtn = qs("#immAuto");
+  if (immAutoBtn) immAutoBtn.addEventListener("click", function () { autoToggle(); });
 
   /* 面板开合、划词、切后台都在这一秒内改变「该不该停」；200ms 兜底轮询之外，
      这三个事件让暂停当场反映到按钮上（WCAG 2.2.2 要求的是「随时能停」）。 */
@@ -4528,10 +4552,26 @@ html[data-reduce="on"] .ar-p { transition: none; }
      不重排就会让末行被条子拦腰切掉、页内又长出滚动条（autoSyncBook 治的是自动翻页条，
      同一个坑：两条互斥，见 autoStart 的自拒，所以各治各的）。通栏不分页，跳过。 */
   function ttsSyncBook() { if (!state.scroll) repaginate(false); }
-  function openTTSBar() { qs("#ttsBar").style.display = "flex"; ttsSyncBook(); }
+  /* 沉浸态：朗读条 / 自动翻页条都是**文档流**里的元素，会被固定的沉浸底栏（54px）整条盖住 ——
+     实测点开出自动翻页条后，条子中心命中的是 #immHint（底栏的提示语），暂停与调速全点不到
+     （WCAG 2.2 SC 2.2.2 要的「暂停手段一直可达」当场破功）。谁现身就让 .reader-main 让出那条带子。 */
+  function immBarPad() {
+    var rm = document.querySelector(".reader-main");
+    if (!rm) return;
+    var tb = qs("#ttsBar"), ab = qs("#autoBar");
+    var on = document.body.classList.contains("immersive") &&
+      ((tb && tb.style.display === "flex") || (ab && ab.style.display !== "none" && !ab.hidden));
+    rm.classList.toggle("bar-pad", !!on);
+  }
+  /* 空进度底槽不显形（v2.24.1）：播放前那条 76×6 的槽谁也点不动、也不显示任何状态，
+     读者只会问「这条白条是干什么的」。有进度再让它出现 —— 用 visibility 不用 display，
+     条子高度不变，ttsSyncBook 的重排账不必跟着改。 */
+  function ttsProg(on) { var b = qs("#ttsBar"); if (b) b.classList.toggle("no-prog", !on); }
+  function openTTSBar() { qs("#ttsBar").style.display = "flex"; ttsProg(false); immBarPad(); ttsSyncBook(); }
   function closeTTSBar() {
     qs("#ttsBar").style.display = "none";
     hideSpeedPop(); hideTimerPop();
+    immBarPad();
     ttsSyncBook();
   }
   function ttsCleanup() {
@@ -4551,7 +4591,10 @@ html[data-reduce="on"] .ar-p { transition: none; }
       qs("#ttsFrac").textContent = (i + 1) + " / " + SPEAK_UNITS.length;
       ttsFollow(bi);
     });
-    e.on("onTick", function (f) { qs("#ttsBarFill").style.width = Math.round(f * 100) + "%"; });
+    e.on("onTick", function (f) {
+      qs("#ttsBarFill").style.width = Math.round(f * 100) + "%";
+      if (f > 0) ttsProg(true);   /* 真开始读了才让底槽显形（见 ttsProg 注释） */
+    });
     /* 引擎徽标：现在真正在出声的是哪条链路，一眼看得见。
        降级（神经合成未响应）与静默（一句都没读出来）都用琥珀色标出来 ——
        旧版这里什么都不显示，机械音顶替神经音读者毫无察觉。 */
@@ -4928,6 +4971,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
     document.body.classList.add("immersive");
     var el = document.documentElement;
     if (el.requestFullscreen) { try { el.requestFullscreen().catch(function () {}); } catch (e) {} }
+    immBarPad();
     repaginate(false);
     immWake();
     toast("已进入全屏沉浸阅读 · 点击纸面中央呼出控件", "maximize");
@@ -4940,6 +4984,7 @@ html[data-reduce="on"] .ar-p { transition: none; }
     immBars(false);
     scPulse("immerse");
     if (document.fullscreenElement && document.exitFullscreen) { try { document.exitFullscreen().catch(function () {}); } catch (e) {} }
+    immBarPad();
     repaginate(false);
     toast("已退出全屏", "minimize");
   }
@@ -5131,10 +5176,17 @@ html[data-reduce="on"] .ar-p { transition: none; }
     else { clearTimeout(imm.timer); immBars(false); }
   });
 
-  /* 鼠标靠近上下边缘自动呼出 */
+  /* 鼠标靠近上下边缘自动呼出。
+     v2.24.1 修两件事（实测复现）：① 带子原来是 62 / 70px —— 沉浸态里窗口标题栏就贴着屏幕最顶
+     （形态钮实测在 y≈9–37），鼠标一往上走就叫出 46px 高的顶栏，把形态钮整条盖住
+     （命中测试：点在「靠右停靠」钮中心，命中 #immBar）⇒ 切不回浮动形态；
+     ② 指针正压在手柄/形态钮上时绝不唤醒 —— 保证「把鼠标移向标题栏」这个动作本身不会叫出顶栏。
+     顶栏仍够得着：贴最上沿几像素，或点纸面中央（既有的呼出/隐藏开关）。 */
   window.addEventListener("pointermove", function (e) {
     if (!imm.on || !immTop.classList.contains("hide")) return;
-    if (e.clientY < 62 || e.clientY > window.innerHeight - 70) immWake();
+    var t = e.target;
+    if (t && t.closest && t.closest("[data-inkw-bar], .inkw-bar, .inkw-btn")) return;
+    if (e.clientY <= 8 || e.clientY >= window.innerHeight - 12) immWake();
   });
 
   /* 浏览器原生退出全屏（Esc / F11）时同步退出沉浸态 */
