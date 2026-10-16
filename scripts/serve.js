@@ -1002,7 +1002,18 @@ async function docxToBlocks(buf) {
 }
 
 /* PDF：按 y 坐标把碎片归行（容差半行高），行内按 x 排序、间隙成空格；
-   行距超中位数 1.7 倍断段，英文行尾连字符去拼、词尾加空格，中文直拼。 */
+   断段与标题都按字号判（见下），英文行尾连字符去拼、词尾加空格，中文直拼。
+   —— v1.0.2 起 pdfjs 的行字号不再是"用完即弃"的容差参数：读者报「从 section 开始朗读
+      不识别」，根因是整份 PDF 塌成一个 p 块 —— 朗读只有一个单元（点哪都从头念）、
+      目录零项、「读完本章」找不到章界。旧判据两条都站不住：
+      ① 断段用「全局行距中位数 ×1.7」：一份每段只有一两行的短文档里，段间距本身就是
+         中位数，行内距反而是少数派，阈值永远够不着（canvas-probe.pdf 实测超阈值行数 0）。
+      ② 标题只认「第一段且 ≤80 字」：pdfjs 明写 24pt/18pt 对正文 12pt 的证据被丢掉。 */
+const PDF_HEAD_RATIO = 1.15;   /* 行字号 ≥ 正文×此倍数 → 标题候选 */
+const PDF_HEAD_MAX = 40;       /* 标题行长度上限（超了是"整段都放大"，不是标题） */
+const PDF_LEAD_MUL = 1.6;      /* 行距 > 该字号常规行距 ×此倍数 → 断段 */
+const PDF_FORM_RUN = 3;        /* 同字号同起点连续 ≥此数行 = 封面信息表 / 目录点线行，不是标题 */
+
 async function pdfToBlocks(buf) {
   const pdfjsLib = await lazyPdfjs();
   if (!pdfjsLib) throw new Error("解析组件未安装");
@@ -1011,63 +1022,132 @@ async function pdfToBlocks(buf) {
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const tc = await page.getTextContent();
-    const rows = new Map();
+    /* 行 = 把 item 按 y 从高到低排好后贪心归并，容差取「待入行字号与本行最小字号里较小的那个」的一半。
+       旧写法 key = Math.round(y / tol) 的 tol 来自每个 item 自己，不同字号的 key 根本不可比：
+       电赛报告实测 13.99pt 标题（y=755.9，tol=7）和 12pt 正文（y=645.6，tol=6）算出同一个 key=108，
+       相隔 110pt 的两行拼成一行，行字号又被字数众数算成正文 → 标题当场消失、正文串字。 */
+    const parts = [];
     for (const it of tc.items) {
       if (!it.str || !it.str.trim()) continue;
       const tr = it.transform;
-      const h = Math.abs(tr[3]) || it.height || 10;
-      const tol = Math.max(2, h * 0.5);
-      const key = Math.round(tr[5] / tol);
-      if (!rows.has(key)) rows.set(key, { y: tr[5], h, parts: [] });
-      rows.get(key).parts.push({ x: tr[4], w: it.width || 0, s: it.str });
+      parts.push({ x: tr[4], w: it.width || 0, s: it.str, y: tr[5], h: Math.abs(tr[3]) || it.height || 10 });
     }
-    const pageLines = [...rows.values()].sort((a, b) => b.y - a.y).map((r) => {
+    parts.sort((a, b) => b.y - a.y || a.x - b.x);
+    const rows = [];
+    for (const pt of parts) {
+      const r = rows[rows.length - 1];
+      if (r && r.y - pt.y <= Math.max(2, Math.min(pt.h, r.hMin) * 0.5)) {
+        r.parts.push(pt);
+        if (pt.h < r.hMin) r.hMin = pt.h;
+      } else rows.push({ y: pt.y, hMin: pt.h, parts: [pt] });
+    }
+    const pageLines = rows.map((r) => {
       r.parts.sort((a, b) => a.x - b.x);
+      /* 行字号按字符数加权取众数：一行里夹几个不同字号的 run 时，占字多的那个才算这行的字号 */
+      const sizes = new Map();
+      for (const pt of r.parts) for (const ch of pt.s) if (ch !== " ") sizes.set(pt.h, (sizes.get(pt.h) || 0) + 1);
+      let size = r.hMin, n = -1;
+      sizes.forEach((c, sz) => { if (c > n) { n = c; size = sz; } });
       let s = "", lx = null, lw = 0;
       for (const pt of r.parts) {
-        if (!pt.s) continue;
-        if (s && lx != null && pt.x - (lx + lw) > Math.max(1.2, r.h * 0.22)) s += " ";
+        if (s && lx != null && pt.x - (lx + lw) > Math.max(1.2, size * 0.22)) s += " ";
         s += pt.s;
         lx = pt.x; lw = pt.w;
       }
-      return { y: r.y, s: squeeze(s) };
+      return { y: r.y, page: p, size, s: squeeze(s), x0: r.parts[0].x };
     }).filter((l) => l.s);
-    if (lines.length && pageLines.length) lines.push({ y: NaN, s: "" });
+    if (lines.length && pageLines.length) lines.push({ y: NaN, page: p, size: 0, s: "", x0: 0 });
     lines.push(...pageLines);
     page.cleanup && page.cleanup();
   }
-  const gaps = [];
-  for (let i = 1; i < lines.length; i++) {
-    if (Number.isNaN(lines[i].y) || Number.isNaN(lines[i - 1].y)) continue;
-    const g = lines[i - 1].y - lines[i].y;
-    if (g > 0) gaps.push(g);
+  if (!lines.length) return { blocks: [], pages: doc.numPages };
+
+  /* 正文字号 = 全篇按字符数加权的众数（四份真 PDF 实测全部命中真实正文字号） */
+  const weight = new Map();
+  lines.forEach((l) => { if (!Number.isNaN(l.y)) weight.set(l.size, (weight.get(l.size) || 0) + l.s.length); });
+  let body = 0, best = -1;
+  weight.forEach((n, sz) => { if (n > best) { best = n; body = sz; } });
+  if (!(body > 0)) body = 12;
+
+  lines.forEach((l) => {
+    l.head = !Number.isNaN(l.y) && l.size >= body * PDF_HEAD_RATIO && l.s.length <= PDF_HEAD_MAX;
+  });
+  /* 成组的同字号同起点行是"表"不是"标题"：封面一列字段、目录里的点线条目都长这样 */
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].head) continue;
+    let j = i;
+    while (j + 1 < lines.length && lines[j + 1].head
+      && lines[j + 1].page === lines[j].page
+      && Math.abs(lines[j + 1].size - lines[i].size) < 0.5
+      && Math.abs(lines[j + 1].x0 - lines[i].x0) < 3) j++;
+    if (j - i + 1 >= PDF_FORM_RUN) for (let k = i; k <= j; k++) lines[k].head = false;
+    i = j;
   }
-  gaps.sort((a, b) => a - b);
-  const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+  /* 每个字号自己的常规行距 = 同字号相邻行行距的偏低中位数。
+     标题行通常只有一两行、拿不到自身样本，退回正文字号的行距。 */
+  const gapBySize = new Map();
+  for (let i = 1; i < lines.length; i++) {
+    const a = lines[i - 1], b = lines[i];
+    if (Number.isNaN(a.y) || Number.isNaN(b.y) || a.page !== b.page) continue;
+    if (Math.abs(a.size - b.size) > 0.5) continue;
+    const g = a.y - b.y;
+    if (g <= 0) continue;
+    const k = a.size.toFixed(1);
+    if (!gapBySize.has(k)) gapBySize.set(k, []);
+    gapBySize.get(k).push(g);
+  }
+  const leadBySize = new Map();
+  gapBySize.forEach((arr, k) => {
+    arr.sort((x, y) => x - y);
+    /* 偶数样本取「靠下」那个：样本里混着段内距和段间距，取偏小的才是段内常规行距。
+       取偏大的等于把段间距当成常规，阈值就永远够不着（canvas-probe 实测塌块的第二个原因）。 */
+    leadBySize.set(k, arr[Math.floor((arr.length - 1) / 2)]);
+  });
+  const leadOf = (size) => {
+    const k = size.toFixed(1);
+    if (leadBySize.has(k)) return leadBySize.get(k);
+    const kb = body.toFixed(1);
+    return leadBySize.has(kb) ? leadBySize.get(kb) : 0;
+  };
   const joinLine = (cur, s) => {
     if (/[A-Za-z]-$/.test(cur)) return cur.slice(0, -1) + s;
     if (/[A-Za-z0-9,.;:!?)]$/.test(cur) && /^[A-Za-z0-9("'[]/.test(s)) return cur + " " + s;
     return cur + s;
   };
   const paras = [];
-  let cur = "";
-  let prevY = NaN;
+  let cur = null, prev = null;
   for (const l of lines) {
-    if (!l.s) { if (cur) { paras.push(cur); cur = ""; } prevY = NaN; continue; }
-    if (!cur) { cur = l.s; prevY = l.y; continue; }
-    const g = Number.isNaN(prevY) ? Infinity : prevY - l.y;
-    if (g > median * 1.7 && !(/[A-Za-z]-$/.test(cur) || (/[[A-Za-z0-9,(]$/.test(cur) && /^[a-z]/.test(l.s)))) {
-      paras.push(cur); cur = l.s;
-    } else cur = joinLine(cur, l.s);
-    prevY = l.y;
+    if (!l.s) { if (cur) { paras.push(cur); cur = null; } prev = null; continue; }
+    if (!cur) { cur = { text: l.s, head: l.head, size: l.size }; prev = l; continue; }
+    let brk = false;
+    if (l.head !== prev.head) brk = true;                          /* 标题 ↔ 正文：必断 */
+    else if (l.head && Math.abs(l.size - prev.size) > 0.5) brk = true;  /* 不同层级的标题之间 */
+    else {
+      const g = (Number.isNaN(prev.y) || Number.isNaN(l.y) || prev.page !== l.page)
+        ? Infinity : prev.y - l.y;
+      const lead = leadOf(prev.size);
+      /* 行尾连字符 / 英文词被拆到下一行开头时不断段（沿用旧判据） */
+      if (lead && g > lead * PDF_LEAD_MUL
+        && !(/[A-Za-z]-$/.test(cur.text) || (/[[A-Za-z0-9,(]$/.test(cur.text) && /^[a-z]/.test(l.s)))) brk = true;
+    }
+    if (brk) { paras.push(cur); cur = { text: l.s, head: l.head, size: l.size }; }
+    else cur.text = joinLine(cur.text, l.s);
+    prev = l;
   }
   if (cur) paras.push(cur);
+
   const blocks = [];
-  let hn = 0;
-  paras.forEach((x, i) => {
-    if (i === 0 && x.length <= 80) blocks.push({ type: "h1", x, id: "h-" + (++hn) });
-    else blocks.push({ type: "p", x });
+  let hn = 0, sawHead = false;
+  paras.forEach((pp) => {
+    if (!pp.head) { blocks.push({ type: "p", x: pp.text }); return; }
+    const ratio = pp.size / body;
+    blocks.push({ type: ratio >= 1.6 ? "h1" : ratio >= 1.3 ? "h2" : "h3", x: pp.text, id: "h-" + (++hn) });
+    sawHead = true;
   });
+  /* 一篇都没认出标题时，退回旧行为（首段 ≤80 字当 h1）—— 保证任何文档都不比改前差 */
+  if (!sawHead && blocks.length && blocks[0].type === "p" && blocks[0].x.length <= 80) {
+    blocks[0] = { type: "h1", x: blocks[0].x, id: "h-" + (++hn) };
+  }
   return { blocks, pages: doc.numPages };
 }
 

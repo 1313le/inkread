@@ -3889,21 +3889,40 @@
     qs("#ttsPopGo").innerHTML = icon("play", 13) + "<span>" + (playing ? "从此处续读" : "从此朗读") + "</span>";
     placePop(qs("#ttsPop"), el);
   }
+  /* 标题的「题字」占位：按行量 Range 的 client rects，比块的整行框窄得多。
+     用来把「点在题目那几个字上」和「点在题目行右侧的空白」分开 —— 后者照旧翻页。 */
+  function headWordHit(el, x, y) {
+    if (!/^H[123]$/.test(el.tagName)) return false;
+    var r = document.createRange();
+    r.selectNodeContents(el);
+    var rects = r.getClientRects();
+    for (var i = 0; i < rects.length; i++) {
+      var b = rects[i];
+      if (y >= b.top - 1 && y <= b.bottom + 1 && x >= b.left && x <= b.right) return true;
+    }
+    return false;
+  }
   qs("#doc").addEventListener("click", function (e) {
     if (!CAN_SPEAK || EDIT.on) return;
     if (e.target.closest(".hl, .nref, .note-ref, .task-flag, .task-src, .tool-btn, .sel-bar")) return;
     var sel = window.getSelection();
     if (sel && String(sel).trim()) return;
-    /* 左右 30% 是翻页区（v2.9 纸面 tap 翻页）——不弹朗读气泡，给翻页让路 */
-    if (!state.scroll) {
-      var bx = bookTapZone(e);
-      if (bx < TAP_ZONE || bx > 1 - TAP_ZONE) return;
-    }
     var el = e.target.closest("[data-bi]");
     if (!el) return;
     var bi = parseInt(el.getAttribute("data-bi"), 10);
     var isUnit = SPEAK_UNITS.some(function (u) { return u.bi === bi; });
     if (!isUnit) return;
+    /* 左右 30% 是翻页区（v2.9 纸面 tap 翻页）——不弹朗读气泡，给翻页让路。
+       例外：标题的题字。pdf/epub 里一节只有一行题目，而题目常常整个落在 30% 里
+       （1280 窗口实测左翻页线在 x=529.6，题字从 362 起）——读者点在题目上表达的是
+       「从这一节读」，所以题字让气泡，题字行右侧的空白照旧归翻页。 */
+    if (!state.scroll) {
+      var bx = bookTapZone(e);
+      if (bx < TAP_ZONE || bx > 1 - TAP_ZONE) {
+        if (!headWordHit(el, e.clientX, e.clientY)) return;
+        e.stopPropagation();   /* 翻页监听挂在祖先 #book 上，晚于这里 */
+      }
+    }
     showTtsPop(el, bi);
   });
   qs("#ttsPopGo").addEventListener("click", function () {
