@@ -135,26 +135,41 @@
     st.id = id; st.textContent = css;
     document.head.appendChild(st);
   }
-  /* 字体样式表一律「不挡首屏」：先挂 media="print"（浏览器不把它计入渲染阻塞集合），
-     到手后再切回 all。fonts.googleapis.com 在部分网络下会长时间挂起，原来的直挂写法
-     会让窗口白到超时为止 —— 一台离线阅读器不该有这样的开局。
-     失败也不丢节点：记下来，联网后原样重挂一次即可补上字体。 */
+  /* 字体样式表一律「不挡首屏」，也不再挡 load —— v1.0.1 起改为 fetch 取文本 + 注入 <style>：
+     —— <link media="print"> 只保首绘，保不住 load 事件：link 一发出请求，load 就等它结束，
+        而挂死的表实测 4–6.5s 才被网络栈放弃（劣化网络更久），且**移除节点/href 都放不开**
+        （headless Chromium 实测三法全灭：节点移除、removeAttribute(href)、href="data:"）。
+     —— fetch 不进文档资源集，天然不压 load；AbortController 到点即真中止；失败/超时留档，
+        联网 / 回到前台时原样再取一次即可补上字体。display=swap 由远端表自带，取不回也不白屏。 */
+  var LINK_TIMEOUT = 5000;
   var pending = [];
+  function loadFontCss(rec) {
+    var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) try { ctl.abort(); } catch (e) {} }, LINK_TIMEOUT);
+    fetch(rec.href, { mode: "cors", signal: ctl ? ctl.signal : undefined })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then(function (css) {
+        clearTimeout(timer);
+        var st = document.getElementById(rec.id);
+        if (!st) { st = document.createElement("style"); st.id = rec.id; document.head.appendChild(st); }
+        st.textContent = css;
+        rec.done = true;
+      })
+      .catch(function () { clearTimeout(timer); rec.done = false; });
+  }
   function injectLink(id, href) {
     if (document.getElementById(id)) return;
-    var lk = document.createElement("link");
-    lk.id = id; lk.rel = "stylesheet"; lk.media = "print"; lk.href = href;
-    lk.addEventListener("load", function () { lk.media = "all"; });
-    document.head.appendChild(lk);
-    pending.push(lk);
+    var rec = { id: id, href: href, done: false };
+    pending.push(rec);
+    loadFontCss(rec);
   }
-  if (window.addEventListener) window.addEventListener("online", function () {
-    pending.forEach(function (lk) {
-      var p = lk.parentNode;
-      if (!p || lk.media !== "print") return;
-      p.removeChild(lk); p.appendChild(lk);   /* 重新插入才会再发一次请求 */
-    });
-  });
+  function retryPending() {
+    pending.forEach(function (rec) { if (!rec.done) loadFontCss(rec); });
+  }
+  if (window.addEventListener) {
+    window.addEventListener("online", retryPending);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) retryPending(); });
+  }
 
   /* 把某字体接到页面上（幂等） */
   function ensure(k) {

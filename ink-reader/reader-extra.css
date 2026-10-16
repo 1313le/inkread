@@ -1,0 +1,657 @@
+
+/* ============================================================
+   听书 v2 · 页面级样式（起点式播放条 / @Voice 式点段起读 / 边听边看）
+   只作用于本页，全部走主题 token，不改全局 styles.css。
+   ============================================================ */
+/* 播放条：三区布局 —— 走带控制 | 段落预览+进度 | 音色/语速/定时/停止 */
+#ttsBar { align-items: center; gap: 8px; flex-wrap: nowrap; }
+#ttsBar .tts-mid { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+/* 窄屏必须折行：全局 .tts-bar 本来就是 wrap（styles.css 那条注释写着「不把进度条挤没」），
+   本页的 nowrap 把它盖掉了 —— 390 实测八个子元的不可收缩宽（44×3 + 音色 + 52×2 + 44 + 7×8 间隙）
+   正好吃掉整行，只有 .tts-mid 允许缩到 0，于是段落预览和进度条整块消失（clientW=0 / scrollW=136），
+   读者正在听第几页完全看不见。热区不能靠缩钮换来，所以把中间区单独放一行、并给它下限。 */
+@media (max-width: 600px) {
+  #ttsBar { flex-wrap: wrap; column-gap: 6px; row-gap: 8px; }
+  #ttsBar .tts-mid { flex: 1 1 168px; min-width: 168px; }
+  /* 行间距收到 6 + 音色名收窄，是为了让 音色/语速/定时/停止 正好落在第二行：
+     三条折行在 844 高的手机上要吃掉 168px，播放器不该比正文还高。 */
+  #ttsBar .tts-voice select { max-width: 120px; }
+}
+#ttsBar .tts-now {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); letter-spacing: .02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#ttsBar .tts-frac { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+/* 引擎徽标：读者必须看得见「现在是谁在念」——旧版神经合成挂了照样界面走动，
+   只是悄悄换成系统机械音，用户完全不知道。降级与静默都用 warn 色标出来。 */
+#ttsBar .tts-eng {
+  flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; letter-spacing: .04em; color: var(--ink-3);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 1px 8px;
+}
+#ttsBar .tts-eng.warn { color: var(--amber-ink); border-color: var(--amber); }
+#ttsBar .bar { flex: 0 0 76px; min-width: 0; }
+/* v2.24.1：空进度底槽不显形 —— 播放前它既不可点也不显示状态，只会在界面上留一条谁都看不懂的白条 */
+#ttsBar.no-prog .bar { visibility: hidden; }
+#ttsBar .tts-ctl { font-family: var(--font-mono); font-size: 11.5px; min-width: 52px; }
+/* 播放键：主操作朱砂描边提示「正在听书」 */
+#ttsBar #ttsPlay { border-color: var(--mark); color: var(--mark-ink); border-radius: 50%; width: 34px; padding: 0; }
+#ttsBar #ttsPlay.active { background: var(--mark); color: var(--on-mark); }
+
+/* 语速 / 定时迷你弹层：贴播放条上方，点外部即收 */
+.tts-mini-pop {
+  position: fixed; z-index: 286; min-width: 218px; padding: 12px 14px;
+  background: var(--paper-2); border: 1px solid var(--line-2); border-radius: var(--r-md);
+  box-shadow: var(--sh-md); font-size: 12.5px; color: var(--ink-2);
+}
+.tts-mini-pop .tmp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.tts-mini-pop output { font-family: var(--font-mono); color: var(--accent-ink); }
+.tts-mini-pop input[type="range"] { width: 100%; }
+.tts-mini-pop .tmp-presets { display: flex; gap: 6px; flex-wrap: wrap; justify-content: space-between; margin-bottom: 0; }
+.tts-mini-pop .tmp-presets button {
+  flex: 1; padding: 5px 0; background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--r-sm); font: inherit; font-size: 11.5px; color: var(--ink-2); cursor: pointer;
+}
+.tts-mini-pop .tmp-presets button:hover { border-color: var(--accent); color: var(--accent-ink); }
+.tts-mini-pop .tmp-presets button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+#ttsTimerPop { display: grid; gap: 6px; }
+#ttsTimerPop button {
+  text-align: left; padding: 8px 10px; background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--r-sm); font: inherit; font-size: 12.5px; color: var(--ink-2); cursor: pointer;
+}
+#ttsTimerPop button:hover { border-color: var(--accent); color: var(--accent-ink); }
+#ttsTimerPop button.on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-wash); }
+
+/* 点段起读气泡（@Voice 式「从这里朗读」） */
+.tts-pop { position: fixed; z-index: 287; }
+.tts-pop button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px;
+  background: var(--ink); color: var(--paper); border: none; border-radius: var(--r-sm);
+  font: inherit; font-size: 12.5px; letter-spacing: .05em; cursor: pointer;
+  box-shadow: var(--sh-md);
+}
+.tts-pop button:hover { background: var(--accent); color: var(--on-accent); }
+
+/* 边听边看：当前段朱砂淡染（正文 / 标题 / 引文通用） */
+#doc .tts-live {
+  background: var(--accent-wash);
+  box-shadow: 0 0 0 4px var(--accent-wash);
+  border-radius: 3px;
+}
+/* 沉浸阅读时面板让位（听书继续播，不打断）。
+   v2.24.1：朗读条与它的迷你弹层在沉浸态**放行** —— 沉浸底栏新增了「听书」入口，
+   再藏就等于点开一个开不了的条子。条子仍在文档流里、由 ttsSyncBook 重排，不压正文。 */
+/* v2.14 沉浸态：阅读底栏一并让位（顶栏/侧栏由 styles.css 的 immersive 规则收起；
+   呼出全靠悬浮球，进面板仍是浮层滑入） */
+body.immersive .reader-dock { display: none !important; }
+/* ============ 批注面板 · 沉浸可用 + 显式关闭（v16 体验排查 P1–P3） ============
+   旧版沉浸态 CSS 直接 display:none，点「批注面板」还得先退全屏；
+   现在沉浸态面板以浮层滑入（覆盖正文、不动全屏状态），层级压住沉浸浮条、
+   让位划词工具条；普通态行为不变（styles.css 已是滑入面板）。 */
+body.immersive .reader-notes {
+  display: flex !important;
+  z-index: 255;
+  box-shadow: -18px 0 46px -24px var(--edge), 0 0 0 1px var(--edge);
+}
+/* 面板头关闭钮：所有模式可见 */
+#notesClose { margin-left: auto; }
+/* 窄屏：面板收窄 */
+@media (max-width: 700px) {
+  body.immersive .reader-notes { width: min(340px, 92vw); }
+}
+
+/* ============ 写笔记 · 字号三档 + 全屏写作浮层（v17 笔记体验） ============
+   ① 字号：三档 15 / 17 / 20px，落在根上的 --note-fs，面板 textarea 与全屏写作区
+      同源同值；默认「中」17px（旧版约 13.5px，用户反馈偏小）。
+   ② 浮层：fixed 全覆盖，自身即纸面（无遮罩层），层级压住批注面板（255）、
+      划词条（260）与听书弹层（286/287）；顶栏一条、底栏一条，中间一张写作纸。 */
+.nfs-seg { flex: none; }
+.nfs-seg .seg-btn { min-width: 32px; padding: 6px 10px; font-size: 12px; }
+/* 面板「写笔记」正文：字号随档，最小高度抬到 200px（仍可纵向手动拉高） */
+.field#noteInput { font-size: var(--note-fs, 17px); line-height: 1.9; min-height: 200px; }
+
+.note-im {
+  position: fixed; inset: 0; z-index: 300;
+  display: flex; flex-direction: column;
+  background-color: var(--paper); background-image: var(--grain);
+  color: var(--ink); animation: nimIn .22s cubic-bezier(.2, .8, .3, 1);
+}
+@keyframes nimIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+html[data-reduce="on"] .note-im { animation: none; }
+@media (prefers-reduced-motion: reduce) { .note-im { animation: none; } }
+
+.nim-bar, .nim-foot {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  min-height: 46px; padding: 6px 16px; background: var(--paper-2);
+}
+.nim-bar { flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+.nim-foot { min-height: 42px; border-top: 1px solid var(--line); }
+.nim-title { font-size: 13.5px; font-weight: 700; letter-spacing: .1em; color: var(--ink); }
+.nim-kinds, .nim-dots { display: inline-flex; align-items: center; gap: 6px; }
+.nim-dot {
+  width: 15px; height: 15px; border-radius: 50%; cursor: pointer;
+  border: 1px solid var(--line-2); transition: transform .16s, box-shadow .16s;
+}
+.nim-dot:hover { transform: scale(1.18); }
+.nim-dot.on { box-shadow: 0 0 0 2px var(--paper-2), 0 0 0 4px var(--ink); }
+
+/* 写作纸：居中版心 760px，无边框、纸色底，衬线正文随字号档 */
+.nim-body { flex: 1; min-height: 0; display: flex; justify-content: center; padding: 22px 24px 14px; }
+.nim-text {
+  width: 100%; max-width: 760px; flex: 1; min-height: 0; padding: 32px;
+  border: none; outline: none; background: transparent; resize: none;
+  font-family: var(--font-serif); font-size: var(--note-fs, 17px); line-height: 1.9;
+  color: var(--ink); letter-spacing: .01em;
+}
+.nim-text::placeholder { color: var(--ink-3); }
+.nim-count { font-family: var(--font-mono); }
+/* 引用条：与面板 #quoteRef 同文，字号随书写档按比例缩一档 */
+.nim-quote {
+  display: inline-block; max-width: 52%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-family: var(--font-kai); font-size: calc(var(--note-fs, 17px) * .84);
+}
+
+/* 浮动预览卡（v2.19.3）：全屏写作时随写随渲染，可拖可缩，位置尺寸记本机。
+   原先要退出全屏回面板才看得到预览 —— 等于「写完才能核对」。 */
+.nim-pv {
+  position: absolute; z-index: 2; display: flex; flex-direction: column;
+  min-width: 260px; min-height: 160px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: 0 12px 30px -14px var(--edge), 0 2px 6px -3px var(--edge);
+}
+.nim-pv-bar {
+  flex: none; height: 28px; display: flex; align-items: center; gap: 8px;
+  padding: 0 6px 0 10px; border-bottom: 1px solid var(--line-2);
+  border-radius: var(--r-md) var(--r-md) 0 0; background: var(--paper-2);
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.nim-pv-bar::before {
+  content: ""; flex: none; width: 8px; height: 11px; color: var(--ink-3); opacity: .6;
+  background-image: radial-gradient(currentColor 1.05px, transparent 1.15px);
+  background-size: 4px 4px;
+}
+.nim-pv-bar:hover::before, .nim-pv-bar:focus-visible::before { opacity: 1; color: var(--accent); }
+body.nim-pv-drag .nim-pv-bar { cursor: grabbing; }
+.nim-pv-name { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-2); }
+.nim-pv-body { flex: 1; min-height: 0; padding: 14px 16px; }
+.nim-pv-rz {
+  position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
+  cursor: nwse-resize; touch-action: none;
+}
+.nim-pv-rz::after {
+  content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px;
+  border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); opacity: .75;
+}
+
+@media (max-width: 720px) {
+  .nim-title { display: none; }
+  .nim-body { padding: 14px 12px 10px; }
+  .nim-text { padding: 18px 16px; }
+  .nim-quote { max-width: 38%; }
+}
+
+/* ---------- 无书可读态（?doc= 指向已被清掉的书 / 空书架直接进阅读页） ----------
+   脚本在 renderNoDoc() 后 return，底栏六钮 / 翻页 / 模式条 / 顶栏书签与全屏的事件都没绑上，
+   点了没有任何反应，纸页上也还没有可操作的对象。Apple HIG、Material 与微软对「当前态用不了」
+   的控件是同一条分工：可能恢复可用的置灰，此刻及本页都不可能可用的直接收掉 ——
+   一排按了没反应的按钮比少一排按钮更糟。回书架的出口（顶栏返回 + 空态里的「回书架」）保留。 */
+body[data-nodoc] #readerDock,
+body[data-nodoc] .page-nav,
+body[data-nodoc] .mode-band,
+body[data-nodoc] #tBookmark,
+body[data-nodoc] #tFull { display: none; }
+
+
+/* ============================================================
+   批注体系 v2.5 · 阅读页专属样式（正文角标 + 批注浮窗 + 完整笔记嵌入）
+   只作用于本页，全部走既有主题 token，不动全局 styles.css。
+   两块内容：
+   ① .nref —— 四类标注在正文中的类型角标，锚在「选中文本末尾之后」（字符级）；
+   ② .reader-notes —— 批注面板由「覆盖侧栏」改为「悬浮窗」（可拖 / 可缩 / 可最大化）。
+      开合机制一行没动（仍是 #reader[data-notes]），这里只重写它的形体与位次：
+      位置 / 尺寸一律由页内 JS 内联下发，样式表只管长相、只管压过 styles.css 的侧栏定位。
+   ============================================================ */
+
+/* ---------- ① 正文标注角标（v2.5）----------
+   四类各一图：高亮 highlighter（描边随其高亮色）/ 笔记 notebook-pen / 书签 bookmark / 随笔 pen-line。
+   视觉重量比 .task-flag 轻一档：任务旗是「方章 + 文字」，角标只是句末一个点 ——
+   14px 圆、纸色底、1px 描边，hover 才放大，不抢行、不打断阅读节奏。 */
+.nref {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; margin: 0 1px 0 2px; padding: 0;
+  vertical-align: 2px; border: 1px solid var(--nref-c, var(--line-2)); border-radius: 50%;
+  background: var(--paper-2); color: var(--nref-c, var(--ink-3));
+  cursor: pointer; line-height: 0;
+  transition: transform .16s, box-shadow .16s, border-color .16s;
+}
+.nref .ic { display: block; }
+.nref:hover { transform: scale(1.18); box-shadow: 0 2px 7px -3px var(--edge); }
+.nref:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 四类各有专属色；高亮一项的具体颜色保存时由内联 --nref-c 覆盖（描边即高亮色） */
+.nref-highlight { --nref-c: var(--accent); }
+.nref-note { --nref-c: var(--blue); }
+.nref-bookmark { --nref-c: var(--amber); }
+.nref-margin { --nref-c: var(--ink-3); }
+/* 同一处多条：并排不换行，仍是一个视觉单位 */
+.nref-group { display: inline-flex; align-items: center; }
+/* 「批注标记」关掉时角标一并隐去（与 .hl / .task-flag 同一约定） */
+.doc[data-marks="off"] .nref { display: none; }
+
+/* ---------- ② 批注浮窗（v2.5）----------
+   特异性对齐：styles.css 里 .reader[data-notes="open"] .reader-notes（0,3,0）会给出 transform:none，
+   本组规则用 body[data-page="reader"] 前缀（≥0,2,1）并写在 #tts-extra 之后，稳稳压过侧栏定位与媒体查询宽度。 */
+body[data-page="reader"] .reader-notes {
+  position: absolute; inset: auto; z-index: 258;          /* 由「贴右上、通高」改为自由落位；258 高于沉浸浮条 240 */
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--paper-2); border: 1px solid var(--line-2); border-radius: var(--r-md);
+  box-shadow: 0 26px 64px -34px var(--edge), 0 3px 12px -8px var(--edge);
+  transform: none;
+  transition: opacity .18s ease, transform .18s ease,
+              background-color .24s ease, color .24s ease, border-color .24s ease;
+}
+/* 最大化：不再是「卡片」，抹掉圆角，读起来像一块贴着正文的纸 */
+body[data-page="reader"] .reader-notes[data-max="1"] { border-radius: 0; }
+/* 收起态：不占位、不挡点击（开合仍是 #reader[data-notes]，从这里取形态） */
+body[data-page="reader"] .reader[data-notes="closed"] .reader-notes {
+  opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(10px) scale(.985);
+}
+html[data-reduce="on"] body[data-page="reader"] .reader-notes { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  body[data-page="reader"] .reader-notes { transition: none; }
+}
+
+/* 头部即拖动条：页签那一条整体可拖；文字不许选中（否则拖窗变划词） */
+.reader-notes .side-tabs { user-select: none; -webkit-user-select: none; cursor: grab; touch-action: none; }
+body.nw-drag .reader-notes .side-tabs { cursor: grabbing; }
+/* v2.10 专用拖动条 → v2.19.3 升级为 28px 标题条。
+   8px 细线是「逻辑上能拖、视觉上不存在」：用户实测直接判为「浮窗拖不动」。
+   现在左端是抓握点阵、中间是窗名、右端是 InkDock 注入的四枚形态钮
+   （v2.23 W2：这一条就是这扇窗的控制行，页签行只放页签）。 */
+.nw-dragbar {
+  flex: none; height: 28px; position: relative; z-index: 5; display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; cursor: grab; touch-action: none;
+  user-select: none; -webkit-user-select: none;
+  background: var(--paper-2); border-bottom: 1px solid var(--line-2);
+}
+.nw-dragbar::before {
+  content: ""; flex: none; width: 8px; height: 11px; color: var(--ink-3); opacity: .6;
+  background-image: radial-gradient(currentColor 1.05px, transparent 1.15px);
+  background-size: 4px 4px;
+}
+.nw-dragbar:hover::before, .nw-dragbar:focus-visible::before { opacity: 1; color: var(--accent); }
+.nw-dbar-name { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-2); }
+[data-dock-state="docked"] .nw-dragbar {
+  background: var(--paper-3); box-shadow: inset 0 2px 5px -3px var(--edge); cursor: grab;
+}
+body.dock-drag .nw-dragbar, body.nw-drag .nw-dragbar { cursor: grabbing; }
+/* 浮动态八方位缩放手柄（InkDock 生成）：贴内缘的细条，只在 float 态存在 */
+.dock-rz { position: absolute; z-index: 4; display: none; touch-action: none; }
+[data-dock-state="float"] .dock-rz { display: block; }
+.dock-rz[data-dir="n"], .dock-rz[data-dir="s"] { left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
+.dock-rz[data-dir="e"], .dock-rz[data-dir="w"] { top: 14px; bottom: 14px; width: 6px; cursor: ew-resize; }
+.dock-rz[data-dir="n"] { top: 0; } .dock-rz[data-dir="s"] { bottom: 0; }
+.dock-rz[data-dir="e"] { right: 0; } .dock-rz[data-dir="w"] { left: 0; }
+.dock-rz[data-dir="ne"], .dock-rz[data-dir="nw"], .dock-rz[data-dir="se"], .dock-rz[data-dir="sw"] {
+  width: 14px; height: 14px;
+}
+.dock-rz[data-dir="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.dock-rz[data-dir="ne"] { right: 0; top: 0; cursor: nesw-resize; }
+.dock-rz[data-dir="sw"] { left: 0; bottom: 0; cursor: nesw-resize; }
+.dock-rz[data-dir="se"] { right: 0; bottom: 0; cursor: nwse-resize; }
+/* 2.19.6：顶边那 6px 的缩放手柄压在标题条之上——v2.19.3 把拖动条从 8px 细线长成
+   28px 标题条时，这条一直贴在 top:0 的边手柄就吃进了标题条最上的 5px。实测：
+   抓条顶边 3px 处 pointerdown 命中的是 .dock-rz[data-dir=n]，于是"按标题条上的
+   提示去拖窗"变成"把窗口越拖越矮"（高 600→320，不出吸附引导，双击也被它截走）。
+   现在让标题条整条只负责移动（z 5 盖过 n 条），四角仍是缩放（z 6 盖回条上）。
+   代价是"用上边缘单独调高度"这条路没了——它本就长在移动把手身上，是陷阱不是功能；
+   调高度改由下边缘、左右边与四角负责。 */
+.dock-rz[data-dir="nw"], .dock-rz[data-dir="ne"] { z-index: 6; }
+body.dock-drag { user-select: none; -webkit-user-select: none; }
+body.dock-drag .sel-bar { display: none !important; }
+/* 三个页签 + 三个工具钮在停靠态（更窄）也要端得住：页签可缩、文字不换行 */
+.reader-notes .side-tab { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reader-notes .side-tabs .tool-btn { padding: 0 7px; }
+body.nw-drag { user-select: none; -webkit-user-select: none; }
+body.nw-drag .sel-bar { display: none !important; }        /* 拖动中不弹划选工具条 */
+.reader-notes .side-tabs .tool-btn { flex: none; align-self: center; }
+
+/* ---------- ②b 停靠态（v2.10）：吸附成侧栏时不再是「卡片」，而是贴着正文的一块纸 ----------
+   拖到左右边缘（或点标题栏的停靠钮）后进入：通高、直角、内侧一条分隔线，
+   外侧用与 .reader-side 同一支阴影，读起来像 Word / Typora 的侧栏。 */
+body[data-page="reader"] .reader-notes[data-dock-state="docked"] {
+  border: 0; border-left: 1px solid var(--line); border-radius: 0;
+  box-shadow: -12px 0 26px -24px var(--edge);
+}
+body[data-page="reader"] .reader-notes[data-docked="left"] {
+  border: 0; border-right: 1px solid var(--line); border-radius: 0;
+  box-shadow: 12px 0 26px -24px var(--edge);
+}
+/* 停靠态用内侧竖边调宽（.dock-edge），右下抓角让位 */
+body[data-page="reader"] .reader-notes[data-dock-state="docked"] .nw-grip { display: none; }
+
+/* 右下抓角：24×24，斜纹示意可拖，最大化 / 窄屏时收起 */
+.nw-grip {
+  position: absolute; right: 0; bottom: 0; width: 24px; height: 24px;
+  cursor: nwse-resize; touch-action: none; z-index: 3;
+}
+.nw-grip::after {
+  content: ""; position: absolute; right: 5px; bottom: 5px; width: 7px; height: 7px;
+  border-right: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3);
+  border-radius: 1px; opacity: .5;
+}
+.reader-notes[data-max="1"] .nw-grip { display: none; }
+
+/* ---------- ③ 完整笔记（嵌入 notes.html）----------
+   第三页签：iframe 撑满面板，无边框、圆角内嵌；面板头部（页签条）仍在，随时切回批注列表。 */
+body[data-page="reader"] .reader-notes[data-tab="embed"] .side-body { padding: 0; overflow: hidden; position: relative; }
+.nw-embed-box { position: absolute; inset: 0; }
+.nw-embed-box iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--paper); }
+
+/* ---------- ④ v2.17 浮窗重排（走查证据 shots-layout/03·04·05） ----------
+   原状：批注页签下方四成死白、写笔记工具条折两行拖尾巴、保存行悬在半空。
+   处方：面板跟随浮窗高度成一条 flex 列 —— 列表/编辑区吃满余量并自己滚动，
+        动作行天然贴底；工具条第二行右分组，不再左对齐拖出 ragged tail。
+   （嵌窗「完整笔记」内部的重排在 notes.html 的 v2.17 段，两边各管一层。） */
+body[data-page="reader"] .reader-notes .side-body {
+  display: flex; flex-direction: column; overflow: hidden; padding: 12px;
+}
+/* display 必须写在这里：三个面板里只有 new/embed 在 HTML 上带了内联 display:none，
+   list 是默认值。原来只在 switchNoteTab()/focusNote() 里写 style.display="flex"，
+   于是「打开浮窗直接停在批注页签」这一条路径下它始终是 block —— 下面的
+   #noteList{flex:1} 全部失效，实测面板 522px 而列表只占 127px，底下 395px 死白。 */
+.reader-notes [data-npanel] { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+.reader-notes [data-npanel] > .row, .reader-notes [data-npanel] > .row-between { flex: none; }
+.reader-notes [data-npanel="embed"] { position: relative; }
+
+/* 批注列表：滚动关在列表里，页签头行不动 */
+.reader-notes [data-npanel="list"] #noteList { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.reader-notes [data-npanel="list"] .row-between { flex-wrap: wrap; gap: 6px; }
+.reader-notes [data-npanel="list"] #notesSummary { min-width: 0; }
+/* 空态：大虚线框是「拖放目标」的记号，这里没有拖放 —— 降成紧凑一行 */
+.reader-notes .empty { border: none; padding: 22px 8px; }
+.reader-notes .empty > .ic { width: var(--ic-lg); height: var(--ic-lg); margin-bottom: 8px; }   /* v2.23 §W3 第六步：22 → 档位 lg */
+/* 列表为空时把这一行居中到面板中部：原来它贴着筛选行往下沉，
+   底下整片空白看着像「加载不出来」。:has 限定只在唯一子节点是空态时生效，
+   有批注时列表仍从顶部正常排。 */
+.reader-notes [data-npanel="list"] #noteList:has(> .empty:only-child) {
+  display: flex; flex-direction: column; justify-content: center;
+}
+
+/* 写笔记：编辑区撑满，保存行贴底 */
+.reader-notes #noteInput, .reader-notes .editor-preview {
+  flex: 1 1 auto; min-height: 120px; resize: none;
+}
+.reader-notes .editor-preview { overflow-y: auto; }
+/* 工具条：让「字号三档」成为第二行的起点 —— margin-left:auto 把它连同其后的
+   全屏/预览一起推到所在行右端；原来那个 .spacer 留在第一行反而吃掉换行前的余量。 */
+.reader-notes [data-npanel="new"] > .row:first-child { row-gap: 6px; }
+.reader-notes [data-npanel="new"] > .row:first-child > .spacer { display: none; }
+.reader-notes #noteFsSeg { margin-left: auto; }
+.reader-notes #noteFull { padding: 0 8px; }
+.reader-notes #noteHint { display: none; }   /* 与 textarea 的 placeholder 重复 */
+.reader-notes #noteMetaRow { flex-wrap: wrap; }
+/* 色点组：连同「标色」名目作为一个整体换行，半截落在上一行会读成孤立圆点。 */
+.reader-notes .nw-dotset { flex: none; margin-left: auto; row-gap: 6px; }
+.reader-notes .nw-cap { font-size: 11px; letter-spacing: .1em; color: var(--ink-3); }
+
+
+/* ============================================================
+   v2.6 工具包 · 页面级样式（要求一按钮清理 / 要求二悬浮球 + 双层轮盘 + AI 速问）
+   ------------------------------------------------------------
+   设计依据（v2.6 方案「要求二」调研结论）：
+   ① 方向而非距离 —— 扇区按角度吸附最近项（Fitz 定律），熟练后凭方向可靠选中；
+   ② 容量 3–12 项 —— 一级 5 模式 + 中心「全部」；二级同心外环（SubMenuRing），
+      父环节点半透明，全部工具按用途合并到 12 项；
+   ③ 入场 scale .86→1 + opacity 180ms；减少动效 / prefers-reduced-motion 直切。
+   色值一律走既有 token（三层语义层），不改 styles.css，不动 #tts-extra / #annwin-extra。
+   ============================================================ */
+
+/* ---------- ⓪ 单态按钮过滤（要求一）----------
+   data-solo="plain"：只在非全屏有意义（如「全屏」入口）→ 沉浸态隐藏；
+   data-solo="imm"  ：只在沉浸全屏才有意义 → 非全屏隐藏（现阶段为空集，留作挂载点）。
+   hide 侧回收由 styles.css 的全局 [hidden] 基线统一负责，此处不再逐组件打补丁。 */
+
+/* ---------- ① 悬浮球（#inkOrb）----------
+   只在 body.immersive 出现；44px 圆形（触控最小命中区）。
+   图形是「刻度盘」而不是「录音键」：外圈一道浅环 + 四个方位短刻度 + 中心一点朱砂 ——
+   它预览的正是点开后的轮盘（四个方向 = 扇区吸附的方向语义）。
+   位置由 JS 内联下发（left/top），拖动即写 inkread.orb.v1。 */
+#inkOrb {
+  position: fixed; z-index: 298; left: 0; top: 0;
+  width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  display: none; align-items: center; justify-content: center;
+  background: var(--paper-2); background-image: var(--grain); color: var(--ink-2);
+  border: 1px solid var(--line-2);
+  /* 深色主题下 paper-2 与纸面只差一档，必须有一圈实边才「看得见、知道能按」 */
+  box-shadow: 0 0 0 1px var(--line), 0 12px 26px -16px var(--edge), inset 0 1px 0 var(--line-2);
+  cursor: grab; touch-action: none;
+  user-select: none; -webkit-user-select: none;
+  transition: transform .16s, border-color .16s, color .16s, background .16s, opacity .16s;
+}
+body.immersive #inkOrb { display: flex; }
+body.tk-open #inkOrb { opacity: 0; pointer-events: none; }   /* 轮盘开着时中心由「全部」承担，不重复出现 */
+#inkOrb:hover { border-color: var(--accent); color: var(--accent-ink); }
+#inkOrb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+body.tk-drag #inkOrb { cursor: grabbing; transform: scale(1.06); }
+#inkOrb svg { display: block; }
+/* 悬停时轮盘转过一格（辐条六等分 → 60°）：按下去会转出轮盘 —— 动效说明因果，不是装饰 */
+#inkOrb .tk-orb-tick { transform-box: view-box; transform-origin: 50% 50%;
+  transition: transform .24s cubic-bezier(.2, .8, .3, 1); }
+#inkOrb:hover .tk-orb-tick { transform: rotate(60deg); }
+html[data-reduce="on"] #inkOrb, html[data-reduce="on"] #inkOrb .tk-orb-tick { transition: none; }
+@media (prefers-reduced-motion: reduce) { #inkOrb, #inkOrb .tk-orb-tick { transition: none; } }
+
+/* ---------- ② 轮盘（#inkWheel）----------
+   全屏透明遮罩（点空白关闭 / 退回） + 定位在悬浮球处的圆盘。
+   z-index 310：压过沉浸浮条 240 / 批注浮窗 258 / 划词条 260 / 模式抽屉 272 / 辅助卡 293，
+   低于外观抽屉与全屏写作 400（那两个是真·模态）。 */
+#inkWheel { position: fixed; inset: 0; z-index: 310; touch-action: none; }
+.tk-wheel {
+  position: absolute; width: var(--tk-d); height: var(--tk-d);
+  transform: translate(-50%, -50%);
+  animation: tkRingIn .18s cubic-bezier(.2, .8, .3, 1) both;
+}
+@keyframes tkRingIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.86); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+html[data-reduce="on"] .tk-wheel { animation: none; }
+@media (prefers-reduced-motion: reduce) { .tk-wheel { animation: none; } }
+
+.tk-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+.tk-wedge {
+  fill: var(--paper-2); stroke: var(--line-2); stroke-width: 1;
+  transition: fill .14s, stroke .14s;
+}
+.tk-wedge.sub { fill: var(--paper-3); }
+/* 扇区放大 1.06：以 viewBox 中心为原点（viewBox 以 0,0 居中，故 50% 50% = 轮盘圆心） */
+.tk-g { transform-box: view-box; transform-origin: 50% 50%; transition: transform .16s, opacity .14s; }
+.tk-g.on { transform: scale(1.06); }
+.tk-g.on .tk-wedge { fill: var(--accent-wash); stroke: var(--accent); }
+.tk-g.dim, .tk-lab.dim { opacity: .42; }                    /* 二级展开时一级扇区半透明 */
+.tk-g.dim.on, .tk-lab.dim.on { opacity: 1; }
+
+.tk-lab {
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  color: var(--ink-2); text-align: center; pointer-events: none;
+  transition: transform .16s, color .14s, opacity .14s;
+}
+.tk-lab .tk-tx { font-size: var(--tk-fs); letter-spacing: .04em; white-space: nowrap; }
+.tk-lab.on { transform: translate(-50%, -50%) scale(1.06); color: var(--accent-ink); }
+
+.tk-hub {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: var(--tk-hub); height: var(--tk-hub); padding: 0; border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--line);
+  font: inherit; cursor: pointer; overflow: hidden;
+  box-shadow: 0 8px 22px -16px var(--edge);
+  transition: border-color .16s, color .16s, background .16s;
+}
+.tk-hub:hover { border-color: var(--accent); }
+.tk-hub b { font-size: var(--tk-fs); font-weight: 700; letter-spacing: .08em; line-height: 1.15;
+    /* 工具名一行装不下就省略 —— 名字超一行本来就已经顶到圆边了 */
+    max-width: 92%; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tk-hub em { font-style: normal; font-size: var(--tk-hf); line-height: 1.35; color: var(--ink-2); max-width: 86%;
+    /* v2.18：中心圆里的提示最多两行。
+       原来这里写的是 -webkit-line-clamp:2，但 .tk-hub 是 flex 列，em 作为 flex item
+       被 blockify 成 flow-root —— 实测 computed display 就是 flow-root，clamp 根本不生效，
+       只是个看着安心的死规则。改成 max-height 两行：flex item 上真能夹住。
+       治本的三条：① 中心圆放大到 0.66R，② 提示字号随轮盘缩放（不再固定 10px），
+       ③ 提示文案统一压到 ≤10 字。实测 s/m/l 三档 99 次悬停，最长提示正好两行、四角落在圆内。
+       配色：提示行从 --ink-3 提到 --ink-2 —— 29 套主题实测 ink-3 压在 --paper 上只有
+       3.42~4.37:1，而这一行在新设计里是主要说明文字（9~12px 小字），必须过 4.5:1；
+       换 ink-2 后最低 5.65:1（暖夜），全部达标。 */
+    display: block; max-height: 2.7em; overflow: hidden; text-align: center; }
+.tk-hub .ic { color: var(--accent-ink); }
+
+.tk-gear {
+  position: absolute; left: 2%; top: 2%; width: 30px; height: 30px; padding: 0;
+  display: grid; place-items: center; border-radius: 50%;
+  background: var(--paper); color: var(--ink-3); border: 1px solid var(--line-2);
+  cursor: pointer; transition: color .16s, border-color .16s, transform .16s;
+}
+.tk-gear:hover { color: var(--accent-ink); border-color: var(--accent); transform: rotate(40deg); }
+html[data-reduce="on"] .tk-gear { transition: none; }
+
+/* 大小三档：齿轮右侧一排小签（贴着轮盘外缘，不挡扇区） */
+.tk-sizes { position: absolute; left: calc(2% + 36px); top: calc(2% + 2px); display: flex; gap: 5px; }
+.tk-chip {
+  padding: 4px 9px; background: var(--paper); color: var(--ink-2);
+  border: 1px solid var(--line); border-radius: 999px;
+  font: inherit; font-size: 11.5px; letter-spacing: .06em; cursor: pointer;
+  transition: border-color .16s, color .16s, background .16s;
+}
+.tk-chip:hover { border-color: var(--accent); color: var(--accent-ink); }
+.tk-chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* ---------- ③ AI 阅读助手（#aiReader，v2.23 W1e）----------
+   取代原「AI 速问」浮窗：拖、停靠、铺满、位置记忆全部交回 InkWin（W2），
+   这里只写内容。高度不用 autoH —— 对话流要有一块定高的 Reading 区自己滚，
+   不然每来一条回答窗就长一截，读者永远看不见上面那句。 */
+.ar-card {
+  position: fixed; z-index: 320; width: min(396px, calc(100vw - 24px));
+  height: min(560px, calc(100vh - 132px)); min-height: 320px;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--paper-2); border: 1px solid var(--line-2); border-radius: var(--r-md);
+  box-shadow: 0 26px 64px -34px var(--edge), 0 3px 12px -8px var(--edge);
+  color: var(--ink);
+}
+.ar-head {
+  flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; min-height: 38px;
+  border-bottom: 1px solid var(--line); background: var(--paper-3);
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.ar-k { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; letter-spacing: .1em; }
+.ar-doc { font-style: normal; font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.ar-x {
+  flex: none; width: 26px; height: 26px; display: grid; place-items: center;
+  background: transparent; border: 1px solid var(--line); border-radius: var(--r-sm);
+  color: var(--ink-3); cursor: pointer;
+}
+.ar-x:hover { color: var(--accent-ink); border-color: var(--accent); }
+/* 停靠 / 铺满时它是侧栏：吃满那一条高度、去掉圆角，滚动仍归 .ar-stream 自己。
+   高度不能用 autoH —— 那由 InkWin 按内容量，而对话流的内容是越长越高的。 */
+.ar-card[data-dock-state="docked"], .ar-card[data-dock-state="max"] { height: 100%; border-radius: 0; }
+.ar-card[data-docked="left"] { border-left: 0; }
+.ar-card[data-docked="right"] { border-right: 0; }
+.ar-head .inkw-st { align-self: center; }
+
+/* 携带条：这一问到底带上了什么 —— 书名 / 章 / 选中文本，看不见就会怀疑没带 */
+.ar-ctx {
+  flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 6px 12px; font-size: 11px; color: var(--ink-3);
+  border-bottom: 1px solid var(--line); background: var(--paper);
+}
+.ar-ctx .ar-c { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; }
+.ar-ctx .ar-c.on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-wash); }
+.ar-ctx .ar-hint { color: var(--ink-3); }
+
+.ar-stream { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.ar-row { max-width: 90%; font-size: 13px; line-height: 1.72; white-space: pre-wrap; word-break: break-word; }
+.ar-row.me {
+  align-self: flex-end; padding: 6px 10px; color: var(--ink);
+  background: var(--accent-wash); border-radius: var(--r-md) var(--r-md) 2px var(--r-md);
+}
+.ar-row.bot {
+  align-self: flex-start; padding: 7px 10px; color: var(--ink-2);
+  background: var(--paper); border: 1px solid var(--line-2);
+  border-radius: var(--r-md) var(--r-md) var(--r-md) 2px;
+  white-space: normal;   /* 回答里现在是真块级元素：留着 pre-wrap 会把源码换行再算一遍，行距凭空翻倍 */
+}
+/* 回答的 markdown 排版：全局 .md-* 那套是按正文 16px 的宽栏定的，直接搬进
+   396px 的窗里松得像三张卡叠着 —— 这里只收间距与字号，配色一律继续吃 token，
+   29 套主题不用另配。 */
+.ar-row.bot > :first-child { margin-top: 0; }
+.ar-row.bot > :last-child { margin-bottom: 0; }
+.ar-row.bot p { margin: 0 0 .5em; }
+.ar-row.bot .md-list { margin: .18em 0 .5em 1.25em; }
+.ar-row.bot .md-list li { margin: .16em 0; }
+.ar-row.bot h1, .ar-row.bot h2, .ar-row.bot h3,
+.ar-row.bot h4, .ar-row.bot h5, .ar-row.bot h6 {
+  margin: .62em 0 .26em; font-size: 13.5px; line-height: 1.5;
+  color: var(--ink); letter-spacing: 0; text-indent: 0;
+}
+.ar-row.bot strong { color: var(--ink); font-weight: 700; }
+.ar-row.bot em { font-style: italic; }
+.ar-row.bot code {
+  font-family: var(--font-mono); font-size: 12px; padding: .06em .3em;
+  background: var(--paper-3); border: 1px solid var(--line); border-radius: 3px;
+}
+.ar-row.bot .md-code, .ar-row.bot .md-tablebox { margin: .46em 0; }
+.ar-row.bot .md-code pre, .ar-row.bot .md-gut { padding-top: 7px; padding-bottom: 7px; line-height: 1.6; }
+.ar-row.bot .md-tablebox .md-table { font-size: 12px; line-height: 1.6; }
+.ar-row.bot .md-tablebox th, .ar-row.bot .md-tablebox td { padding: 3px 7px; }
+.ar-row.bot blockquote {
+  margin: .46em 0; padding: .1em 0 .1em 9px;
+  border-left: 2px solid var(--accent); color: var(--ink-3);
+}
+.ar-row.bot .md-hr { margin: .7em 0; }
+.ar-row.bot .md-fns { margin: .7em 0 0; padding-top: .4em; }
+.ar-row.sys { align-self: center; font-size: 11.5px; color: var(--ink-3); text-align: center; }
+.ar-row.err { align-self: flex-start; font-size: 12px; color: var(--accent-ink); border: 1px dashed var(--accent); border-radius: var(--r-sm); padding: 5px 9px; }
+.ar-tag {
+  display: inline-block; margin-right: 5px; padding: 0 5px; font-size: 10.5px;
+  color: var(--accent-ink); border: 1px solid var(--accent); border-radius: 999px;
+}
+.ar-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); }
+/* 答案里的 [3]：点它跳回原文。做成按钮而不是 <a>，因为它不换页。 */
+.ar-ref {
+  display: inline-block; margin: 0 1px; padding: 0 3px; font: inherit; font-size: 11px;
+  color: var(--accent-ink); background: var(--accent-wash);
+  border: 1px solid var(--accent); border-radius: 3px; cursor: pointer; line-height: 1.5;
+}
+.ar-ref:hover { background: var(--accent); color: var(--on-accent); }
+/* 动作流水：工具层做了什么，一行字说清（读了哪章 / 将建几张卡） */
+.ar-act { align-self: flex-start; font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 5px; }
+
+/* 预置六问：首屏就给方向，不把读者丢进一个空输入框 */
+.ar-preset { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.ar-p {
+  padding: 4px 9px; font: inherit; font-size: 11.5px; color: var(--ink-2);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+  transition: color .16s, border-color .16s, background .16s;
+}
+.ar-p:hover { border-color: var(--accent); color: var(--accent-ink); }
+.ar-p[disabled] { opacity: .45; cursor: not-allowed; }
+html[data-reduce="on"] .ar-p { transition: none; }
+
+/* 落地三钮：答案 → 笔记 / 闪卡 / 任务，全走工具层（统一确认与撤销） */
+.ar-land { flex: none; display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-top: 1px solid var(--line); background: var(--paper-3); }
+.ar-land .btn { font-size: 11.5px; padding: 4px 9px; }
+.ar-land .btn[disabled] { opacity: .45; cursor: not-allowed; }
+
+/* 确认卡：写操作前把「将落地什么」摊开列出来，逐条可看，不是参数 JSON */
+.ar-cft {
+  flex: none; margin: 0 12px 8px; padding: 9px 10px;
+  background: var(--paper); border: 1px solid var(--accent); border-radius: var(--r-sm);
+}
+.ar-cft b { display: block; font-size: 12px; margin-bottom: 6px; }
+.ar-cft ul { margin: 0 0 7px; padding-left: 16px; font-size: 11.5px; color: var(--ink-2); line-height: 1.7; max-height: 116px; overflow-y: auto; }
+.ar-cft .ar-cf-bad { color: var(--accent-ink); list-style: none; margin-left: -16px; }
+.ar-cft .ar-cf-row { display: flex; align-items: center; gap: 6px; }
+
+.ar-foot { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
+.ar-foot .field { flex: 1; min-width: 0; }
+
