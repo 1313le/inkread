@@ -819,8 +819,41 @@ function htmlToBlocks(html, opts) {
   let hn = 0;
   let preBuf = null, noteBuf = null, noteId = "", noteDepth = 0, rubySkip = false;
   let mathBuf = null, svgDepth = 0, svgGotImg = false, skipText = false;
+  /* 正文内链（EPUB 的书内自带目录页、脚注引用、章间互链）：opts.link 判收，
+     落地时随所属块一起记下 {bi, cs, len, x, href}。这里只记「哪一段字是个链接」，
+     href 指向哪个块由调用方解析 —— 解析要跨文件，得等全书的块与锚点都齐了才认得。
+     块的字节形状不动（§九 不动清单），这份侧表单独走 toc.json。 */
+  const links = [];
+  let pendLinks = [];
+  let linkAt = -1, linkHref = "";
+  /* 作者锚点 → 块号。标题与注块本来就把 id 挂在块上（读侧大纲要用），其余容器
+     （<p id="fn1"> 的脚注、<div id="ch3"> 的章界）落块时 id 就散了 —— 而那些正是
+     正文内链最常指的地方。这里另记一份侧表，块的字节形状照旧不动。
+     认领规则：开标签记下 id，紧随其后的那个块落地时认领（段落 / 列表项 / 表格 /
+     容器边界都是落地点）；下一个开标签先作废旧 id，绝不隔元素误认领。 */
+  const idAt = Object.create(null);
+  let anchorId = "";
+  const markAnchor = () => { if (anchorId && idAt[anchorId] == null) idAt[anchorId] = blocks.length; anchorId = ""; };
+
+  /* 当前正在攒着的那份文本：单元格 / 列表项 / 注块 / 段落四选一，
+     与下面 text() 的分流顺序保持一致 —— cs 是相对这份文本量的，
+     调用方拿它当「同一个块里出现两次同样的字时该认哪一处」的提示。 */
+  const curText = () => (noteBuf != null ? noteBuf : cell != null ? cell : (lists.length && item ? item.x : para));
+
+  /* 块落地：记下块号，把这一段攒下的内链一并带走。
+     嵌套列表并进父项 sub 时不走这里（它还不是顶层块），那些链等顶层列表落地时再收 ——
+     链的字面就在顶层块的渲染文本里，读侧按字面找得到，块号也就不用细分到子项。 */
+  const emit = (b) => {
+    const bi = blocks.length;
+    blocks.push(b);
+    if (pendLinks.length) {
+      for (const l of pendLinks) links.push(Object.assign({ bi }, l));
+      pendLinks = [];
+    }
+  };
 
   const flush = () => {
+    markAnchor();
     const t = squeeze(para);
     const tp = pend || "p";
     const pid = pendId;
@@ -830,7 +863,7 @@ function htmlToBlocks(html, opts) {
     /* 标题挂锚点 id，读侧大纲 / 起读锚定要用；EPUB 优先保留作者自己的 id。
        pid 必须在清 pendId 之前取，否则作者锚点全丢，目录点了只会跳本章第一个标题。 */
     if (/^h[1-3]$/.test(tp)) b.id = (EP && pid) ? "x-" + pid : "h-" + (++hn);
-    blocks.push(b);
+    emit(b);
   };
   const closeCell = () => {
     if (cell == null) return;
@@ -859,7 +892,7 @@ function htmlToBlocks(html, opts) {
     const block = { type: fr.ordered ? "olist" : "list", items };
     const parent = lists[lists.length - 1];
     if (parent && parent.items.length) parent.items[parent.items.length - 1].sub.push(block);
-    else blocks.push(block);
+    else emit(block);
   };
   const text = (s) => {
     if (rubySkip) return;
@@ -886,6 +919,9 @@ function htmlToBlocks(html, opts) {
     const close = m[0][1] === "/";
     const a = EP && !close ? attrsOf(m[2]) : null;
     const selfClose = EP && /\/\s*$/.test(m[2] || "");
+    /* 开标签带着作者 id 就把 id 记下来，交给下一个「块起点」（见 markAnchor）；
+       闭标签与不带 id 的开标签都作废，免得隔了两个元素的旧 id 认领错块。 */
+    if (EP) anchorId = (!close && a && a.id) ? String(a.id) : "";
     /* 作者 CSS / 脚本一律丢弃：不应用、也不让样式表里的字混进正文。
        配对标签缺失时这里仍然兜得住（head 已被 cleanXhtml 剥掉）。 */
     if (EP && (tag === "style" || tag === "script")) { if (!selfClose) skipText = !close; continue; }
@@ -895,7 +931,7 @@ function htmlToBlocks(html, opts) {
         if (--svgDepth <= 0) {
           svgDepth = 0;
           /* 内部若已抽出可服务的 <image>，就不再补占位，免得一句话两行字 */
-          if (!svgGotImg) blocks.push({ type: "p", x: "（此处有一幅内联矢量插图，墨读未导入）" });
+          if (!svgGotImg) emit({ type: "p", x: "（此处有一幅内联矢量插图，墨读未导入）" });
           svgGotImg = false;
         }
       } else if (!selfClose) svgDepth++;
@@ -905,16 +941,38 @@ function htmlToBlocks(html, opts) {
       imgs++;
       if (EP && o.img && !close) {
         const r = o.img(a || {});
-        if (r && r.src) { flush(); blocks.push({ type: "img", src: r.src, alt: r.alt || "", w: r.w || 0, h: r.h || 0 }); if (svgDepth) svgGotImg = true; }
+        if (r && r.src) { flush(); emit({ type: "img", src: r.src, alt: r.alt || "", w: r.w || 0, h: r.h || 0 }); if (svgDepth) svgGotImg = true; }
       }
       continue;
     }
     if (tag === "br") { if (preBuf != null) preBuf += "\n"; else text(" "); continue; }
+    /* EPUB 内链（书中自带的目录页 / 脚注引用 / 章间互链）：开标签记住「链内文字从哪个字起」，
+       闭标签时把那段原文取出来交给 o.link 判定收不收、并把块号留给上层解析目标。
+       这里只认字面不认目标 —— href 指向哪一章哪一块，要等全书锚点齐了才解得出（见 linkTarget）。
+       <pre> 里的引用不算链接（代码块没有目录语义），跨块的悬空 <a> 取到空字面自然丢弃。 */
+    if (EP && tag === "a") {
+      if (close) {
+        if (linkAt >= 0 && preBuf == null && o.link) {
+          const raw = curText().slice(linkAt);
+          const label = squeeze(raw);
+          const keep = label ? o.link(linkHref, label) : null;
+          if (keep) {
+            const lead = raw.length - raw.replace(/^ +/, "").length;
+            pendLinks.push(Object.assign({ cs: linkAt + lead, len: label.length, x: label }, keep));
+          }
+        }
+        linkAt = -1; linkHref = "";
+      } else if (!selfClose) {
+        linkAt = preBuf == null ? curText().length : -1;
+        linkHref = (a && a.href) || "";
+      }
+      continue;
+    }
     if (EP && preBuf != null) {
       if (tag === "pre" && close) {
         const x = preBuf.replace(/^\s*\n+/, "").replace(/\s+$/, "");
         preBuf = null;
-        if (x) blocks.push({ type: "code", x });
+        if (x) emit({ type: "code", x });
       }
       continue;
     }
@@ -946,10 +1004,10 @@ function htmlToBlocks(html, opts) {
         closeRow();
         if (table) {
           if (!table.head.length && table.rows.length) table.head = table.rows.shift();
-          if (table.head.length || table.rows.length) blocks.push({ type: "table", head: table.head, rows: table.rows });
+          if (table.head.length || table.rows.length) emit({ type: "table", head: table.head, rows: table.rows });
           table = null;
         }
-      } else table = { head: [], rows: [] };
+      } else { markAnchor(); table = { head: [], rows: [] }; }
       continue;
     }
     if (tag === "ul" || tag === "ol") {
@@ -958,7 +1016,7 @@ function htmlToBlocks(html, opts) {
       continue;
     }
     if (tag === "li") {
-      if (!close && lists.length) { item = { x: "", sub: [] }; lists[lists.length - 1].items.push(item); }
+      if (!close && lists.length) { markAnchor(); item = { x: "", sub: [] }; lists[lists.length - 1].items.push(item); }
       continue;
     }
     if (/^h[1-6]$/.test(tag)) {
@@ -971,11 +1029,12 @@ function htmlToBlocks(html, opts) {
       if (noteBuf != null) continue;                       /* 注内段落并进注块，不另起 */
       if (!lists.length && cell == null) {
         if (close) flush();
-        else { flush(); pend = EP && tag === "blockquote" ? "quote" : "p"; }
+        else { markAnchor(); flush(); pend = EP && tag === "blockquote" ? "quote" : "p"; }
       }
       continue;
     }
     if (EP && (tag === "div" || tag === "section" || tag === "article") && noteBuf == null) {
+      markAnchor();
       flush();                                            /* 规范不强制 <p>：容器边界即段落边界 */
       continue;
     }
@@ -987,11 +1046,11 @@ function htmlToBlocks(html, opts) {
     if (!t) return;
     const b = { type: "note", text: t };
     if (noteId) b.id = "x-" + noteId;
-    blocks.push(b);
+    emit(b);
   }
   flush();
   if (noteBuf != null) closeNote();                       /* 作者漏写闭合标签：注块就地收尾 */
-  return { blocks, imgs };
+  return { blocks, imgs, links, idAt };
 }
 
 async function docxToBlocks(buf) {
@@ -1013,12 +1072,294 @@ const PDF_HEAD_RATIO = 1.15;   /* 行字号 ≥ 正文×此倍数 → 标题候�
 const PDF_HEAD_MAX = 40;       /* 标题行长度上限（超了是"整段都放大"，不是标题） */
 const PDF_LEAD_MUL = 1.6;      /* 行距 > 该字号常规行距 ×此倍数 → 断段 */
 const PDF_FORM_RUN = 3;        /* 同字号同起点连续 ≥此数行 = 封面信息表 / 目录点线行，不是标题 */
+const PDF_GRID_TOL = 2;        /* E5 格线聚类容差（pt）：同一条格线的线段落差不大于此 */
+const PDF_GRID_MIN = 3;        /* E5 横、竖格线各至少的条数（3H×3V = 2×2 表起） */
+const PDF_COL_SIDE = 3;        /* E3 书脊两侧各需的最少文本行数（少于这个就不是「栏」，是残行） */
+const PDF_COL_FREE = 0.2;      /* E3 允许压住书脊的行占比：通栏标题正是那一成，全空才判反而认不出带题头的双栏 */
+const PDF_COL_ROWS = 8;        /* E3 少于此行数不判分栏：两三行的页面谈「栏」没有意义 */
+const PDF_HF_PAGE = 5;         /* E1 总页数少于此整条关闭（§四6 原文：短文档没统计可言，误删正文） */
+const PDF_HF_RATIO = 0.2;      /* E1 页边带占比（§四6 原文 ST_HEADER_RATIO=0.2）：上下各取页高这么多 */
+const PDF_HF_BODY = 0.5;       /* E1 正文特征行：行宽 > 页宽×此比。页眉页脚通常是短行，长行落在带里就说明带子是正文 */
+const PDF_HF_LEAD = 2;         /* E1 正文上下界各外扩的行距倍数：宁可少剔，把临界行留给正文 */
+const PDF_HF_RATE = 0.2;       /* E1 判据②：带内有正文特征行的页占比上限（≥3 页有行才统计） */
+const PDF_HF_SIGN = 0.6;       /* E1 判据①：同一签名覆盖的页占比（与 3 页取大者） */
+const PDF_HF_YTOL = 0.02;      /* E1 判据①：跨页同带允许的 y 漂移（页高中位数之比） */
+const PDF_HF_MAXROW = 3;       /* E1 单页剔除行数上限，超了本页放弃 —— 第三道误杀保险 */
+const PDF_HF_BANDPAGE = 3;     /* E1 判据②：带内至少要出现这么多页，否则样本太薄不判 */
+const PDF_TOC_MIN = 3;         /* E2 连续 ≥此数行「主体+点线+页码」才判目录（§四3 原文：命中 ≥3 行才生效） */
+/* E2 目录点线行：行尾是「≥2 个引导点线字符 + 页码」。阿拉伯数字 1~4 位或小写罗马数字（§三 原文口径）。 */
+const PDF_TOC_RUN = /[·•⋅．.。…~\-—]{2,}\s*([0-9]{1,4}|[ivxIVX]{1,6})\s*$/;
+
+/* E3 双栏：x 投影找书脊。行内先并区间再计数（同一行两个词压同一格只算一次），
+   得到「多少行盖住了这个 x」；盖住行数 ≤PDF_COL_FREE 的连续 x 段就是空谷。
+   谷宽 ≥2×正文字号、谷中心落在页宽 25%~75%（左右页边天然空，靠这条挡掉）、两侧各 ≥PDF_COL_SIDE 行 —— 三条同时成立才判双栏。
+   正文字号取本页字符加权众数，不用全局 body：全局要等归行之后才算得出，而分栏必须在归行之前定。 */
+function pdfSplitCols(items, pageW) {
+  if (!(pageW > 0) || items.length < PDF_COL_SIDE * 2) return null;
+  const srt = items.slice().sort((a, b) => b.y - a.y || a.x - b.x);
+  const rws = [];
+  for (const pt of srt) {
+    const r = rws[rws.length - 1];
+    if (r && r.y - pt.y <= Math.max(2, Math.min(pt.h, r.hMin) * 0.5)) { r.pts.push(pt); if (pt.h < r.hMin) r.hMin = pt.h; }
+    else rws.push({ y: pt.y, hMin: pt.h, pts: [pt] });
+  }
+  if (rws.length < PDF_COL_ROWS) return null;
+  const w = new Map();
+  for (const pt of items) for (const ch of pt.s) if (ch !== " ") w.set(pt.h, (w.get(pt.h) || 0) + 1);
+  let psize = 10, best = -1;
+  w.forEach((n, sz) => { if (n > best) { best = n; psize = sz; } });
+  const nb = Math.ceil(pageW) + 2;
+  const bins = new Int32Array(nb);
+  for (const r of rws) {
+    const iv = [];
+    for (const pt of r.pts) {
+      const a = Math.max(0, Math.floor(pt.x)), b = Math.min(pageW, Math.ceil(pt.x + pt.w));
+      if (b > a) iv.push([a, b]);
+    }
+    iv.sort((a, b) => a[0] - b[0]);
+    const mg = [];
+    for (const q of iv) {
+      const m = mg[mg.length - 1];
+      if (m && q[0] <= m[1]) m[1] = Math.max(m[1], q[1]);
+      else mg.push([q[0], q[1]]);
+    }
+    for (const q of mg) for (let k = q[0]; k < q[1] && k < nb; k++) bins[k]++;
+  }
+  const cap = Math.floor(rws.length * PDF_COL_FREE);
+  const minW = Math.max(6, psize * 2);
+  let gut = null;
+  for (let k = 1; k < nb; k++) {
+    if (bins[k] > cap || bins[k - 1] <= cap) continue;
+    let e = k;
+    while (e + 1 < nb && bins[e + 1] <= cap) e++;
+    const wid = e - k, c = (k + e) / 2;
+    if (wid >= minW && c >= pageW * 0.25 && c <= pageW * 0.75 && (!gut || wid > gut[2])) gut = [k, e, wid];
+    k = e;
+  }
+  if (!gut) return null;
+  const L = gut[0], R = gut[1];
+  const rowsL = rws.filter((r) => r.pts.some((pt) => pt.x + pt.w <= L + 0.5)).length;
+  const rowsR = rws.filter((r) => r.pts.some((pt) => pt.x >= R - 0.5)).length;
+  if (rowsL < PDF_COL_SIDE || rowsR < PDF_COL_SIDE) return null;
+  const left = [], right = [], full = [];
+  for (const pt of items) {
+    if (pt.x + pt.w <= L + 0.5) left.push(pt);
+    else if (pt.x >= R - 0.5) right.push(pt);
+    else full.push(pt);
+  }
+  return { left, right, full, gut: [L, R] };
+}
+
+/* E1 三判据剔页眉/页脚/页码。插在归行之后、断段之前；只用「页边位置 + 跨页重复」两种信号，不用字号规则
+   （§9.5 原文：字号规则会把封面大字认成标题，同理页眉小字也不配用字号判）。
+   候选带 = 页高上下各 20%（§四6 原文 ST_HEADER_RATIO=0.2）：顶带 y ≥ 0.8h，底带 y ≤ 0.2h。
+   ① 重复签名：同带同位（y 差 ≤2% 页高）在 ≥max(3, 60%×页数) 个页出现的行 → 剔。
+      页码逐页文本不同，先把「3」「- 3 -」「第 4 页」这类模式行的数字归一成 # 再比。
+   ② 区域出现率：带内「有正文特征行（宽 >50% 页宽）」的页占比 <20%（且带内 ≥3 页）→ 该带判页眉/页脚带；
+   ③ 继承：②成立则全篇该带一并剔，但带内的正文特征行仍然豁免 —— 除非它自己命中①（整版重复的横幅）。
+   防护（全部硬性）：首页永不剔（封面字段是真内容）、总页 <5 整条关闭、单页剔 >3 行则本页放弃。 */
+function pdfHeaderFoot(lines, geo, npages) {
+  const drop = new Set();
+  if (npages < PDF_HF_PAGE) return drop;
+  const phOf = (l) => { const g = geo.get(l.page); return g && g.h > 0 ? g.h : 0; };
+  const wide = (l) => { const g = geo.get(l.page); return !!g && g.w > 0 && (l.xe - l.x0) > g.w * PDF_HF_BODY; };
+  const inTop = (l) => { const h = phOf(l); return h > 0 && l.y >= h * (1 - PDF_HF_RATIO); };
+  const inBot = (l) => { const h = phOf(l); return h > 0 && l.y <= h * PDF_HF_RATIO; };
+  /* 页码模式行的签名：数字先归一，其余照文本比 */
+  const PN1 = /^[-·—.\s]*\d{1,4}[-·—.\s]*$/;
+  const PN2 = /^第\s*\d+\s*页(共\s*\d+\s*页)?$/;
+  const sigOf = (s) => (PN1.test(s) || PN2.test(s)) ? s.replace(/\d/g, "#") : s;
+
+  const band = { top: [], bottom: [] };
+  for (const l of lines) {
+    if (Number.isNaN(l.y) || l.table || l.page === 1) continue;   /* 首页整页豁免 */
+    if (inTop(l)) band.top.push(l);
+    else if (inBot(l)) band.bottom.push(l);
+  }
+  const hs = [];
+  geo.forEach((g) => { if (g.h > 0) hs.push(g.h); });
+  const med = (a) => { const s = a.slice().sort((x, y) => x - y); return s[(s.length - 1) >> 1]; };
+  const ph = hs.length ? med(hs) : 0;
+  const need = Math.max(3, Math.ceil(npages * PDF_HF_SIGN));
+  const hit = new Set();
+  for (const key of ["top", "bottom"]) {
+    const arr = band[key];
+    if (arr.length) {
+      /* ②③ 整带继承（长行豁免） */
+      const pages = new Map();
+      for (const l of arr) pages.set(l.page, (pages.get(l.page) || false) || wide(l));
+      let withBody = 0;
+      pages.forEach((v) => { if (v) withBody++; });
+      if (pages.size >= PDF_HF_BANDPAGE && withBody / pages.size < PDF_HF_RATE) {
+        for (const l of arr) if (!wide(l)) hit.add(l);
+      }
+      /* ① 带内重复签名 */
+      const sigs = new Map();
+      for (const l of arr) {
+        const k = sigOf(l.s);
+        if (!sigs.has(k)) sigs.set(k, []);
+        sigs.get(k).push(l);
+      }
+      sigs.forEach((ls) => {
+        if (new Set(ls.map((l) => l.page)).size < need) return;
+        if (!ph) return;
+        const ys = ls.map((l) => l.y);
+        if (Math.max(...ys) - Math.min(...ys) > ph * PDF_HF_YTOL) return;
+        ls.forEach((l) => hit.add(l));
+      });
+    }
+  }
+  /* 单页剔除上限：超了就整页放弃（第三道误杀保险，两带合并计数） */
+  const perPage = new Map();
+  hit.forEach((l) => perPage.set(l.page, (perPage.get(l.page) || 0) + 1));
+  hit.forEach((l) => { if (perPage.get(l.page) <= PDF_HF_MAXROW) drop.add(l); });
+  return drop;
+}
+
+/* E2 目录：一行「主体 + 点线 + 页码」是目录条目的形状，正文段落不是。
+   判成目录的行整组收编成一条伪行（toc=[items]）——断段那一步按行距拼字，四行点线会被粘成一坨
+   （v102 CN fixture 实测「一、系统方案 .. 3二、理…」成一个 p 段），所以必须在断段之前把它们从行流里摘出来。
+   点线是排版噪音、剥掉；页码是原书页码、留着当参照。 */
+function tocItemOf(l) {
+  if (!l.s || Number.isNaN(l.y) || l.table) return "";
+  const m = PDF_TOC_RUN.exec(l.s);
+  if (!m) return "";
+  const subj = l.s.slice(0, m.index).replace(/[\s·•⋅．.。…~\-—]+$/, "");
+  return subj ? subj + " · " + m[1] : "";
+}
+function pdfToc(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const first = tocItemOf(lines[i]);
+    if (!first) continue;
+    let j = i;
+    const items = [first];
+    while (j + 1 < lines.length && lines[j + 1].page === lines[i].page) {
+      const nx = tocItemOf(lines[j + 1]);
+      if (!nx) break;
+      items.push(nx); j++;
+    }
+    if (items.length >= PDF_TOC_MIN) {
+      lines[i].toc = items;
+      lines.splice(i + 1, items.length - 1);
+    } else i = j;
+  }
+}
+
+/* E5 有线表格：pdfjs operator list 里取「真画出来」的线段 —— 描边线 + 细填充矩形 ——
+   按 x/y 聚类成格线，横竖各 ≥PDF_GRID_MIN 条才算表，格内文本按基线/中点落位归格，首行作表头（同 docx）。
+   只认有线表格：无线表、跨页续表、扫描件一律不做。路径坐标在流空间，须乘 CTM
+   （transform 累乘 + save/restore 栈）才与正文同系 —— Chromium 的 PDF 里 CTM 是 y 翻转，
+   不乘的话格线全部落在页面下半截，一个格都对不上。 */
+function pdfTables(ol, OPS, parts) {
+  try {
+    const raw = [];   /* 候选线段 [x1,y1,x2,y2]，已变换到正文坐标系 */
+    const mul = (m, n) => [
+      m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
+      m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+      m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]
+    ];
+    /* constructPath args = [收尾算子, [DrawOPS…], minMax]；DrawOPS: moveTo=0 lineTo=1 curveTo=2 quadTo=3 closePath=4
+       （与 pdfjs 自家 makePathFromDrawOPS 同源；描边/填充不落在 fnArray，就收在这第 0 个参数里） */
+    const walk = (arr, m) => {
+      let i = 0, cx = 0, cy = 0, sx = 0, sy = 0;
+      const T = (k) => [m[0] * arr[k] + m[2] * arr[k + 1] + m[4], m[1] * arr[k] + m[3] * arr[k + 1] + m[5]];
+      while (i < arr.length) {
+        const op = arr[i++];
+        if (op === 0) { const q = T(i); sx = cx = q[0]; sy = cy = q[1]; i += 2; }
+        else if (op === 1) { const q = T(i); raw.push([cx, cy, q[0], q[1]]); cx = q[0]; cy = q[1]; i += 2; }
+        else if (op === 2) { const q = T(i + 4); cx = q[0]; cy = q[1]; i += 6; }   /* 曲线不是格线，只续当前点 */
+        else if (op === 3) { const q = T(i + 2); cx = q[0]; cy = q[1]; i += 4; }
+        else if (op === 4) { raw.push([cx, cy, sx, sy]); cx = sx; cy = sy; }
+        else return false;   /* 未知算子：该路径整条放弃，防坐标错位 */
+      }
+      return true;
+    };
+    const STROKE = new Set([OPS.stroke, OPS.closeStroke, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke]);
+    const FILL = new Set([OPS.fill, OPS.eoFill]);
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const stack = [];
+    for (let i = 0; i < ol.fnArray.length; i++) {
+      const fn = ol.fnArray[i], a = ol.argsArray[i];
+      if (fn === OPS.save) stack.push(ctm);
+      else if (fn === OPS.restore) ctm = stack.pop() || ctm;
+      else if (fn === OPS.transform) ctm = mul(ctm, a);
+      else if (fn === OPS.constructPath) {
+        const arr = Array.isArray(a[1]) ? a[1][0] : null;
+        if (!arr || !arr.length) continue;
+        /* 收尾算子不是描边/填充 = 这条路径根本没画出来（endPath 的页底白矩形、W n 的裁剪路径）：
+           它的边一条都不是格线。这扇门不关，全页 bbox 一撑开，表外的标题全被吸进表里。 */
+        if (!STROKE.has(a[0]) && !FILL.has(a[0])) continue;
+        const mark = raw.length;
+        if (!walk(arr, ctm)) { raw.length = mark; continue; }
+        if (FILL.has(a[0])) {
+          /* 填充只认细长矩形（表格线的画法）；成块的色不是格线，整条回退 */
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          for (let k = mark; k < raw.length; k++) {
+            x0 = Math.min(x0, raw[k][0], raw[k][2]); x1 = Math.max(x1, raw[k][0], raw[k][2]);
+            y0 = Math.min(y0, raw[k][1], raw[k][3]); y1 = Math.max(y1, raw[k][1], raw[k][3]);
+          }
+          if (!((x1 - x0) <= 2.5 || (y1 - y0) <= 2.5)) raw.length = mark;
+        }
+      }
+    }
+    const h = [], v = [];
+    for (const [x1, y1, x2, y2] of raw) {
+      if (Math.abs(y1 - y2) <= 0.6 && Math.abs(x2 - x1) > 2) h.push({ k: (y1 + y2) / 2, a: Math.min(x1, x2), b: Math.max(x1, x2) });
+      else if (Math.abs(x1 - x2) <= 0.6 && Math.abs(y2 - y1) > 2) v.push({ k: (x1 + x2) / 2, a: Math.min(y1, y2), b: Math.max(y1, y2) });
+    }
+    if (h.length < PDF_GRID_MIN || v.length < PDF_GRID_MIN) return [];
+    const cl = (arr, key, tol) => {
+      arr.sort((p, q) => p[key] - q[key]);
+      const out = [];
+      for (const s of arr) {
+        const g = out[out.length - 1];
+        if (g && s[key] - g.k <= tol) { g.segs.push(s); g.k = g.segs.reduce((u, t) => u + t[key], 0) / g.segs.length; }
+        else out.push({ k: s[key], segs: [s] });
+      }
+      return out.map((g) => g.k);
+    };
+    const ys = cl(h, "k", PDF_GRID_TOL).sort((a, b) => b - a);
+    const xs = cl(v, "k", PDF_GRID_TOL).sort((a, b) => a - b);
+    if (ys.length < PDF_GRID_MIN || xs.length < PDF_GRID_MIN) return [];
+    const cells = [];
+    for (let i = 0; i < ys.length - 1; i++) cells.push(new Array(Math.max(0, xs.length - 1)).fill(0).map(() => []));
+    const used = [];
+    for (const pt of parts) {
+      let ri = -1, cj = -1;
+      for (let i = 0; i < ys.length - 1; i++) if (pt.y <= ys[i] && pt.y >= ys[i + 1]) { ri = i; break; }
+      if (ri < 0) continue;
+      const mx = pt.x + pt.w / 2;
+      for (let j = 0; j < xs.length - 1; j++) if (mx >= xs[j] && mx <= xs[j + 1]) { cj = j; break; }
+      if (cj < 0) continue;
+      cells[ri][cj].push(pt);
+      used.push(pt);
+    }
+    const cellText = (arr) => {
+      if (!arr.length) return "";
+      arr.sort((p, q) => q.y - p.y || p.x - q.x);
+      let s = "", lx = null, lw = 0;
+      for (const pt of arr) {
+        if (s && pt.x - (lx + lw) > Math.max(1.2, pt.h * 0.22)) s += " ";
+        s += pt.s; lx = pt.x; lw = pt.w;
+      }
+      return squeeze(s);
+    };
+    const trs = [];
+    for (const row of cells) {
+      const t = row.map(cellText);
+      if (t.some((x) => x)) trs.push(t);   /* 全空行（隔行）不进表 */
+    }
+    if (trs.length < 2) return [];         /* 连表头带数据不足两行，当普通版式走 */
+    return [{ top: ys[0], left: xs[0], right: xs[xs.length - 1], head: trs[0], rows: trs.slice(1), items: used }];
+  } catch (e) { return []; }
+}
 
 async function pdfToBlocks(buf) {
   const pdfjsLib = await lazyPdfjs();
   if (!pdfjsLib) throw new Error("解析组件未安装");
   const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf), useSystemFonts: true, isEvalSupported: false }).promise;
   const lines = [];
+  const geo = new Map();        /* E1 用：页号 → { w, h }，页边带与正文特征行都要按各自页的版面量 */
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const tc = await page.getTextContent();
@@ -1032,39 +1373,78 @@ async function pdfToBlocks(buf) {
       const tr = it.transform;
       parts.push({ x: tr[4], w: it.width || 0, s: it.str, y: tr[5], h: Math.abs(tr[3]) || it.height || 10 });
     }
-    parts.sort((a, b) => b.y - a.y || a.x - b.x);
-    const rows = [];
-    for (const pt of parts) {
-      const r = rows[rows.length - 1];
-      if (r && r.y - pt.y <= Math.max(2, Math.min(pt.h, r.hMin) * 0.5)) {
-        r.parts.push(pt);
-        if (pt.h < r.hMin) r.hMin = pt.h;
-      } else rows.push({ y: pt.y, hMin: pt.h, parts: [pt] });
+    /* E5 线上表格：格内文本归表块，其余照常归行；网格提取任何失败都按无表走 */
+    let tables = [];
+    if (parts.length) {
+      try {
+        const ol = await page.getOperatorList();
+        tables = pdfTables(ol, pdfjsLib.OPS, parts);
+      } catch (e) { tables = []; }
     }
-    const pageLines = rows.map((r) => {
-      r.parts.sort((a, b) => a.x - b.x);
-      /* 行字号按字符数加权取众数：一行里夹几个不同字号的 run 时，占字多的那个才算这行的字号 */
-      const sizes = new Map();
-      for (const pt of r.parts) for (const ch of pt.s) if (ch !== " ") sizes.set(pt.h, (sizes.get(pt.h) || 0) + 1);
-      let size = r.hMin, n = -1;
-      sizes.forEach((c, sz) => { if (c > n) { n = c; size = sz; } });
-      let s = "", lx = null, lw = 0;
-      for (const pt of r.parts) {
-        if (s && lx != null && pt.x - (lx + lw) > Math.max(1.2, size * 0.22)) s += " ";
-        s += pt.s;
-        lx = pt.x; lw = pt.w;
+    let flow = parts;
+    if (tables.length) {
+      const used = new Set();
+      tables.forEach((t) => t.items.forEach((it) => used.add(it)));
+      if (used.size) flow = parts.filter((pt) => !used.has(pt));
+    }
+    /* 归行 + 拼字：同一套容差与字号判据，整页走一遍、单栏也走一遍（E3 分栏后每栏各调一次） */
+    const mkLines = (list, col) => {
+      const sorted = list.slice().sort((a, b) => b.y - a.y || a.x - b.x);
+      const rows = [];
+      for (const pt of sorted) {
+        const r = rows[rows.length - 1];
+        if (r && r.y - pt.y <= Math.max(2, Math.min(pt.h, r.hMin) * 0.5)) {
+          r.parts.push(pt);
+          if (pt.h < r.hMin) r.hMin = pt.h;
+        } else rows.push({ y: pt.y, hMin: pt.h, parts: [pt] });
       }
-      return { y: r.y, page: p, size, s: squeeze(s), x0: r.parts[0].x };
-    }).filter((l) => l.s);
+      return rows.map((rr) => {
+        rr.parts.sort((a, b) => a.x - b.x);
+        /* 行字号按字符数加权取众数：一行里夹几个不同字号的 run 时，占字多的那个才算这行的字号 */
+        const sizes = new Map();
+        for (const pt of rr.parts) for (const ch of pt.s) if (ch !== " ") sizes.set(pt.h, (sizes.get(pt.h) || 0) + 1);
+        let size = rr.hMin, n = -1;
+        sizes.forEach((c, sz) => { if (c > n) { n = c; size = sz; } });
+        let s = "", lx = null, lw = 0, xe = -Infinity;
+        for (const pt of rr.parts) {
+          if (s && lx != null && pt.x - (lx + lw) > Math.max(1.2, size * 0.22)) s += " ";
+          s += pt.s;
+          lx = pt.x; lw = pt.w;
+          if (pt.x + pt.w > xe) xe = pt.x + pt.w;
+        }
+        return { y: rr.y, page: p, size, s: squeeze(s), x0: rr.parts[0].x, xe: Math.max(rr.parts[0].x, xe), col };
+      }).filter((l) => l.s);
+    };
+    /* 表格块按位置插进所属栏的行流（bbox 顶线即它的 y），保持与正文行的阅读顺序 */
+    const withTables = (list, col, tset) => {
+      const out = mkLines(list, col);
+      for (const t of tset) {
+        const e = { y: t.top, page: p, size: 0, s: "", x0: t.left, col, table: t };
+        let k = 0;
+        while (k < out.length && out[k].y > t.top) k++;
+        out.splice(k, 0, e);
+      }
+      return out;
+    };
+    /* E3：认得出书脊就按「通栏行 → 左栏 → 右栏」出块（横排读序，定案 §四 偏差登记），
+       每栏各自归行 → 左栏行尾拼右栏行首这类跨栏串行结构性不可能再发生；认不出就整页归行（原行为）。 */
+    const vp1 = page.getViewport({ scale: 1 }) || {};
+    const pageW = vp1.width || 0;
+    geo.set(p, { w: pageW, h: vp1.height || 0 });
+    const split = pdfSplitCols(flow, pageW);
+    const tOf = (c) => tables.filter((t) => (!split ? 0 : t.left >= split.gut[1] ? 2 : t.right <= split.gut[0] ? 1 : 0) === c);
+    const pageLines = split
+      ? mkLines(split.full, 0).concat(withTables(split.left, 1, tOf(1)), withTables(split.right, 2, tOf(2)))
+      : withTables(flow, 0, tables);
     if (lines.length && pageLines.length) lines.push({ y: NaN, page: p, size: 0, s: "", x0: 0 });
     lines.push(...pageLines);
     page.cleanup && page.cleanup();
   }
   if (!lines.length) return { blocks: [], pages: doc.numPages };
 
-  /* 正文字号 = 全篇按字符数加权的众数（四份真 PDF 实测全部命中真实正文字号） */
+  /* 正文字号 = 全篇按字符数加权的众数（四份真 PDF 实测全部命中真实正文字号）；表格条目不带字，不参选 */
   const weight = new Map();
-  lines.forEach((l) => { if (!Number.isNaN(l.y)) weight.set(l.size, (weight.get(l.size) || 0) + l.s.length); });
+  lines.forEach((l) => { if (!Number.isNaN(l.y) && l.s) weight.set(l.size, (weight.get(l.size) || 0) + l.s.length); });
   let body = 0, best = -1;
   weight.forEach((n, sz) => { if (n > best) { best = n; body = sz; } });
   if (!(body > 0)) body = 12;
@@ -1088,7 +1468,7 @@ async function pdfToBlocks(buf) {
   const gapBySize = new Map();
   for (let i = 1; i < lines.length; i++) {
     const a = lines[i - 1], b = lines[i];
-    if (Number.isNaN(a.y) || Number.isNaN(b.y) || a.page !== b.page) continue;
+    if (Number.isNaN(a.y) || Number.isNaN(b.y) || a.page !== b.page || a.col !== b.col || !a.s || !b.s) continue;
     if (Math.abs(a.size - b.size) > 0.5) continue;
     const g = a.y - b.y;
     if (g <= 0) continue;
@@ -1109,6 +1489,16 @@ async function pdfToBlocks(buf) {
     const kb = body.toFixed(1);
     return leadBySize.has(kb) ? leadBySize.get(kb) : 0;
   };
+  /* E1：归行之后、断段之前。行距统计（leadBySize）已按含页眉的全量行算好，剔完再断段 ——
+     顺序反过来会让「剔不剔」去改「常规行距基线」，两道判据互相挂钩就再也说不清是谁的锅。 */
+  const hfDrop = pdfHeaderFoot(lines, geo, doc.numPages);
+  if (hfDrop.size) {
+    const keep = lines.filter((l) => !hfDrop.has(l));
+    lines.length = 0; lines.push(...keep);
+  }
+  /* E2：目录点线行 → 成组伪行。同样放在断段之前，且放在 E1 之后 ——
+     页眉里的「第 x 页」不该被当成目录页码，先剔完再收目录。 */
+  pdfToc(lines);
   const joinLine = (cur, s) => {
     if (/[A-Za-z]-$/.test(cur)) return cur.slice(0, -1) + s;
     if (/[A-Za-z0-9,.;:!?)]$/.test(cur) && /^[A-Za-z0-9("'[]/.test(s)) return cur + " " + s;
@@ -1117,10 +1507,12 @@ async function pdfToBlocks(buf) {
   const paras = [];
   let cur = null, prev = null;
   for (const l of lines) {
+    if (l.toc) { if (cur) { paras.push(cur); cur = null; } paras.push({ toc: l.toc }); prev = null; continue; }
+    if (l.table) { if (cur) { paras.push(cur); cur = null; } paras.push({ table: l.table }); prev = null; continue; }
     if (!l.s) { if (cur) { paras.push(cur); cur = null; } prev = null; continue; }
     if (!cur) { cur = { text: l.s, head: l.head, size: l.size }; prev = l; continue; }
     let brk = false;
-    if (l.head !== prev.head) brk = true;                          /* 标题 ↔ 正文：必断 */
+    if (l.head !== prev.head || l.col !== prev.col) brk = true;      /* 标题 ↔ 正文必断；跨栏必断（右栏首行绝不接在左栏末行后面） */
     else if (l.head && Math.abs(l.size - prev.size) > 0.5) brk = true;  /* 不同层级的标题之间 */
     else {
       const g = (Number.isNaN(prev.y) || Number.isNaN(l.y) || prev.page !== l.page)
@@ -1139,6 +1531,8 @@ async function pdfToBlocks(buf) {
   const blocks = [];
   let hn = 0, sawHead = false;
   paras.forEach((pp) => {
+    if (pp.toc) { blocks.push({ type: "list", items: pp.toc }); return; }
+    if (pp.table) { blocks.push({ type: "table", head: pp.table.head, rows: pp.table.rows }); return; }
     if (!pp.head) { blocks.push({ type: "p", x: pp.text }); return; }
     const ratio = pp.size / body;
     blocks.push({ type: ratio >= 1.6 ? "h1" : ratio >= 1.3 ? "h2" : "h3", x: pp.text, id: "h-" + (++hn) });
@@ -1555,11 +1949,22 @@ async function epubToBook(buf, o) {
         if (!assetSet.has(rel)) return null;
         const dim = dimByPath[rel];
         return { src: urlOf(rel), alt: a.alt || a["aria-label"] || "", w: dim ? dim.w : 0, h: dim ? dim.h : 0 };
+      },
+      /* 书内自带的目录页靠 <a> 跳章，所以正文里的链接字面必须留下（目标稍后统一解）。
+         只收书内的相对引用：外链（http / mailto / javascript / 协议相对 //）阅读页开不了新窗口，
+         收进来只会得到一枚「点了没反应」的假链接 —— 不如维持纯文本。
+         返回 {href} = 收下了但目标还没解，linkTarget 认不出时整条丢弃。 */
+      link: (href) => {
+        const h = String(href || "").trim();
+        if (!h) return null;
+        if (h[0] === "#") return { href: h };
+        if (/^\/\//.test(h) || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(h)) return null;
+        return { href: h };
       }
     });
     if (!r.blocks.length) continue;
     if (!cover) { const im = r.blocks.find((b) => b.type === "img"); if (im) cover = im.src; }
-    docs.push({ path: sp.path, title: tm ? decodeEntities(squeeze(tm[1])) : stemOf(sp.path), blocks: r.blocks, imgs: r.imgs });
+    docs.push({ path: sp.path, title: tm ? decodeEntities(squeeze(tm[1])) : stemOf(sp.path), blocks: r.blocks, imgs: r.imgs, links: r.links, idAt: r.idAt });
   }
   if (!docs.length) throw new Error("EPUB 里没有解析出正文（可能是纯图片书或全文在 spine 之外）");
 
@@ -1567,7 +1972,7 @@ async function epubToBook(buf, o) {
   let an = 0;
   docs.forEach((d, c) => {
     const seen = {};
-    d.anchorMap = {};
+    d.anchorMap = Object.create(null);
     for (const b of d.blocks) {
       if (typeof b.id !== "string") continue;
       const a = b.id.indexOf("x-") === 0 ? b.id.slice(2) : b.id;
@@ -1615,13 +2020,56 @@ async function epubToBook(buf, o) {
       d.pending.push(b);
       en.anchor = b.id;
     }
-    docs.forEach((d) => { if (d.pending && d.pending.length) d.blocks.unshift(...d.pending.reverse()); });
+    docs.forEach((d) => { if (d.pending && d.pending.length) { d.pad = d.pending.length; d.blocks.unshift(...d.pending.reverse()); } });
   } else {
     docs.forEach((d, c) => {
       if (d.blocks.some((b) => /^h[1-3]$/.test(b.type))) return;
       d.blocks.unshift({ type: "h1", x: d.title || stemOf(d.path) || "第 " + (c + 1) + " 节", id: "x" + c + "-t" + (++an) });
+      d.pad = (d.pad || 0) + 1;
     });
     tocSrc = "headings";
+  }
+
+  /* ---- 正文内链 → 目标块（定案 §3.2 路径 A：书里自带的目录页 / 脚注引用 / 章间互链） ----
+     href 只有三种形状：#frag（同文件）、相对路径、相对路径#frag。
+     目标优先认「挂着 id 的块」（标题 / 注块，读侧有现成的 gotoAnchor）；
+     认不到再退到 idAt 的「作者 id → 块号」侧表（脚注常写成 <p id="fn1">，块上不留 id），
+     这种只能按块号跳。两处都认不得 → 整条丢弃（跳到该章开头是「看着对、点着错」，比不跳更坏）；
+     只指向一个文件（目录页最常见写法 <a href="text/c3.xhtml">第三章</a>）→ 认那一章的第一个标题块。
+     块的字节形状不动（§九），这份侧表随 toc.json 单独落盘，读侧按字面在渲染文本里找位置。 */
+  const baseOf = [];
+  { let acc = 0; for (const d of docs) { baseOf.push(acc); acc += d.blocks.length; } }
+  const linkTarget = (d, href) => {
+    const rawRel = String(href || "").split("#")[0];
+    const slot = byPath[rawRel ? resolvePath(dirOf(d.path), rawRel) : d.path];
+    if (!slot) return null;
+    const pad = slot.d.pad || 0;
+    const frag = fragOf(href);
+    if (frag) {
+      const a = slot.d.anchorMap[frag];
+      if (a) return { anchor: a };
+      const local = slot.d.idAt[frag];
+      return local == null ? null : { tbi: baseOf[slot.c] + pad + local };
+    }
+    const first = slot.d.blocks.find((b) => /^h[1-3]$/.test(b.type) && typeof b.id === "string");
+    if (first) return { anchor: first.id };
+    /* 这一章没有标题块（nav 直接指到没有 h 标签的文件）→ 跳到它第一个有内容的块 */
+    const fi = slot.d.blocks.findIndex((b) => b.type === "img" || (b.x && String(b.x).trim()));
+    return fi < 0 ? null : { tbi: baseOf[slot.c] + pad + fi };
+  };
+  const TOC_LINK_MAX = 3000;
+  const links = [];
+  let linkClipped = false, lbase = 0;
+  for (const d of docs) {
+    const pad = d.pad || 0;
+    for (const l of d.links) {
+      if (links.length >= TOC_LINK_MAX) { linkClipped = true; break; }
+      const t = linkTarget(d, l.href);
+      if (!t) continue;
+      /* anchor = 目标块自己挂着 id（读侧 gotoAnchor），tbi = 只认得块号（读侧 gotoBlock） */
+      links.push(Object.assign({ bi: lbase + pad + l.bi, cs: l.cs, len: l.len, x: l.x }, t));
+    }
+    lbase += d.blocks.length;
   }
 
   const blocks = [];
@@ -1635,12 +2083,16 @@ async function epubToBook(buf, o) {
   if (assetsSkipped) warnings.push(assetsSkipped + " 张插图超出单本限额，未导出");
   if (tocSrc === "headings") warnings.push("本书没有目录文件，墨读按各章标题生成大纲");
   if (nonLinear) warnings.push(nonLinear + " 个非正读顺序文件未并入正文");
+  if (linkClipped) warnings.push("正文内链多于 " + TOC_LINK_MAX + " 条，只保留了前面这些");
 
   return {
     kind: "epub",
     bookId,
     blocks,
     cover,
+    /* 目录侧表（定案 §3.1）：entries = nav/ncx 解析出的层级条目，links = 正文里可跳的内链字面。
+       两者都不进 blocks —— 正文字节形状是 §九 的不动清单，目录是叠加在正文之上的另一份数据。 */
+    toc: { src: tocSrc, entries: entries.map((e) => ({ lv: e.level, x: e.label, anchor: e.anchor })), links },
     meta: {
       title: one("dc:title") || stemOf(rootPath),
       author: many("dc:creator").join(" / "),
@@ -1751,7 +2203,7 @@ async function parseOne(req, res, buf, name, jh) {
     if (kind === "epub") {
       /* /api/parse 走「不落盘」降级：正文照常返回，插图只计数（书仓端点 POST /api/book 才解资源） */
       const r = await epubToBook(buf, {});
-      return ok("epub", r.blocks, r.meta.imgs, { meta: r.meta, warnings: r.warnings, rejected: r.meta.rejected });
+      return ok("epub", r.blocks, r.meta.imgs, { meta: r.meta, warnings: r.warnings, rejected: r.meta.rejected, toc: r.toc });
     }
     if (kind === "pdf") {
       const r = await pdfToBlocks(buf);
@@ -1797,6 +2249,16 @@ function readBookHead(id) {
   try {
     const head = JSON.parse(fs.readFileSync(path.resolve(dir, "book.json"), "utf8"));
     return head && typeof head === "object" ? head : null;
+  } catch (e) { return null; }
+}
+/* 目录侧表（v1.1-S5b）：与正文分家，正写字节不动。
+   v2.21 导入的书没有这一份，读侧拿不到就照旧「按标题生成大纲」—— 不是错，是如实降级。 */
+function readBookToc(id) {
+  const dir = bookDirOf(id);
+  if (!dir) return null;
+  try {
+    const t = JSON.parse(fs.readFileSync(path.resolve(dir, "toc.json"), "utf8"));
+    return t && typeof t === "object" ? t : null;
   } catch (e) { return null; }
 }
 
@@ -1849,7 +2311,7 @@ async function serveBook(req, res) {
     const head = readBookHead(bookId);
     if (head) {
       return send(res, 200, JSON.stringify({
-        code: 0, data: { bookId, kind: "epub", blocks: null, words: head.words || 0, cover: head.cover, meta: head.meta, warnings: head.warnings || [], existed: true }
+        code: 0, data: { bookId, kind: "epub", blocks: null, words: head.words || 0, cover: head.cover, meta: head.meta, warnings: head.warnings || [], toc: readBookToc(bookId), existed: true }
       }), jh);
     }
     const tmp = dir + ".tmp";
@@ -1860,11 +2322,12 @@ async function serveBook(req, res) {
     const bookHead = { bookId, kind: "epub", at: Date.now(), cover: r.cover, words, meta: r.meta, warnings: r.warnings };
     fs.writeFileSync(path.resolve(tmp, "book.json"), JSON.stringify(bookHead));
     fs.writeFileSync(path.resolve(tmp, "blocks.json"), JSON.stringify(r.blocks));
+    fs.writeFileSync(path.resolve(tmp, "toc.json"), JSON.stringify(r.toc));
     if (fs.existsSync(dir)) rmrf(dir);
     fs.mkdirSync(path.dirname(dir), { recursive: true });
     fs.renameSync(tmp, dir);
     return send(res, 200, JSON.stringify({
-      code: 0, data: { bookId, kind: "epub", blocks: lite ? null : r.blocks, words, cover: r.cover, meta: r.meta, warnings: r.warnings, existed: false }
+      code: 0, data: { bookId, kind: "epub", blocks: lite ? null : r.blocks, words, cover: r.cover, meta: r.meta, warnings: r.warnings, toc: r.toc, existed: false }
     }), jh);
   } catch (e) {
     rmrf(dir + ".tmp");

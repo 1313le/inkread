@@ -7,19 +7,19 @@
 <title>墨读 InkRead · 书架</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="fonts/local.css">
+<link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="styles.css">
 <style id="index-extra">
 /* ---------- 导入弹窗 · 归类区（仅书架页生效） ----------
    复用 .seg/.field/.card-title 既有样式，这里只管布局与两处小动效：
    dropzone 的拖入态、新卡片的一次性描边高亮。 */
-.imp-cls { margin-top: 18px; }
-.imp-cls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px 16px; }
-.imp-cls-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.imp-cls { margin-top: var(--space-18); }
+.imp-cls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-13) var(--space-16); }
+.imp-cls-item { display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; }
 .imp-cls-item.imp-cls-wide { grid-column: 1 / -1; }
-.imp-cls-k { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-3); }
+.imp-cls-k { font-size: var(--fs-11_5); letter-spacing: .1em; color: var(--ink-3); }
 #impKindSeg { align-self: flex-start; flex-wrap: wrap; }   /* 8 类：宽屏一行，窄屏折行不溢出 */
-#impKindSeg .seg-btn { min-width: 52px; }
-#impGroupNew { margin-top: 2px; }
+#impGroupNew { margin-top: var(--space-2); }
 /* dropzone 拖入悬停态（drop 事件由页内 JS 处理） */
 #dropzone.dragover { border-color: var(--accent-ink); background: var(--accent-wash); }
 /* 新导入卡片的一次性描边高亮：动画播完由 JS 摘除 .bc-new，不残留样式 */
@@ -47,9 +47,9 @@
 [data-kind="other"]    { --kc: var(--ink-3); --kc-text: color-mix(in oklab, var(--kc) 84%, var(--ink)); }
 /* 类别徽标：书架卡片（标题下）、继续阅读卡（chip 内）共用同一份配方 */
 .kchip {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 10.5px; letter-spacing: .08em; line-height: 1;
-  padding: 3px 8px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: var(--space-4);
+  font-size: var(--fs-10_5); letter-spacing: .08em; line-height: 1;
+  padding: var(--space-3) var(--space-8); border-radius: var(--radius-999);
   color: var(--kc-text, var(--kc, var(--ink-3)));
   border: 1px solid color-mix(in srgb, var(--kc, var(--ink-3)) 42%, transparent);
   background: color-mix(in oklab, var(--kc, var(--ink-3)) 12%, transparent);
@@ -58,16 +58,16 @@
 .kchip .ic { width: var(--ic-xs); height: var(--ic-xs); }   /* v2.23 §W3 第六步：写死 px 会盖掉 svg 属性，收进五档 */
 /* 卡下徽标是 .book-meta 里的 span，styles.css 的 .book-meta span（颜色 / 字号）
    优先级更高，这里必须显式抬回来 —— 否则类徽标只剩底色、文字全是灰的。 */
-.book-meta span.kchip { color: var(--kc-text, var(--kc, var(--ink-3))); font-size: 10.5px; }
+.book-meta span.kchip { color: var(--kc-text, var(--kc, var(--ink-3))); font-size: var(--fs-10_5); }
 .book-meta span.kchip .ic { width: var(--ic-xs); height: var(--ic-xs); }
-.chip.kchip { color: var(--kc-text, var(--kc, var(--accent-ink))); font-size: 12px; gap: 6px; }   /* 继续阅读卡：与同排状态 chip 同号 */
+/* .chip.kchip（继续阅读卡）已上收 styles.css 组件层 */
 
 /* 正文未落库徽标：书架卡窄，只写「未落库」，完整原因放悬浮说明；
    继续阅读卡与书架页头有地方，写全「仅本机 · 正文未落库」。 */
 .book-meta span.bc-stored {
-  display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;
-  font-size: 10.5px; letter-spacing: .06em; line-height: 1; padding: 3px 8px;
-  border-radius: 999px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: var(--space-4); margin-top: var(--space-4);
+  font-size: var(--fs-10_5); letter-spacing: .06em; line-height: 1; padding: var(--space-3) var(--space-8);
+  border-radius: var(--radius-999); white-space: nowrap;
   color: var(--amber-ink); border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
   background: color-mix(in oklab, var(--amber) 12%, transparent);
 }
@@ -75,11 +75,11 @@
 
 /* 类别推荐行（分段下方）：识别中 → AI 推荐 / 按规则推荐；用户手改后整行变灰 */
 .imp-kind-hint {
-  display: flex; align-items: flex-start; gap: 6px; margin-top: 7px;
-  font-size: 11.5px; line-height: 1.65; letter-spacing: .03em;
+  display: flex; align-items: flex-start; gap: var(--space-6); margin-top: var(--space-7);
+  font-size: var(--fs-11_5); line-height: 1.65; letter-spacing: .03em;
   color: var(--kc-text, var(--kc, var(--accent-ink)));
 }
-.imp-kind-hint .ic { margin-top: 2px; }
+.imp-kind-hint .ic { margin-top: var(--space-2); }
 .imp-kind-hint.loading, .imp-kind-hint.off { color: var(--ink-3); }
 .imp-kind-hint.off { opacity: .58; }
 .imp-kind-hint.loading .ic { animation: impSpin .9s linear infinite; }
@@ -94,7 +94,7 @@
   scrollbar-width: none;
 }
 .shelf-tools #kindSeg::-webkit-scrollbar { display: none; }
-.shelf-tools #kindSeg .seg-btn { flex: none; white-space: nowrap; }
+.shelf-tools #kindSeg .seg-btn { flex: none; }
 
 /* ≤600px：归类控件竖排，类别分段平铺满行，不溢出；导入弹窗 8 类两行四列 */
 @media (max-width: 600px) {
@@ -108,46 +108,42 @@
    改为 4×2 固定网格：格子等宽、上下对齐，任何宽度下不再错落。 */
 #impKindSeg {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 2px; border: 0; border-radius: 0; background: transparent;
+  gap: var(--space-2); border: 0; border-radius: 0; background: transparent;
   overflow: visible; align-self: stretch;
 }
-#impKindSeg .seg-btn {
-  border: 1px solid var(--line); border-radius: var(--r-xs);
-  background: var(--paper-2); min-width: 0; white-space: nowrap;
-  padding: 8px 4px; text-align: center;
-}
-#impKindSeg .seg-btn + .seg-btn { border-left: 1px solid var(--line); }  /* 覆盖相邻分隔线规则 */
-#impKindSeg .seg-btn.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+/* 八类格子的私有形状：4 列等宽网格里的圆角与居中。
+   边框/底色/内距与相邻分隔线、选中态（.on）一律在 styles.css 组件层。 */
+#impKindSeg .seg-btn { border-radius: var(--r-xs); min-width: 0; text-align: center; }
 
 /* ---------- EPUB 书仓结果卡（v2.21 E5）----------
    EPUB 在导入弹窗里不走「任务抽取」（小说没有待办），改走这张书卡：
    封面 + 题名 + 服务端如实报回的五段结果。封面比例与书架卡同一制式（3:4.3），
    让「导入时看到的」和「书架上排着的」确实是同一本书。 */
-.bk-head { display: flex; gap: 14px; align-items: flex-start; }
+.bk-head { display: flex; gap: var(--space-14); align-items: flex-start; }
 .bk-cover {
   flex: none; width: 68px; aspect-ratio: 3 / 4.3; border-radius: var(--r-sm);
   border: 1px solid var(--line-2); background: var(--paper-2) center / cover no-repeat;
   display: flex; align-items: center; justify-content: center; color: var(--ink-3);
 }
-.bk-main { flex: 1 1 0; min-width: 0; padding-top: 2px; }
-.bk-title { font-family: var(--font-kai); font-size: 17px; line-height: 1.45; word-break: break-word; }
-.bk-byline { margin-top: 3px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); letter-spacing: .04em; }
-.bk-stats { margin-top: 7px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.bk-stages { margin: 13px 0 0; border-top: 1px solid var(--line-2); }
+.bk-main { flex: 1 1 0; min-width: 0; padding-top: var(--space-2); }
+.bk-title { font-family: var(--font-kai); font-size: var(--fs-17); line-height: 1.45; word-break: break-word; }
+.bk-byline { margin-top: var(--space-3); font-size: var(--fs-12_5); line-height: 1.6; color: var(--ink-2); letter-spacing: .04em; }
+.bk-stats { margin-top: var(--space-7); font-size: var(--fs-12); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.bk-stages { margin: var(--space-13) 0 0; border-top: 1px solid var(--line-2); }
 .bk-stages > div {
-  display: grid; grid-template-columns: 5.5em 1fr; gap: 10px;
-  padding: 6px 0; border-bottom: 1px solid var(--line-2);
+  display: grid; grid-template-columns: 5.5em 1fr; gap: var(--space-10);
+  padding: var(--space-6) 0; border-bottom: 1px solid var(--line-2);
 }
-.bk-stages dt { font-size: 11.5px; letter-spacing: .12em; color: var(--ink-3); }
-.bk-stages dd { margin: 0; font-size: 12.5px; line-height: 1.65; word-break: break-word; }
+.bk-stages dt { font-size: var(--fs-11_5); letter-spacing: .12em; color: var(--ink-3); }
+.bk-stages dd { margin: 0; font-size: var(--fs-12_5); line-height: 1.65; word-break: break-word; }
 .bk-warn {
-  margin-top: 9px; display: flex; gap: 7px; align-items: flex-start;
-  font-size: 12.5px; line-height: 1.7; color: var(--ink-2);
+  margin-top: var(--space-9); display: flex; gap: var(--space-7); align-items: flex-start;
+  font-size: var(--fs-12_5); line-height: 1.7; color: var(--ink-2);
 }
-.bk-warn .ic { flex: none; margin-top: 3px; color: var(--amber-ink); }
+.bk-warn .ic { margin-top: var(--space-3); color: var(--amber-ink); }
 @media (max-width: 520px) {
-  .bk-stages > div { grid-template-columns: 1fr; gap: 1px; }
-  .bk-head { gap: 11px; }
+  .bk-stages > div { grid-template-columns: 1fr; gap: var(--space-1); }
+  .bk-head { gap: var(--space-11); }
 }
 </style>
 <script src="ink-keys.js"></script>
@@ -156,6 +152,7 @@
 <script src="scene.js"></script>
 </head>
 <body data-page="library">
+  <a class="skip-link" href="#appContent">跳到主内容</a>
 <div class="boot" id="boot" aria-hidden="true">
   <span class="boot-seal">墨</span>
   <span class="boot-name">墨读 InkRead</span>
@@ -163,7 +160,7 @@
 </div>
 <div class="device">
   <div class="screen" id="screen">
-    <main class="app-content" id="appContent">
+    <main class="app-content" id="appContent" tabindex="-1">
       <!-- 天幕：主题自带的静态分层场景；动效只在翻页 / 换章 / 进出沉浸那一刻发生一次 -->
       <div class="scene-band" data-scene-host aria-hidden="true"></div>
       <div class="page">
@@ -575,6 +572,7 @@
       return '<div class="book-card' + (state.sel[d.id] ? " on" : "") + '" data-id="' + d.id + '" data-kind="' + (KINDS8.indexOf(d.type) >= 0 ? d.type : "book") + '">' +
         '<span class="bc-pick">' + icon("check", 14) + '</span>' +
         '<button class="bc-edit" type="button" data-edit="' + d.id + '" title="编辑" aria-label="编辑《' + esc(d.title) + '》">' + icon("pen-line", 14) + '</button>' +
+        '<button class="bc-exp" type="button" data-exp="' + d.id + '" title="导出批注" aria-label="导出《' + esc(d.title) + '》的批注">' + icon("download", 14) + '</button>' +
         '<a class="bc-link" href="reader.html?doc=' + d.id + '">' +
           '<div class="cover"' + coverAttrs(d) + ' style="' + coverStyle(d) + '">' +
             coverInner(d, { pct: p, badge: badge }) +
@@ -592,9 +590,20 @@
   function refresh() { fillGroups(); renderGrid(); }
 
   /* ---------- 编辑 / 批量：卡上点击的分派 ---------- */
+  /* 卡上一键导出本书批注。书架没有正文块、也不分页，章节与页位两列一律留空：
+     位置只有阅读页现算才靠得住（n.page 是落笔那刻定格的页号，换疏密就过期），
+     导出件里空一格比编一个假页码好查得多。 */
+  function exportBook(id) {
+    var d = InkStore.getDoc(id) || {};
+    var rows = InkStore.getNotes().filter(function (n) { return n.docId === id; })
+      .map(function (n) { return InkExport.row(n, { doc: d.title || "", title: n.title || "" }); });
+    InkExport.open({ rows: rows, mdTitle: "墨读批注导出", base: "inkread-book", scope: "《" + (d.title || "本文") + "》" });
+  }
   qs("#coverGrid").addEventListener("click", function (e) {
     var edit = e.target.closest("[data-edit]");
     if (edit) { openEdit(edit.dataset.edit); return; }
+    var exp = e.target.closest("[data-exp]");
+    if (exp) { exportBook(exp.dataset.exp); return; }
     /* 0 本空态的两个出口：导入 / 示例文档 */
     if (e.target.closest("#emptyImport")) { openImport(); return; }
     if (e.target.closest("#emptyDemo")) { openImport(); startDemo(); return; }
@@ -838,11 +847,14 @@
     if (r.offline) { toast("同步服务不可达 · 本机数据仍即时保存", "wifi-off"); return; }
     if (r.failed) { toast("同步服务拒收本次数据（HTTP " + r.status + "）· 变更已保留，稍后自动重试", "alert-triangle"); return; }
     var extra = (r.oversize && r.oversize.length) ? " · " + r.oversize.length + " 类数据过大未参与同步" : "";
+    /* 与主脑页同一句账：盖了几颗、保住几颗，当场说清（零差异不写「覆盖 0 项」） */
+    var led = (r.over && r.over.length ? " · 覆盖 " + r.over.length + " 项" : "") +
+      (r.keep && r.keep.length ? " · 保留 " + r.keep.length + " 项" : "");
     if (r.pulled > 0) {
-      toast("已从另一端同步 " + r.pulled + " 项 · 即将刷新", "refresh-cw");
+      toast("已从另一端同步 " + r.pulled + " 项" + led + " · 即将刷新", "refresh-cw");
       setTimeout(function () { location.reload(); }, 900);
     } else {
-      toast((r.pushed > 0 ? "已推送本机变更 " + r.pushed + " 项" : "两端已一致 · 无需同步") + extra,
+      toast((r.pushed > 0 ? "已推送本机变更 " + r.pushed + " 项" : "两端已一致 · 无需同步") + led + extra,
         r.oversize && r.oversize.length ? "alert-triangle" : "circle-check");
     }
   });
@@ -976,6 +988,8 @@
      明确选择：重试（同一文件重跑 takeFile）或换一个文件；原因是人话，就地摊开。 */
   function takeFail(f, msg, seq) {
     if (seq != null && seq !== impSeq) return;   /* 已被新文件取代：不该再弹上一轮的错 */
+    window.InkLog && InkLog.add("import", (f.name || "该文件") + "：" + msg,
+      "换个格式再试（PDF 可先转成 EPUB/TXT），或在「本机数据 → 本机异常」里看细节");
     impText = null; impBlocks = null; impSniff = ""; impBook = null; impExcerpt = "";
     clearParseResult();
     qs("#dropzone").style.display = "none";
@@ -1461,6 +1475,7 @@
          不进 localStorage —— 一本几百 MB 的书塞进 4MB 快照墙必然撞墙。 */
       payload.src = "disk"; payload.bookId = book.bookId; payload.cover = book.cover || "";
       payload.author = bm.author || ""; payload.lang = bm.lang || ""; payload.chapters = bm.chapters || 0;
+      payload.toc = book.toc || null;      /* 服务端解好的目录（nav/ncx 条目 + 正文内链位置） */
     }
     var r = await API.importDoc(payload);
     b.textContent = "确认导入";

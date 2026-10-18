@@ -21,6 +21,15 @@ body {
 }
 .sheet { padding: 10mm 0 14mm; }
 
+/* G3 · 跳到纸面内容（纸面页不装 styles.css，同名同形；打印时隐藏） */
+.skip-link {
+  position: fixed; left: .9em; top: -3em; z-index: 1000;
+  padding: .55em 1em; background: #fff; color: #111;
+  border: 1px solid #b3382c; font-size: .86rem; text-decoration: none;
+}
+.skip-link:focus { top: .9em; }
+@media print { .skip-link { display: none; } }
+
 .p-title { font-size: 21pt; line-height: 1.35; font-weight: 700; margin: 0; letter-spacing: .01em; }
 .byline {
   font-family: "InkRead Sans", system-ui, sans-serif; font-size: 9.5pt; color: #5f5950;
@@ -46,7 +55,7 @@ blockquote {
 .p-task { list-style: none; margin-left: -1.35em; }
 /* 方框描边、勾用 U+2713：☐ 这类整字符在中文字体里常有缺字，纸上会印成豆腐块 */
 .p-box { display: inline-block; width: .82em; height: .82em; border: 1.2pt solid #4a453d;
-         border-radius: 2px; margin-right: .42em; vertical-align: -.06em; position: relative; }
+         border-radius: var(--radius-2); margin-right: .42em; vertical-align: -.06em; position: relative; }
 .p-task.on .p-box { border-color: #1c1a17; }
 .p-task.on .p-box::after { content: "✓"; position: absolute; left: 0; right: 0; top: -.08em;
                            text-align: center; font-size: .82em; line-height: 1; color: #1c1a17; }
@@ -58,7 +67,7 @@ th { background: #f2eee5; font-family: "InkRead Sans", system-ui, sans-serif; fo
 td.al-right, th.al-right { text-align: right; }
 td.al-center, th.al-center { text-align: center; }
 .p-code { margin: 1.1em 0; break-inside: avoid; background: #f6f3ec; border: 1px solid #e4dfd3;
-          border-radius: 3px; padding: .7em .9em; }
+          border-radius: var(--radius-3); padding: .7em .9em; }
 .p-code pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
 .p-code code, .p-code pre { font-family: "InkRead Mono", "Cascadia Mono", Consolas, monospace; font-size: 9.5pt; line-height: 1.6; }
 .p-math { margin: 1.1em 0; text-align: center; break-inside: avoid; font-size: 11pt; }
@@ -69,7 +78,7 @@ td.al-center, th.al-center { text-align: center; }
 .p-fig { margin: 1.2em 0; break-inside: avoid; }
 .p-figph {
   height: 34mm; border: 1px dashed #cbc4b6; color: #6b6459; background: #faf8f3;
-  display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 8px;
+  display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 var(--space-8);
   font-family: "InkRead Sans", system-ui, sans-serif; font-size: 9.5pt;
 }
 .p-img { margin: 1.2em 0; break-inside: avoid; text-align: center; }
@@ -93,10 +102,10 @@ del { color: #5f5950; }
 strong { font-weight: 700; }
 p code, li code, td code, th code, blockquote code, h1 code, h2 code, h3 code {
   font-family: "InkRead Mono", "Cascadia Mono", Consolas, monospace; font-size: 9.5pt;
-  background: #f2eee5; padding: .05em .25em; border-radius: 2px;
+  background: #f2eee5; padding: .05em .25em; border-radius: var(--radius-2);
 }
 .md-code .md-copy, .md-code-bar, .md-gut { display: none !important; }
-.md-code { background: #f6f3ec; border: 1px solid #e4dfd3; border-radius: 3px; padding: .7em .9em;
+.md-code { background: #f6f3ec; border: 1px solid #e4dfd3; border-radius: var(--radius-3); padding: .7em .9em;
            margin: 1.1em 0; break-inside: avoid; }
 .md-code pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
 .md-code pre code { font-family: "InkRead Mono", "Cascadia Mono", Consolas, monospace; font-size: 9.5pt;

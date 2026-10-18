@@ -34,11 +34,116 @@
       try {
         if (n && n !== DEFAULT_NAME) localStorage.setItem(K_PROFILE, JSON.stringify(rec));
         else localStorage.removeItem(K_PROFILE);      /* 改回默认 = 不留键，备份更干净 */
-      } catch (e) {}
+      } catch (e) {
+        window.InkLog && InkLog.add("store", "称呼没能存进本机", "在「本机数据」里删掉几本已读完的书或旧封面，再改一次");
+        return null;
+      }
       return n || DEFAULT_NAME;
     }
   };
 
+/* INK_SCHEMA —— 键级版本轨（v1.1-S6 G5）。只覆盖 localStorage 键；
+   会话键见 INK_SESSION_KEYS，两颗靠「不带 inkread. 前缀」躲枚举的哨兵键见 INK_SENTINEL_KEYS。
+   sync:false 的七颗＝红线三键 + 同步自身三本内部账 + 本机异常账，**不得因进了表就接进同步账**。*/
+window.INK_SCHEMA = {
+  "inkread.ai.cap.v1": { ver: 1, kind: "pref", store: "local", sync: true, label: "模型能力位" },
+  "inkread.ai.model.v1": { ver: 1, kind: "private", store: "local", sync: false },
+  "inkread.ai.prompts.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "AI 提示词" },
+  "inkread.autoread.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.brain.seeded.v1": { ver: 1, kind: "derived", store: "local", sync: true },
+  "inkread.cards.gone.v1": { ver: 1, kind: "ledger", store: "local", sync: true },
+  "inkread.cards.search.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.cards.ui.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.cards.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "闪卡" },
+  "inkread.cast.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.checkins.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "打卡" },
+  "inkread.contents.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "导入正文" },
+  "inkread.covers.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "封面" },
+  "inkread.decks.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "卡组" },
+  "inkread.docs.edit.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "正文修改" },
+  "inkread.errors.v1": { ver: 1, kind: "derived", store: "local", sync: false, label: "本机异常" },
+  "inkread.fonts.enabled.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.glossary.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "生词本" },
+  "inkread.kindmap.v1": { ver: 1, kind: "pref", store: "local", sync: true, label: "类别映射" },
+  "inkread.mdfocus.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.mdsplit.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.memory.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "主脑记忆" },
+  "inkread.milestones.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "里程碑" },
+  "inkread.notefs.v1": { ver: 1, kind: "derived", store: "local", sync: true },
+  "inkread.noteImPreview.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.notes.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "笔记" },
+  "inkread.notewin.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.nwmeasure.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.orb.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.pad.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.panel.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.paper.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.profile.v1": { ver: 1, kind: "ledger", store: "local", sync: true },
+  "inkread.progress.v1": { ver: 1, kind: "pref", store: "local", sync: true, label: "阅读进度" },
+  "inkread.read.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.shelf.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "书架" },
+  "inkread.signals.v1": { ver: 1, kind: "ledger", store: "local", sync: true },
+  "inkread.speedmap.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.stats.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "阅读统计" },
+  "inkread.syncinit.v1": { ver: 1, kind: "derived", store: "local", sync: false },
+  "inkread.synclog.v1": { ver: 1, kind: "derived", store: "local", sync: true, label: "同步日志" },
+  "inkread.syncmeta.v1": { ver: 1, kind: "derived", store: "local", sync: false },
+  "inkread.syncseen.v1": { ver: 1, kind: "derived", store: "local", sync: false },
+  "inkread.tasks.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "任务" },
+  "inkread.theme.v1": { ver: 1, kind: "pref", store: "local", sync: true, label: "主题", fromKey: "inkread.theme" },
+  "inkread.themes.custom.v1": { ver: 1, kind: "ledger", store: "local", sync: true },
+  "inkread.themes.installed.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "已装主题" },
+  "inkread.toc.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "目录" },
+  "inkread.tts.speed.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.tts.sysfallback.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.tts.sysvoice.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.tts.v1": { ver: 1, kind: "private", store: "local", sync: false },
+  "inkread.tts.vol.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.ttspos.v1": { ver: 1, kind: "private", store: "local", sync: false },
+  "inkread.voice.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.voices.cloud.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.voices.on.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.wheel.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  "inkread.win.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+};
+
+/* 会话键：不入 SCHEMA、不入备份、不入同步；出现在任何一侧即闸红。*/
+window.INK_SESSION_KEYS = {
+  "inkread.nav.v1": { store: "session", label: "导航" },
+  "inkread.boot.v1": { store: "session", label: "启动记录" },
+  "inkread.sceneArt": { store: "session", label: "本会话随机画" },
+  "inkread.sceneCeremony.v1": { store: "session", label: "开卷仪式" }
+};
+
+/* 哨兵键：故意不带 `inkread.` 前缀才躲开全部 keys() 统计/导出/清空/同步。
+   进 INK_SCHEMA 或被写进备份 data，即破坏语义 —— 闸反向钉红。*/
+window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
+
+  /* ------------------------------------------------------------
+     G4 · 本机异常账：只记「用户做了一件什么具体的事、没成、下一步能干什么」。
+     cat 三值定死（import / cloud / store），hint 必须是动作而不是安慰。
+     记账本身可能因配额失败——那一层再没有别处可记，只能哑掉，这是自指的极限。
+     ------------------------------------------------------------ */
+  var K_ERR = "inkread.errors.v1", ERR_CAP = 200;
+  window.InkLog = {
+    all: function () {
+      try {
+        var l = JSON.parse(localStorage.getItem(K_ERR));
+        return Array.isArray(l) ? l.slice(0, ERR_CAP) : [];
+      } catch (e) { return []; }
+    },
+    add: function (cat, msg, hint) {
+      try {
+        var l = window.InkLog.all();
+        l.unshift({ t: Date.now(), cat: cat, msg: String(msg).slice(0, 200), hint: String(hint).slice(0, 200) });
+        localStorage.setItem(K_ERR, JSON.stringify(l.slice(0, ERR_CAP)));
+      } catch (e) {}
+    }
+  };
+
+  /* ver 升高时的升键迁移挂载点：INK_MIGRATIONS[键][备份里的旧 ver] = function(旧值){return 新值}。
+     本版没有任何一条：G5 唯一的结构变化是主题键改名，同值改名走 INK_SCHEMA[k].fromKey，不走这里。 */
+  window.INK_MIGRATIONS = {};
   /* ------------------------------------------------------------
      朗读（TTS）辅助：等声线就绪 / 长文分段 / 逐段朗读 + 无声看门狗 / 无头回退
      —— 声线挑选交给 voices.js 的 InkVoice.candidates（语言池 + 关键词 + 性别
@@ -229,7 +334,11 @@
       if (!src) return null;
       await playAudio(src, onTick);
       return { code: 0, data: { mode: "cloud", voice: v.name } };
-    } catch (e) { return null; }
+    } catch (e) {
+      window.InkLog && InkLog.add("cloud", "云端朗读没合成出来，已退回本机声线",
+        "在「设置 → 朗读」里核对 Moss 密钥与接口地址；本机声线不受影响");
+      return null;
+    }
   }
 
   /* ------------------------------------------------------------
@@ -249,14 +358,15 @@
     try { if (_neuralFin) _neuralFin(); } catch (e) {}
     _neuralAudio = null; _neuralFin = null;
   }
-  /* 单次合成上限 900 字（服务端 TTS_MAX）；这里按句切到 220 字以内 */
+  /* 单次合成上限 900 字（服务端 TTS_MAX）；v1.1-S3 D1 后单元已是 ≤250 字的句子，
+     这里切到 250：最长句恰好一条 clip，不再为 221~250 字的句子白拆两段各请求一次 */
   function neuralChunks(s) {
     var parts = String(s || "").match(/[^。！？；.!?;]+[。！？；.!?;]?/g) || [];
     var out = [], buf = "";
     parts.forEach(function (sent) {
-      if (buf && (buf + sent).length > 220) { out.push(buf); buf = ""; }
+      if (buf && (buf + sent).length > 250) { out.push(buf); buf = ""; }
       buf += sent;
-      while (buf.length > 220) { out.push(buf.slice(0, 220)); buf = buf.slice(220); }
+      while (buf.length > 250) { out.push(buf.slice(0, 250)); buf = buf.slice(250); }
     });
     if (buf) out.push(buf);
     return out.length ? out : [String(s || "")];
@@ -332,6 +442,16 @@
     var r = Math.round(n + (speed - 1) * 100);
     r = Math.max(-50, Math.min(100, r));
     return (r >= 0 ? "+" : "") + r + "%";
+  }
+  /* 音高合成：音色自带基准 ep（如 "+6Hz"）+ 角色共用人偏移，服务端按 ±NHz 接受。
+     v1.1-S5a A4：cast.js 早就承诺「池子不够用时共用一款、共用者换音高」，但播放层发的
+     一直是音色自带的 ep —— 承诺没兑现，两个角色听起来就是同一个人。Edge 的 pitch
+     有效区间到 ±100Hz，钳在这里（偏移给歪了会整段 400，退化成没有声）。 */
+  function composePitch(epHz, hz) {
+    var n = parseInt(String(epHz || "0Hz").replace(/[^\d+-]/g, ""), 10) || 0;
+    var p = Math.round(n + (Number(hz) || 0));
+    p = Math.max(-100, Math.min(100, p));
+    return (p >= 0 ? "+" : "") + p + "Hz";
   }
   /* 断网兜底开关（默认关）：神经合成拿不到声时，是否允许退到本机系统声线。
      默认关 —— 用户要的是「要么神经语音、要么说清为什么没有」，不是悄悄换个机械音。
@@ -430,10 +550,11 @@
         v = alt;
       }
       var chunks = neuralChunks(text);
+      var pHz = composePitch(v.ep, u && u.pitch);
       var url = function (t) {
         return "/api/tts?voice=" + encodeURIComponent(v.id) +
           "&rate=" + encodeURIComponent(composeRate(v.er, st.speed)) +
-          "&pitch=" + encodeURIComponent(v.ep || "0Hz") +
+          "&pitch=" + encodeURIComponent(pHz) +
           "&text=" + encodeURIComponent(String(t == null ? "" : t));
       };
       var urls = chunks.map(url);
@@ -534,19 +655,26 @@
         emit("onState", "done", "已停止");
         emit("onState", "stopped");
       },
-      /* 跳段 / 换速 / 换嗓：从指定段重起队列；正在播的音频作废，听感即换即生效 */
-      seekIdx(i) {
+      /* 跳段 / 换嗓：从指定段重起队列；正在播的音频作废，听感即换即生效。
+         v1.1-S5a A6：第二个参数可换整条队列。旧写法只能在 start() 时给队列，
+         st.units 抓住的是那个旧数组的引用 —— 外面把 SPEAK_UNITS 重新赋值它根本看不见，
+         于是「改完角色表听上去毫无反应、句高亮倒是按新表画」（两套坐标错位）。
+         只换队列、**不碰** stopAt/stopBi/sysLock（那些是 D3 定时与本章读完的目标，重起会丢）。 */
+      seekIdx(i, units) {
         st.gen++;
         try { if (_neuralAudio) _neuralAudio.pause(); } catch (e) {}
         try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
+        if (units && units.length) st.units = units;
         st.i = Math.max(0, Math.min(st.units.length - 1, i || 0));
         st.dead = false; st.paused = false; _ttsAbort = false;
         emit("onState", "playing");
         run(st.gen);
       },
+      /* v1.1-S3 D3：换速**不**重起队列。神经 clip 的 rate 在建 URL 时读 st.speed、
+         本机声线每段重挂 utterance.rate —— 两者都是「下一句生效」，当前句以旧速
+         念完自然对齐句边界；seekIdx 会把进度打回当前句开头，那正是要治的回退。 */
       setSpeed(x) {
         st.speed = Math.max(0.5, Math.min(3, Number(x) || 1));
-        if (!st.dead) eng.seekIdx(st.i);
       },
       setVoice(k) {
         st.voice = k; st.sysLock = null;
@@ -609,6 +737,52 @@
     delete memContents[docId];
     return { ok: true, why: "", bytes: str.length };
   }
+  /* ------------------------------------------------------------
+     目录账（v1.1-S5b）inkread.toc.v1 = { docId: { rev:1, src, nodes:[], links:[] } }
+     —— 目录原先是渲染期现算的（阅读页扫一遍 h1–h3 就当大纲）。「书里自带的目录要点得动」
+        需要一份存下来的账：哪一项对应哪个块、正文哪一段字是目录条目，都得有个地方记账。
+     —— nodes 是面板上那棵树（人工更正也存这里，src 转 manual 后重扫只提建议不覆写）；
+        links 是正文里的可点区间（服务端解出的 EPUB 内链 + 读侧按文本认领的目录行）。
+     —— 它是派生数据，不是第二份正文：块的字节仍然只有 inkread.contents.v1 一处真源，
+        删了这份顶多退回「按标题生成大纲」，不会丢一个字。
+     ------------------------------------------------------------ */
+  var K_TOC = "inkread.toc.v1";
+  function tocGet() {
+    try {
+      var v = JSON.parse(localStorage.getItem(K_TOC));
+      return v && typeof v === "object" ? v : {};
+    } catch (e) { return {}; }
+  }
+  function tocOf(docId) {
+    var r = tocGet()[docId];
+    return r && typeof r === "object" && Array.isArray(r.nodes) ? r : null;
+  }
+  /* 写回整本账：位置字段（bi / cs / len / bs）由阅读页绑定后盖上。落库失败不算错 ——
+     目录是加速结构，丢了下次开面板重新派生，不像正文那样是用户资产。 */
+  function tocSave(docId, rec) {
+    if (!docId || !rec) return false;
+    var all = tocGet();
+    all[docId] = rec;
+    var str = JSON.stringify(all);
+    if (str.length > LS_CEIL) return false;
+    return lsWrite(K_TOC, str) === "";
+  }
+  /* 服务端 /api/book 的 toc → 本机账的形状。bi = -1 表示还没绑到块上，
+     由阅读页首次开面板时按 anchor / 文本认领并补 bs（与批注 S2-C2 同一口径的块指纹）。 */
+  function tocFromServer(t) {
+    if (!t || typeof t !== "object") return null;
+    var nodes = (Array.isArray(t.entries) ? t.entries : []).map(function (e) {
+      return { lv: Math.min(Math.max(+e.lv || 1, 1), 3), x: String(e.x || ""),
+               bi: -1, cs: 0, len: 0, bs: 0, anchor: String(e.anchor || ""), kids: [], open: true };
+    });
+    var links = (Array.isArray(t.links) ? t.links : []).map(function (l) {
+      return { m: "r", bi: +l.bi || 0, cs: +l.cs || 0, len: +l.len || 0, x: String(l.x || ""),
+               anchor: String(l.anchor || ""), tbi: l.tbi == null ? -1 : (+l.tbi || 0) };
+    });
+    if (!nodes.length && !links.length) return null;
+    return { rev: 1, src: String(t.src || "nav"), nodes: nodes, links: links };
+  }
+
   function taskStoreGet() {
     try {
       var v = JSON.parse(localStorage.getItem(K_TASKS));
@@ -869,16 +1043,11 @@
   async function classifyAI(fileName, text, cfg) {
     var head = String(text == null ? "" : text).slice(0, 1200);
     var mem = kindmapPromptList();
-    var sys = [
-      "你是文档分类器。只输出 JSON：{\"kind\":\"<八类之一>\",\"reason\":\"<一句话>\"}，kind 必须是：book/textbook/paper/report/plan/note/comic/other",
-      "对应关系：book=书籍（小说 / 文学 / 散文），textbook=教材（教材 / 教程 / 讲义），paper=论文（期刊 / 会议 / 学位论文），report=报告（报告 / 白皮书 / 资料汇编），plan=计划（规划 / 待办 / 清单），note=笔记（手稿 / 笔记 / 草稿），comic=漫画（画册 / 图示 / 绘本），other=其他（兜底）。",
-      "只输出 JSON，不要 markdown 围栏，不要任何多余解释；拿不准就归 other，并在 reason 里说清依据。"
-    ].join("\n");
-    if (mem.length) sys += "\n这位读者以往的归类习惯（供参考，不是硬性规则）：\n- " + mem.join("\n- ");
     var usr = "文件名：" + String(fileName == null ? "" : fileName) +
       "\n正文节选（前 1200 字）：" + (head || "（二进制文档，拿不到正文）");
-    var r = await askJson(cfg, sys, usr, {
-      temp: 0.1, maxTokens: 300, timeout: 12000, fields: ["kind", "reason"]
+    var r = await Prompt.run("classify", usr, {
+      cfg: cfg,
+      vars: { memory: mem.length ? "这位读者以往的归类习惯（供参考，不是硬性规则）：\n- " + mem.join("\n- ") : "" }
     });
     /* 闭合标签空间是这条路的护栏：结构再完整，kind 不在八类里就算失败 */
     if (!isKind(r.j.kind)) {
@@ -1223,6 +1392,22 @@
       return (Array.isArray(local) && local.length) ? local : null;
     },
 
+    /* 一键排版落库（v1.1-S5d）：把重排后的 blocks 写回本机正文，返回值原样透传
+       contentsSet 的 {ok, why, bytes} —— 空间满了要说得出来，不能假装排好了。
+       只有正文存在 inkread.contents.v1 的书适用；书仓书（EPUB）的正文在磁盘书仓里，
+       写这份键等于盖不住原书仓，调用方须先看 doc.src。 */
+    contentSave(docId, blocks) { return contentsSet(docId, blocks); },
+
+    /* 文体清单与中文名：排版面板要说「判成了论文」，模型回话也要拿这份清单验档 ——
+       阅读页自己再抄一份八个词，就成了改一处漏一处的第二真源。 */
+    kinds() { return KINDS.slice(); },
+    kindCN(k) { return kindCN(k); },
+
+    /* 目录账（v1.1-S5b）：读一份存下来的 nodes / links，没有就返回 null 由阅读页派生。
+       tocSave 写回时整本替换 —— 记账的是这一本书，多书各占一键。 */
+    tocOf(docId) { return tocOf(docId); },
+    tocSave(docId, rec) { return tocSave(docId, rec); },
+
     /* 落库失败的原因说人话：书架徽标的悬浮说明、阅读页空态、导入提示共用一份措辞，
        免得三个地方三种说法。 */
     storedNote(why) {
@@ -1444,6 +1629,11 @@
       } else {
         DB.shelf.unshift(entry);
       }
+      /* 目录账随书落地（v1.1-S5b 路径 C）：nav/ncx 在服务端已经解好（含每条的锚点与
+         正文内链的位置），导入即入册 —— 开书第一页就能点书里自带的目录，不必等用户
+         先打开一次面板。解不出条目也不建空账：没有记录时阅读页照旧按标题生成大纲。 */
+      var tocRec = tocFromServer(o.toc);
+      if (tocRec) tocSave(entry.id, tocRec);
       /* 学习时刻：用户确认导入 = 「这个文件名属于这个类别」的一次真实标注。
          用户改过推荐也照存（按最终选的类别沉淀），下次同类命名优先按映射推荐。 */
       kindmapLearn(o.fileName || entry.title, kind);
@@ -1882,12 +2072,16 @@
        全程序的 AI 能力都从这里出网：主脑对话 / 溯源 / 翻译 / 解析 / 检索。
        业务侧只负责「说什么」，超时、错误、流式、缓存全在这一层收口。
        ------------------------------------------------------------ */
-    /* 单轮：sys 为系统前言，user 为这一轮的用户内容；传 onDelta 即流式 */
-    llm(sys, user, opts) { return callChat(getModelCfg(), sys, user, opts || {}); },
+    /* 单轮：sys 为系统前言，user 为这一轮的用户内容；传 onDelta 即流式。
+       opts.cfg 给调用点自带的那份配置（提示词注册表按功能路由模型时用）。 */
+    llm(sys, user, opts) {
+      var o = opts || {};
+      return callChat(o.cfg || getModelCfg(), sys, user, o);
+    },
     /* 多轮：messages 为 [{role,content}]（不含 system），用于主脑对话 */
     llmMsgs(messages, opts) {
       var o = opts || {};
-      return chatMsgs(getModelCfg(), messages, o, typeof o.onDelta === "function");
+      return chatMsgs(o.cfg || getModelCfg(), messages, o, typeof o.onDelta === "function");
     },
     hasModel() { var c = getModelCfg(); return !!(c.baseUrl && c.key && c.model); },
     modelCfg() { return getModelCfg(); },
@@ -2023,6 +2217,16 @@
        工具层再抄一份就会和溯源/解析走出两套容错口径。 */
     aiJson(sys, usr, o) { return askJson(getModelCfg(), sys, usr, o || {}); },
     aiParse(txt, keys) { return parseStructured(txt, keys); },
+    /* v1.1-S5c 提示词注册表的公开口 —— 表在本文件下方，这里只是梯子。
+       run() 是所有 AI 功能的唯一入口：调用点只交材料与占位符，不再自带系统提示词。 */
+    run(feature, input, opts) { return Prompt.run(feature, input, opts); },
+    promptSys(feature, vars) { return promptText(feature, vars); },
+    promptList() { return Prompt.list(); },
+    promptSave(key, patch) { return Prompt.save(key, patch); },
+    promptReset(key) { return Prompt.reset(key); },
+    promptHas(key) { return Prompt.has(key); },
+    promptParams(key, opts) { return Prompt.params(key, opts); },
+    promptSecretHit(text) { return Prompt.secretHit(text); },
     /* 能力位读写（inkread.ai.cap.v1，按「接口地址 + 模型」记）：
        工具层用它记「这一家认不认原生 tool_calls」，字段里只有 0/1 与时间戳，不含密钥。 */
     capGet(field) {
@@ -2037,6 +2241,308 @@
       return m[k];
     }
   };
+
+  /* ============================================================
+     v1.1-S5c 提示词注册表（inkread.ai.prompts.v1）
+     ============================================================
+     内置模板一律写在下面这对哨兵之间 —— 哨兵之外再出现整句人设字面就是漏收编，
+     闸按这条计数（定案 §五 / 排期第 1 刀判据①）。
+     解析链：用户覆盖 → 内置默认 → 调用点参数 → callChat / askJson。
+     覆盖只存改过的那几枚；没改过的跟着内置一起升级，不冻在旧版本上。
+     红线：这张表要进同步，所以它不是密钥的容身之处 —— 模板里出现
+     key / token 字样，保存与上行两道各拦一次（上行那道在 app.js）。 */
+  var K_PROMPTS = "inkread.ai.prompts.v1";
+  var PROMPT_SECRET_RE = /(sk-[A-Za-z0-9_\-]{6,}|api[\s_-]?key|apikey|secret|[a-z]?token|password|passwd|Bearer\s|Authorization)/i;
+  function promptSecretHit(s) { var m = String(s == null ? "" : s).match(PROMPT_SECRET_RE); return m ? String(m[0]) : ""; }
+
+  /* >>> 内置模板哨兵（起）：闸以「此区间之外 你是… 计数为 0」判定收编完成 */
+  var PROMPT_DEFS = [
+    { k: "classify", n: "导入识别 · 文档分类", g: "导入", json: 1, temp: 0.1, maxTokens: 300, timeout: 12000,
+      fields: ["kind", "reason"],
+      ph: { memory: "读者以往的归类习惯（kindmap 最近 8 条，无则留空）" },
+      t: "你是文档分类器。只输出 JSON：{\"kind\":\"<八类之一>\",\"reason\":\"<一句话>\"}，kind 必须是：book/textbook/paper/report/plan/note/comic/other\n" +
+        "对应关系：book=书籍（小说 / 文学 / 散文），textbook=教材（教材 / 教程 / 讲义），paper=论文（期刊 / 会议 / 学位论文），report=报告（报告 / 白皮书 / 资料汇编），plan=计划（规划 / 待办 / 清单），note=笔记（手稿 / 笔记 / 草稿），comic=漫画（画册 / 图示 / 绘本），other=其他（兜底）。\n" +
+        "只输出 JSON，不要 markdown 围栏，不要任何多余解释；拿不准就归 other，并在 reason 里说清依据。\n" +
+        "{{memory}}" },
+
+    { k: "translate", n: "翻译 · 指定语言", g: "阅读", json: 0, temp: null, maxTokens: null, timeout: 20000,
+      ph: { preamble: "主脑上下文（记忆 / 当前文档）", toName: "目标语言名", fromNote: "原文语言说明", glossary: "术语表（必须遵守的译名，无则留空）" },
+      t: "{{preamble}}你是严谨的翻译引擎。把用户给出的文本译成{{toName}}。{{fromNote}}只输出译文本身，不要解释、不要加引号、不要保留原文。{{glossary}}" },
+
+    { k: "translate.auto", n: "翻译 · AI 智能判定", g: "阅读", json: 0, temp: null, maxTokens: null, timeout: 20000,
+      ph: { preamble: "主脑上下文", glossary: "术语表（无则留空）" },
+      t: "{{preamble}}你是严谨的翻译引擎。先判断用户给出的文本是什么语言，再判断一位以中文为母语的读者最需要把它译成什么语言" +
+        "（通常是中文；若原文已是中文而其中夹有外文，则把外文部分译回中文），然后完成翻译。" +
+        "只输出译文本身，不要解释、不要加引号、不要保留原文。{{glossary}}" },
+
+    { k: "trace", n: "溯源 · 出处考证", g: "阅读", json: 1, temp: 0.2, maxTokens: 1400, timeout: 22000,
+      fields: ["kind", "title", "lead", "meaning", "doubt"],
+      ph: { preamble: "主脑上下文" },
+      t: "{{preamble}}你是考据学者，替读者追溯一段文字的来源与本原。\n" +
+        "溯源对象是一切事物 —— 事、物、人、时、地皆可溯其来源，不限于典故；成语典故、历史事件、人物、节日、地名、名物、术语、诗句、文献引文、制度风俗、俗语、器物、机构等只是举例。凡「它从哪来、谁先说、原话是什么」皆可考。\n" +
+        "工作顺序：①先判断它属于哪一类；②再给一句话定性；③再考最早出处（典籍 / 文献 / 事件 / 年代 / 作者，能确定才写，不确定就写「未详」并说明为何不确定）；④给原文或原始表述（有则引，无则写「未见原始表述」）；⑤说清含义与本末（它指什么、怎么来的）；⑥如有，给后世沿用或相近说法；⑦最后单列存疑与不确定之处。\n" +
+        "只输出 JSON，不要 markdown 围栏，不要任何多余解释。字段如下：\n" +
+        "{\"kind\":\"类别，如 典故 / 历史事件 / 节日 / 文献引文 / 术语 / 地名 / 名物 / 人物 / 风俗\",\"title\":\"一句话定性，20字内\",\"lead\":\"30-80字概述\",\"facts\":[{\"k\":\"出处\",\"v\":\"…\"},{\"k\":\"年代\",\"v\":\"…\"},{\"k\":\"作者\",\"v\":\"…\"}],\"origin\":{\"quote\":\"原文或原始表述\",\"note\":\"版本、异文或说明\"},\"meaning\":\"含义与本末，80-200字\",\"related\":[\"后世沿用或相近说法\"],\"refs\":[{\"t\":\"文献或条目名\",\"u\":\"链接，不确定则留空字符串\"}],\"doubt\":\"存疑与不确定之处\"}\n" +
+        "facts 的 k 可自由取（如 出处 / 年代 / 作者 / 流行时期 / 地域 / 相关人物），2-5 条即可。\n" +
+        "宁可写「未详」也不要编造。年代、作者、原话拿不准，一律标注不确定 —— 读者要的是可靠，不是好听。" },
+
+    { k: "search", n: "检索 · AI 模糊", g: "阅读", json: 1, temp: 0.2, maxTokens: 800, timeout: 18000,
+      fields: ["note"],
+      ph: { preamble: "主脑上下文" },
+      t: "{{preamble}}你是检索助手。读者给一句粗略的描述，你要指出下面候选段落里哪些最相关。\n" +
+        "只输出 JSON，不要 markdown 围栏：\n" +
+        "{\"hits\":[{\"i\":段号,\"reason\":\"为什么相关，20字内\"}],\"note\":\"补充说明，可空\"}\n" +
+        "最多 5 条，按相关度降序。宁少勿滥 —— 没有真正相关的就返回空数组，并在 note 里直说没有。" },
+
+    { k: "explain", n: "解析 · 拆解一段文字", g: "阅读", json: 1, temp: 0.3, maxTokens: 900, timeout: 18000,
+      fields: ["kind", "title", "lead"],
+      ph: { preamble: "主脑上下文" },
+      t: "{{preamble}}你是阅读助教，替读者拆解一段文字。\n" +
+        "只输出 JSON，不要 markdown 围栏：\n" +
+        "{\"kind\":\"phrase|sentence|formula|paragraph\",\"title\":\"一句话定性，18字内\",\"lead\":\"30-80字：这段在讲什么\",\"items\":[{\"k\":\"关键点\",\"v\":\"…\"}],\"terms\":[{\"w\":\"术语原词\",\"pos\":\"词性，可空\",\"mean\":\"一句释义\"}]}\n" +
+        "items 给 2-4 条；terms 只列这段里真正需要解释的术语，没有就给空数组 —— 不确定的术语宁可不说。" },
+
+    { k: "assistant", n: "阅读助手 · 书页旁问答", g: "阅读", json: 0, temp: 0.6, maxTokens: null, timeout: 60000,
+      ph: { cite: "引用编号说明（有检索结果时才有）", material: "随问附上的原文与上下文", preamble: "主脑上下文" },
+      t: "你是墨读里的阅读助手，正陪着读者读这一本书。回答贴着下面给出的原文，别泛泛而谈；" +
+        "原文里没有的就直说没有，不要编。{{cite}}" +
+        /* 排版约束：这扇窗只有 396px 宽、正文 13px。模型默认按「一页文档」的写法答，
+           三级标题套大表格在窄栏里必然挤成一团 —— 让它按一栏的尺子写，比事后用 CSS 硬压有效。 */
+        "回答是贴在书页旁的一小段话，不是整篇文章：控制在几句之内，" +
+        "要列举就用一层短列表，一条一句；不要多级标题、不要表格、不要代码块（读者点名要除外）；" +
+        "术语解释用「术语：解释」这样的行，别另起标题。" +
+        "\n\n{{material}}\n\n{{preamble}}" },
+
+    { k: "assistant.cards", n: "助手 · 从原文挑闪卡句", g: "助手", json: 1, temp: null, maxTokens: null, timeout: 40000,
+      ph: { material: "随问附上的原文与上下文" },
+      t: "从下面给出的原文里挑 5 句最值得记住的话。要求：逐字照抄原文，不改写、不拼接、不加引号、不缩略，" +
+        "长短以 8-60 字为宜；只能从给的原文里挑，原文不够 5 句就少给几条。只回 JSON，不要解释。" +
+        "\n\n{{material}}" },
+
+    { k: "assistant.tasks", n: "助手 · 生成本章任务", g: "助手", json: 1, temp: null, maxTokens: null, timeout: 40000,
+      ph: { material: "随问附上的原文与上下文" },
+      t: "针对读者正在读的这一章，拟 4-6 条可执行的学习任务。要求：每条不超过 20 字、动词开头" +
+        "（如「复述…」「整理…」「对照…」），彼此不重复，不要写「阅读本章」这类空话。只回 JSON，不要解释。" +
+        "\n\n{{material}}" },
+
+    { k: "cast.assign", n: "朗读 · 对白归属", g: "朗读", json: 0, temp: 0.1, maxTokens: 1200, timeout: 45000,
+      ph: {},
+      t: "你是中文小说的对白归属标注器。只输出 JSON 数组，不要解释、不要代码块。" },
+
+    { k: "density.suggest", n: "版式 · 一键推荐疏密", g: "阅读", json: 0, temp: 0.2, maxTokens: 200, timeout: 15000,
+      ph: { denKeys: "五档档位键（从紧到疏）" },
+      t: "你是中文书刊的排版顾问。读者点「一键推荐疏密」时，你会拿到这本书在本机五档疏密下的实测排版表。" +
+        "档位键从紧到疏：{{denKeys}}。只可从这些键里选一个。" +
+        "取舍原则：页底空白率越低越好、跨页拆分越少越好；两档成本差在 1% 内时取接近适中的一档；" +
+        "再结合文体（对话密集偏紧凑、散文诗歌偏疏朗）。" +
+        "严格输出一行 JSON，不要任何多余文字：{\"den\":\"档位键\",\"reason\":\"一句话中文理由（不超过 40 字）\"}" },
+
+    { k: "brain.chat", n: "主脑 · 人设", g: "主脑", json: 0, temp: 0.6, maxTokens: null, timeout: 60000,
+      ph: { honor: "读者称呼（「读者希望被称为「×」。」，默认名时留空）" },
+      t: "你是「墨读」的主脑 —— 这套水墨屏阅读器的中枢智能。{{honor}}\n" +
+        "\n" +
+        "【你的职责】\n" +
+        "你不只是对话框里的助手。本程序里所有用到 AI 的地方 —— 翻译、溯源（出处考证）、解析、检索、内容模式识别 —— 都由你完成。这里是你的对话入口，主要用于讨论读者已导入文档的内容、做总结与提炼，但你具备你所接入模型应有的全部能力：写作、编程、数学、翻译、常识、推理、创意，任何通用问题都直接、完整、认真地回答。不要因为「这是阅读器」就拒绝或敷衍与文档无关的问题。\n" +
+        "\n" +
+        "【作答要求】\n" +
+        "1. 先直接给答案，再补理由；不要用「作为 AI」之类的空话开场。\n" +
+        "2. 结合下面的读者记忆与文档上下文作答；引用原文时标明《书名》· 章节 · 页码。\n" +
+        "3. 拿不准就说不确定，绝不编造出处、数据或引文。\n" +
+        "4. 用中文回答（读者用其他语言提问时跟随其语言）。\n" +
+        "5. 篇幅按问题需要，不为了显得详细而灌水。" },
+
+    { k: "brain.cheer", n: "主脑 · 里程碑鼓励", g: "主脑", json: 0, temp: 0.85, maxTokens: 260, timeout: 20000,
+      ph: { persona: "主脑人设（brain.chat 渲染结果）", memory: "读者记忆块（无则留空）", stat: "这一次达到的里程碑数据" },
+      t: "{{persona}}\n{{memory}}【这次的任务 · 里程碑鼓励】\n" +
+        "{{stat}}\n" +
+        "请写 2-3 句真诚、有分寸、不油腻的鼓励：承认坚持本身的分量，但不夸张吹捧、不喊口号；\n" +
+        "可以用一个和阅读、坚持有关的小意象；感叹号不超过两个；不用 emoji，不用 markdown 标题与列表。\n" +
+        "只输出鼓励文本本身 —— 不要前后缀，不要解释你在做什么。" },
+
+    { k: "toc.lint", n: "目录 · AI 模糊复核", g: "目录", json: 1, temp: 0.1, maxTokens: 1200, timeout: 30000,
+      fields: ["note"],
+      ph: { nodes: "目录条目与其当前绑定", heads: "正文里可挂靠的标题与位置" },
+      t: "你是目录校对员。读者在更正一份「机器扫出来的章节目录」，你要指出哪几条对不上正文。\n" +
+        "当前目录：\n{{nodes}}\n正文里认出来的标题：\n{{heads}}\n" +
+        "只输出 JSON，不要 markdown 围栏：\n" +
+        "{\"suspect\":[{\"i\":条目号,\"why\":\"一句话，20字内\"}],\"bind\":[{\"i\":条目号,\"h\":标题号}],\"note\":\"可空，一句话\"}\n" +
+        "suspect 只列真正可疑的（标题与所指正文对不上、顺序颠倒、同一节挂了两处）；拿不准就不要列 —— 误报会让读者不再相信这条提示。\n" +
+        "bind 只给「未绑定」的条目找正文标题，且只在字面明显是同一条时才给；对不上就不给，宁可空着也不要猜。" },
+
+    { k: "toc.parse", n: "目录 · AI 认目录", g: "目录", json: 1, temp: 0.1, maxTokens: 1500, timeout: 30000,
+      fields: ["note"],
+      ph: { tocText: "正文里那张目录页的条目清单（行首是编号，末尾标着这一条挂上没挂上）", heads: "正文里可挂靠的标题与位置" },
+      t: "你是目录解析器。下面第一段是书里自带的那张目录页的条目清单，第二段是正文里认出来的标题清单。\n" +
+        "目录条目清单：\n{{tocText}}\n\n正文标题清单：\n{{heads}}\n" +
+        "只输出 JSON，不要 markdown 围栏：\n" +
+        "{\"nodes\":[{\"x\":\"章节名，照抄清单里的写法\",\"lv\":1,\"h\":标题号}],\"note\":\"可空，一句话\"}\n" +
+        "lv 只有 1 / 2 / 3 三档，按目录的缩进与编号层级判。h 给这一条对应的标题号；认不出对应项就省略 h 字段。\n" +
+        "标题号只能取自清单里给出的编号，不许自己编；章节名照抄目录清单里的写法，不要改写、不要补全。" },
+
+    { k: "layout.detect", n: "排版 · 文体判定", g: "排版", json: 1, temp: 0.1, maxTokens: 300, timeout: 15000,
+      fields: ["kind", "conf"],
+      ph: { kinds: "可选文体清单", sample: "正文抽样（前若干块）" },
+      t: "你是中文排版顾问，先判断这本书属于哪种文体，再谈怎么排。\n" +
+        "正文抽样：\n{{sample}}\n" +
+        "只输出 JSON，不要 markdown 围栏：{\"kind\":\"<文体之一>\",\"conf\":0到1的小数,\"reason\":\"一句话\"}\n" +
+        "kind 必须是：{{kinds}} 之一。判据看版式特征（有无摘要 / 参考文献 / 图表编号、对话密度、段落长短），不看题材。\n" +
+        "拿不准就把 conf 给低，不要为了显得有把握而编造依据。" },
+
+    { k: "layout.apply", n: "排版 · 层级判定", g: "排版", json: 1, temp: 0.1, maxTokens: 2000, timeout: 45000,
+      fields: ["edits"],
+      ph: { kind: "文体判定结果", rules: "本次启用的规则包说明", blocks: "带块号的正文" },
+      t: "你是中文书刊的结构编辑。文体是「{{kind}}」。{{rules}}\n" +
+        "正文（每行前面是块号）：\n{{blocks}}\n" +
+        "只输出 JSON，不要 markdown 围栏：\n" +
+        "{\"edits\":[{\"bi\":块号,\"type\":\"h1|h2|h3|p\"}]}\n" +
+        "只做一件事：判每一块该是标题还是正文；是标题的话是第几级。\n" +
+        "第X章 / 第X篇 这类起头判 h1，第X节 / 1. / 1.2 判 h2，一、 /（一）/ 1) 判 h3，其余判 p。\n" +
+        "不要重打任何文字，也不要在回话里带 x 字段 —— 正文由本机原样保留，你只给块号与类型。\n" +
+        "同一块只许出现一次。拿不准的块干脆不要出现在 edits 里：少判一块只是少改一处，多判一块会挪走读者的正文。" }
+  ];
+  /* <<< 内置模板哨兵（止） */
+
+  var PROMPT_DEF = Object.create(null);
+  PROMPT_DEFS.forEach(function (d) { PROMPT_DEF[d.k] = d; });
+
+  function promptOverrides() {
+    try {
+      var o = JSON.parse(localStorage.getItem(K_PROMPTS) || "{}");
+      return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+    } catch (e) { return {}; }      /* 账本坏了当没有：功能要能跑，别因一处脏数据瘫掉 */
+  }
+  function promptWriteOverrides(m) {
+    try { localStorage.setItem(K_PROMPTS, JSON.stringify(m)); return true; } catch (e) { return false; }
+  }
+  /* 取一枚功能的「当前生效定义」：文本走用户覆盖，参数走内置，用户改过的参数优先于内置。 */
+  function promptOf(key) {
+    var d = PROMPT_DEF[key];
+    if (!d) return null;
+    var o = promptOverrides()[key] || {};
+    var out = { k: d.k, n: d.n, g: d.g, json: d.json, fields: d.fields || [], ph: d.ph || {},
+      builtin: d.t, temp: d.temp, maxTokens: d.maxTokens, timeout: d.timeout, model: "" };
+    Object.keys(Prompt.PARAMS).forEach(function (p) { if (o[p] != null && o[p] !== "") out[p] = o[p]; });
+    out.model = String(o.model || "");
+    out.t = typeof o.text === "string" && o.text.trim() ? o.text : d.t;
+    out.overridden = typeof o.text === "string" && o.text.trim() ? 1 : 0;
+    out.edited = Object.keys(o).filter(function (p) { return o[p] != null && o[p] !== ""; });
+    return out;
+  }
+  /* 占位符替换：认不出的按空处理（用户删掉某个占位符 = 这一路少喂一样材料，功能照常跑），
+     结尾空白一律削掉 —— 模板里写在末尾的 {{preamble}} 空值时不该留一串空行。 */
+  function renderPrompt(tpl, vars) {
+    var v = vars || {};
+    return String(tpl == null ? "" : tpl).replace(/\{\{([A-Za-z0-9_.]+)\}\}/g, function (_, k) {
+      return v[k] == null ? "" : String(v[k]);
+    }).replace(/\s+$/, "");
+  }
+  function promptText(key, vars) {
+    var d = promptOf(key);
+    if (!d) { var e = new Error("注册表里没有这枚提示词功能：" + key); e.name = "NoPrompt"; throw e; }
+    return renderPrompt(d.t, vars);
+  }
+  /* 参数解析：用户覆盖 > 调用点 > 内置 > 全局兜底；null 表示「跟着模型配置走」。
+     调用点那份参数（如划词翻译的 temp 0.1）是功能作者定的默认，读者在管理页明确改过
+     这一项时要以读者为准 —— 否则这张表上改温度对那几枚功能是空操作。
+     base 是调用点带来的那一份模型配置（导入识别等自带 cfg，不等于全局），
+     用户在这枚功能上填了模型名才替换，其余字段一律沿用 base —— 密钥永远不进这张表。 */
+  function promptParams(d, o, base, raw) {
+    var cfg = base || getModelCfg(), out = {}, send = {}, ed = d.edited || [];
+    ["temp", "maxTokens", "timeout"].forEach(function (p) {
+      var u = ed.indexOf(p) >= 0;
+      var v = u ? d[p] : (o && o[p] != null ? o[p] : d[p]);
+      var set = v != null;
+      if (!set) v = p === "temp" ? (Number(cfg.temp) || 0.4)
+        : p === "maxTokens" ? Math.min(Number(cfg.maxTokens) || 1024, 2048) : 20000;
+      out[p] = Number(v);
+      /* raw：只把「真的有人定过」的参数交给请求，其余留给 callChat / chatMsgs 按全局兜 —— 判据③ */
+      if (!raw || set) send[p] = Number(v);
+    });
+    out.model = String((o && o.model) || d.model || cfg.model || "");
+    out.cfg = Object.assign({}, cfg, { model: out.model });
+    out.send = send;
+    return out;
+  }
+  var Prompt = {
+    PARAMS: { temp: 1, maxTokens: 1, timeout: 1 },
+    DEFS: PROMPT_DEFS,
+    has(key) { return !!PROMPT_DEF[key]; },
+    /* 管理页用：内置 + 覆盖合并后的视图，按组分好 */
+    list() {
+      return PROMPT_DEFS.map(function (d) {
+        var c = promptOf(d.k);
+        return { k: d.k, n: d.n, g: d.g, json: !!d.json, ph: d.ph, fields: d.fields || [],
+          t: c.t, builtin: d.t, overridden: c.overridden, edited: c.edited,
+          temp: c.temp, maxTokens: c.maxTokens, timeout: c.timeout, model: c.model,
+          bp: { temp: d.temp, maxTokens: d.maxTokens, timeout: d.timeout },
+          globalModel: getModelCfg().model || "" };
+      });
+    },
+    /* 保存覆盖：只落与内置不同的部分；模板里出现密钥字样一律拒收（红线第一道）。 */
+    save(key, patch) {
+      if (!PROMPT_DEF[key]) return { code: 1, msg: "注册表里没有这枚功能" };
+      var p = patch || {}, m = promptOverrides(), cur = m[key] || {}, next = Object.assign({}, cur);
+      if (typeof p.text === "string") {
+        var hit = promptSecretHit(p.text);
+        if (hit) return { code: 1, msg: "提示词里出现了「" + hit + "」—— 这张表会同步到别的设备，密钥不能写在这里" };
+        if (!p.text.trim()) return { code: 1, msg: "模板不能是空的，要还原请点「恢复内置」" };
+        var miss = String(p.text).match(/\{\{([A-Za-z0-9_.]+)\}\}/g) || [], known = Object.keys(PROMPT_DEF[key].ph || {});
+        var bad = miss.filter(function (x) { return known.indexOf(x.slice(2, -2)) < 0; });
+        if (bad.length) return { code: 1, msg: "模板里有不认识的占位符：" + bad.join(" ") + "（可用：" + (known.join(" / ") || "无") + "）" };
+        /* 抄回来的文本与内置一字不差 = 这一枚其实没改：不钉住它，
+           否则内置文案以后升级，这枚会永远停在用户那次「顺手点保存」时的旧版本。 */
+        if (p.text === PROMPT_DEF[key].t) delete next.text; else next.text = p.text;
+      }
+      Object.keys(Prompt.PARAMS).forEach(function (f) {
+        if (p[f] === null || p[f] === "") delete next[f];
+        else if (p[f] != null) next[f] = Number(p[f]);
+      });
+      if (p.model != null) {
+        var mh = promptSecretHit(p.model);
+        if (mh) return { code: 1, msg: "模型名里出现了「" + mh + "」，这里只填模型名，不填密钥" };
+        if (String(p.model).trim()) next.model = String(p.model).trim(); else delete next.model;
+      }
+      if (Object.keys(next).length) { next.at = Date.now(); m[key] = next; } else delete m[key];
+      return promptWriteOverrides(m) ? { code: 0, edited: Object.keys(next) } : { code: 1, msg: "本机存储写入失败" };
+    },
+    /* 恢复内置：整枚覆盖删掉（文本与参数一起还），不是把文本抄一遍 */
+    reset(key) {
+      var m = promptOverrides();
+      if (!PROMPT_DEF[key]) return { code: 1, msg: "注册表里没有这枚功能" };
+      if (!m[key]) return { code: 0, cleared: 0 };
+      delete m[key];
+      return promptWriteOverrides(m) ? { code: 0, cleared: 1 } : { code: 1, msg: "本机存储写入失败" };
+    },
+    secretHit(text) { return promptSecretHit(text); },
+    /* 唯一入口：解析链见本节抬头。opts.vars 填占位符，opts.json 决定走 askJson 还是纯文本，
+       opts.cfg 给调用点自带的那份模型配置（没给就取全局）。
+       没在管理页改过的参数保持「不写进请求」—— 由 callChat / chatMsgs 按全局配置兜底，
+       这样「未配置」这条路发出去的字节与收编之前一字不差。 */
+    async run(key, input, opts) {
+      var o = opts || {}, d = promptOf(key);
+      if (!d) { var e = new Error("注册表里没有这枚提示词功能：" + key); e.name = "NoPrompt"; throw e; }
+      var sys = renderPrompt(d.t, o.vars);
+      var pr = promptParams(d, o, o.cfg, true);
+      var usr = String(input == null ? "" : input);
+      if (d.json || o.json) {
+        var r = await askJson(pr.cfg, sys, usr,
+          Object.assign({ fields: o.fields || d.fields }, pr.send));
+        return { text: r.raw, j: r.j, via: r.via, raw: r.raw, retried: r.retried, key: key, model: pr.model };
+      }
+      var txt = await callChat(pr.cfg, sys, usr,
+        Object.assign({ onDelta: o.onDelta, signal: o.signal }, pr.send));
+      return { text: txt, j: null, via: "chat", raw: txt, retried: false, key: key, model: pr.model };
+    },
+    /* 只要文本、不要调用（流式多轮的两处自己拼 messages：主脑对话、书页旁助手） */
+    sys(key, vars) { return promptText(key, vars); },
+    /* 同上：把某一枚功能的参数与模型路由算出来，交给 llmMsgs 去发 */
+    params(key, opts) {
+      var d = promptOf(key);
+      if (!d) { var e = new Error("注册表里没有这枚提示词功能：" + key); e.name = "NoPrompt"; throw e; }
+      return promptParams(d, opts || {}, (opts && opts.cfg) || getModelCfg(), true);
+    }
+  };
+  window.InkPrompts = Prompt;
 
   /* ------------------------------------------------------------
      模型配置：预设服务商 + 用户自定义导入
@@ -2120,20 +2626,30 @@
     var base = String(o.baseUrl || "").replace(/\/+$/, "");
     var via = await llmVia();
     var sig = o.signal;
-    if (via === "proxy") {
-      return fetch("/api/llm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseUrl: base, key: o.key || "", path: o.path, method: o.method, body: o.body || null }),
-        signal: sig
+    try {
+      if (via === "proxy") {
+        /* await 不能省：return fetch(...) 把 Promise 直接交出去，
+           网络层的 reject 就绕过了这个 catch —— 记账会静默漏掉。 */
+        return await fetch("/api/llm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baseUrl: base, key: o.key || "", path: o.path, method: o.method, body: o.body || null }),
+          signal: sig
+        });
+      }
+      var h = { "Authorization": "Bearer " + (o.key || "") };
+      if (o.body) h["Content-Type"] = "application/json";
+      return await fetch(base + o.path, {
+        method: o.method, headers: h,
+        body: o.body ? JSON.stringify(o.body) : undefined, signal: sig
       });
+    } catch (e) {
+      var why = e && e.name === "AbortError" ? "等太久，已中断"
+        : ((window.API && API.netErrPhrase) ? API.netErrPhrase(e) : String((e && e.message) || e));
+      window.InkLog && InkLog.add("cloud", "模型请求没送出去：" + why,
+        "在「设置 → 模型」里核对接口地址与 Key，或换本机透传再试");
+      throw e;
     }
-    var h = { "Authorization": "Bearer " + (o.key || "") };
-    if (o.body) h["Content-Type"] = "application/json";
-    return fetch(base + o.path, {
-      method: o.method, headers: h,
-      body: o.body ? JSON.stringify(o.body) : undefined, signal: sig
-    });
   }
 
   /* /models 的返回形状各家不一：data / models / 直接给数组，元素取 id / name / model */
@@ -2547,9 +3063,11 @@
 
     var again = "";
     try {
+      /* 补话只给证据，不复述格式要求 —— 「只输出 JSON、不要围栏」这类话在各功能自己的模板里
+         已经写过一遍，在这儿重抄就是第二个真源：模板改了这里不跟着改，两处说法会打架。 */
       again = await callChat(cfg, sys, usr + "\n\n——\n上次你返回的内容不是合法 JSON：\n" +
         String(raw).slice(0, 600) +
-        "\n这次只返回 JSON 对象本身：不要 markdown 围栏，不要任何解释、不要前后缀。", {
+        "\n请按上面规定的格式重发一次。", {
         temp: 0, maxTokens: opts.maxTokens, timeout: opts.timeout, jsonFormat: useFmt
       });
     } catch (e) {
@@ -2790,30 +3308,22 @@
     var o = opts || {};
     var terms = allTerms();
     var gloss = terms.map(function (t) { return t.src + " = " + t.dst; }).join("; ");
-    var sys;
-    var pre = brainPreamble("translate");
-    if (to === "ai") {
-      sys = pre + "你是严谨的翻译引擎。先判断用户给出的文本是什么语言，再判断一位以中文为母语的读者最需要把它译成什么语言" +
-        "（通常是中文；若原文已是中文而其中夹有外文，则把外文部分译回中文），然后完成翻译。" +
-        "只输出译文本身，不要解释、不要加引号、不要保留原文。" +
-        (gloss ? "必须遵守以下术语译名：" + gloss + "。" : "");
-    } else {
-      sys = pre + "你是严谨的翻译引擎。把用户给出的文本译成" + langName(to) + "。" +
-        (from && from !== "auto" ? "原文语言为" + langName(from) + "。" : "原文语言请自行判断。") +
-        "只输出译文本身，不要解释、不要加引号、不要保留原文。" +
-        (gloss ? "必须遵守以下术语译名：" + gloss + "。" : "");
-    }
-    var dst = await callChat(cfg, sys, src, {
-      temp: o.mode === "word" ? 0.1 : (Number(cfg.temp) || 0.4),
-      maxTokens: o.mode === "word" ? 256 : Math.min(Number(cfg.maxTokens) || 1024, 2048),
-      timeout: o.mode === "word" ? 10000 : 20000,
-      onDelta: onDelta
-    });
+    var vars = { preamble: brainPreamble("translate"),
+      glossary: gloss ? "必须遵守以下术语译名：" + gloss + "。" : "" };
+    /* 「整篇 / 单词」两档的参数差异留在调用点 —— 那是模式，不是提示词 */
+    var prm = o.mode === "word" ? { temp: 0.1, maxTokens: 256, timeout: 10000 } : {};
+    var r = await Prompt.run(to === "ai" ? "translate.auto" : "translate", src, Object.assign({
+      cfg: cfg, onDelta: onDelta, vars: Object.assign(vars, {
+        toName: langName(to),
+        fromNote: from && from !== "auto" ? "原文语言为" + langName(from) + "。" : "原文语言请自行判断。"
+      })
+    }, prm));
+    var dst = r.text;
     var rTo = to === "ai" ? guessTarget(dst) : to;
     return {
       src: src, dst: dst, from: from, to: rTo,
       toName: to === "ai" ? "AI 智能 · " + (langName(rTo) || rTo) : (langName(rTo) || rTo),
-      engine: cfg.model, terms: termsIn(src), note: ""
+      engine: r.model, terms: termsIn(src), note: ""
     };
   }
 
@@ -2836,22 +3346,12 @@
      故提示词按「先辨类，再考据」组织，并要求结构化 JSON，便于前端渲染成卡片而非一坨散文。
      反复强调「未详优于编造」—— 考据类回答最怕一本正经地胡说。 */
   async function callTrace(src, ctx, cfg) {
-    var sys = brainPreamble("trace") + [
-      "你是考据学者，替读者追溯一段文字的来源与本原。",
-      "溯源对象是一切事物 —— 事、物、人、时、地皆可溯其来源，不限于典故；成语典故、历史事件、人物、节日、地名、名物、术语、诗句、文献引文、制度风俗、俗语、器物、机构等只是举例。凡「它从哪来、谁先说、原话是什么」皆可考。",
-      "工作顺序：①先判断它属于哪一类；②再给一句话定性；③再考最早出处（典籍 / 文献 / 事件 / 年代 / 作者，能确定才写，不确定就写「未详」并说明为何不确定）；④给原文或原始表述（有则引，无则写「未见原始表述」）；⑤说清含义与本末（它指什么、怎么来的）；⑥如有，给后世沿用或相近说法；⑦最后单列存疑与不确定之处。",
-      "只输出 JSON，不要 markdown 围栏，不要任何多余解释。字段如下：",
-      '{"kind":"类别，如 典故 / 历史事件 / 节日 / 文献引文 / 术语 / 地名 / 名物 / 人物 / 风俗","title":"一句话定性，20字内","lead":"30-80字概述","facts":[{"k":"出处","v":"…"},{"k":"年代","v":"…"},{"k":"作者","v":"…"}],"origin":{"quote":"原文或原始表述","note":"版本、异文或说明"},"meaning":"含义与本末，80-200字","related":["后世沿用或相近说法"],"refs":[{"t":"文献或条目名","u":"链接，不确定则留空字符串"}],"doubt":"存疑与不确定之处"}',
-      "facts 的 k 可自由取（如 出处 / 年代 / 作者 / 流行时期 / 地域 / 相关人物），2-5 条即可。",
-      "宁可写「未详」也不要编造。年代、作者、原话拿不准，一律标注不确定 —— 读者要的是可靠，不是好听。"
-    ].join("\n");
     var c = ctxPrompt(ctx, src, 2600);
     /* 材料在前、问题在后：模型对紧邻提问的内容最敏感，把「待溯源的句子」放在尾巴上，
        书的正文与目录作为背景垫在前面（2.1 的缺陷是背景整段被丢弃，只剩一句选中文本）。 */
     var usr = (c.text || "") + "待溯源的内容：\n" + src + (c.loc ? "\n" + c.loc : "");
-    var r = await askJson(cfg, sys, usr, {
-      temp: 0.2, maxTokens: 1400, timeout: 22000,
-      fields: ["kind", "title", "lead", "meaning", "doubt"]
+    var r = await Prompt.run("trace", usr, {
+      cfg: cfg, vars: { preamble: brainPreamble("trace") }
     });
     var j = r.j;
     return {
@@ -2872,7 +3372,7 @@
           .map(function (r) { return { t: String(r.t).slice(0, 80), u: /^https?:\/\//i.test(String(r.u || "")) ? String(r.u) : "" }; })
         : [],
       doubt: String(j.doubt || ""),
-      engine: cfg.model,
+      engine: r.model,
       via: r.via, ctxChars: c.chars, retried: !!r.retried
     };
   }
@@ -3094,17 +3594,11 @@
     var lines = list.map(function (e, i) {
       return (i + 1) + ". [" + (e.chapter || "") + " · 第 " + (e.page || "?") + " 页] " + String(e.text || "").slice(0, 120);
     }).join("\n");
-    var sys = brainPreamble("search") + [
-      "你是检索助手。读者给一句粗略的描述，你要指出下面候选段落里哪些最相关。",
-      "只输出 JSON，不要 markdown 围栏：",
-      '{"hits":[{"i":段号,"reason":"为什么相关，20字内"}],"note":"补充说明，可空"}',
-      "最多 5 条，按相关度降序。宁少勿滥 —— 没有真正相关的就返回空数组，并在 note 里直说没有。"
-    ].join("\n");
     var name = ctxDocName({ docId: ctxDocId({}) });
     var usr = "读者的描述：" + query +
       (name ? "\n这本书：《" + name + "》" : "") + "\n\n候选段落：\n" + lines;
-    var r = await askJson(cfg, sys, usr, {
-      temp: 0.2, maxTokens: 800, timeout: 18000, fields: ["note"]
+    var r = await Prompt.run("search", usr, {
+      cfg: cfg, vars: { preamble: brainPreamble("search") }
     });
     var j = r.j;
     var hits = [];
@@ -3118,7 +3612,7 @@
       });
     });
     return {
-      mode: "ai", count: hits.length, query: query, engine: cfg.model,
+      mode: "ai", count: hits.length, query: query, engine: r.model,
       via: r.via, retried: !!r.retried,
       note: hits.length ? String(j.note || "").slice(0, 120) : (String(j.note || "").slice(0, 120) || "主脑认为正文里没有与描述相符的段落。"),
       hits: hits.slice(0, 5)
@@ -3128,17 +3622,10 @@
   /* 主脑解析：把一段文字拆成「讲什么 / 关键点 / 术语」。
      术语只列真正需要解释的，拿不准就不列 —— 解析的可信度比字数重要。 */
   async function callExplain(src, ctx, cfg) {
-    var sys = brainPreamble("explain") + [
-      "你是阅读助教，替读者拆解一段文字。",
-      "只输出 JSON，不要 markdown 围栏：",
-      '{"kind":"phrase|sentence|formula|paragraph","title":"一句话定性，18字内","lead":"30-80字：这段在讲什么","items":[{"k":"关键点","v":"…"}],"terms":[{"w":"术语原词","pos":"词性，可空","mean":"一句释义"}]}',
-      "items 给 2-4 条；terms 只列这段里真正需要解释的术语，没有就给空数组 —— 不确定的术语宁可不说。"
-    ].join("\n");
     var c = ctxPrompt(ctx, src, 3600);
     var usr = (c.text || "") + "待解析的文字：\n" + src + (c.loc ? "\n" + c.loc : "");
-    var r = await askJson(cfg, sys, usr, {
-      temp: 0.3, maxTokens: 900, timeout: 18000,
-      fields: ["kind", "title", "lead"]
+    var r = await Prompt.run("explain", usr, {
+      cfg: cfg, vars: { preamble: brainPreamble("explain") }
     });
     var j = r.j;
     return {
@@ -3153,7 +3640,7 @@
         ? j.terms.filter(function (t) { return t && t.w; }).slice(0, 8)
           .map(function (t) { return { w: String(t.w).slice(0, 24), pos: String(t.pos || "").slice(0, 10), mean: String(t.mean || "").slice(0, 120) }; })
         : [],
-      engine: cfg.model, note: "",
+      engine: r.model, note: "",
       via: r.via, ctxChars: c.chars, retried: !!r.retried
     };
   }

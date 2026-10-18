@@ -7,8 +7,9 @@
   var IC = {
     icBack: "arrow-left", icAa: "type", icAaSide: "type", icStore: "grid-2x2",
     icDir: "toc", icDirH: "toc", icTpX: "x",
+    icLay: "heading", icLayH: "heading", icLayX: "x",
     icMark: "highlighter",
-    icSpeak: "volume-2", icNotes: "notebook-pen", icPrev: "chevron-left", icNext: "chevron-right",
+    icSpeak: "volume-2", icResume: "rotate-ccw", icNotes: "notebook-pen", icPrev: "chevron-left", icNext: "chevron-right",
     icVol: "volume-2", icStop: "x", icBold: "bold", icItalic: "italic", icH: "heading",
     icList: "list", icQuote: "quote", icCode: "code", icSigma: "sigma", icEye: "eye",
     icSave: "circle-check", icSelNote: "pen-line", icSelMark: "bookmark", icSelCopy: "copy",
@@ -292,15 +293,17 @@
     InkTheme.paint(read);
   }
 
-  /* 全文汉字数：用于「剩余时间」估算（按中文 300 字/分） */
-  var DOC_CHARS = (function () {
+  /* 全文汉字数：用于「剩余时间」估算（按中文 300 字/分）与自动翻页的速度校准。
+     同样写成函数：合段/重拼会改块数与字数，一次性快照会让两处估算长期偏旧。 */
+  function docChars() {
     var s = "";
     blocks.forEach(function (b) {
       if (typeof b.x === "string") s += b.x;
       if (b.items) s += b.items.join("");
     });
     return s.length || 1;
-  })();
+  }
+  var DOC_CHARS = docChars();
 
   /* 滚动进度 0–1：横向翻页按页号，竖向浏览按 scrollTop */
   function scrollRatio() {
@@ -677,57 +680,877 @@
   }
 
   /* ============================================================
-     3. 渲染当前页 + 批注标记
+     2.9 批注定位（S2-C2）：块号 + 块内字符偏移 + 校验和 → 四档裁决
+     ------------------------------------------------------------
+     坐标系：块的「完整渲染文本」= BLOCK_HTML[bi] 的 textContent。批注的
+     cs/len/bs 全活在这个空间里，与分页把这块拆成几片无关（片起点由 fragStarts 还原）。
+     四档：0 精确 / 1 块内迁移 / 2 全文唯一 / 3 待确认。
+     高亮与角标**共用这一个解析器** —— 两条路径各自找位置时，重复句会亮在一处、
+     角标落另一处，用户看到的是「点了没反应」和「划线在别的话上」。
+     改前的口径是「全文第一次 indexOf」（wrapFirst），同一句出现两次就每页各亮一枚，
+     那是静默错位，不是容错 —— 所以档位 3 的处置是「不画」，而不是「猜一处画」。
      ============================================================ */
-  function wrapFirst(root, needle, cls, noteId) {
-    if (!needle) return false;
-    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-    while (walker.nextNode()) {
-      var node = walker.currentNode;
-      if (node.parentNode && node.parentNode.classList && node.parentNode.classList.contains("hl")) continue;
-      var i = node.nodeValue.indexOf(needle);
-      if (i >= 0) {
-        var after = node.splitText(i);
-        var mid = after.splitText(needle.length);
+  var BLOCK_RT = {};     /* bi → 该块完整渲染文本：只给真带批注的块现建，全书不预解析 */
+  var LOC_CACHE = {};    /* note.id → {tier,bi,from,to}：块空间的结论，与翻到哪页无关 */
+
+  function blockRT(bi) {
+    var s = BLOCK_RT[bi];
+    if (s == null) {
+      var d = document.createElement("div");
+      d.innerHTML = BLOCK_HTML[bi] || "";
+      s = d.textContent || "";
+      BLOCK_RT[bi] = s;
+    }
+    return s;
+  }
+  /* FNV-1a 32 位：块文本变了要当场看得出来（改字 / 重导入 / 版面重排都不该让批注悄悄挪位置） */
+  function hash32(s) {
+    var h = 2166136261 >>> 0;
+    for (var i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+    return h >>> 0;
+  }
+  function locReset() { BLOCK_RT = {}; LOC_CACHE = {}; }
+
+  /* 同一块的各分片在整块文本里的起点，按 DOM 顺序还原：把每片文本当作整块文本的
+     连续后缀去 indexOf，游标单调前移。段落分片是精确的（paraFrag 按字符区间切，
+     片文本恰是整块子串）；表格/列表分片带重复表头，indexOf 失配就退回游标 ——
+     只影响「落在哪一片」的择优，不影响逐字比对这道裁决。 */
+  function fragStarts(bi) {
+    var full = blockRT(bi), els = qsa('#doc [data-bi="' + bi + '"]'), out = [], cur = 0;
+    for (var i = 0; i < els.length; i++) {
+      var t = els[i].textContent || "";
+      if (!t.length) { out.push(cur); continue; }
+      var at = full.indexOf(t, cur);
+      if (at < 0) at = full.indexOf(t);
+      if (at < 0) at = cur;
+      out.push(at); cur = at + t.length;
+    }
+    return { els: els, starts: out };
+  }
+  /* 片内文本流：按 DOM 顺序列出 [{node, start, end}]，start 是「整块文本」坐标 */
+  function fragFlow(el, base) {
+    var out = [], acc = base, w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null), n;
+    while ((n = w.nextNode())) {
+      var len = (n.nodeValue || "").length;
+      if (!len) continue;
+      out.push({ node: n, start: acc, end: acc + len });
+      acc += len;
+    }
+    return out;
+  }
+
+  /* 整块文本里穷举 needle 的出现位置（返回起点数组，供「唯一才落」判据） */
+  function occAt(full, needle) {
+    var at = [], i = 0;
+    if (!needle || !full) return at;
+    for (;;) { i = full.indexOf(needle, i); if (i < 0) return at; at.push(i); i += needle.length; }
+  }
+
+  /* sp 夹逼：前后文 + 原句 → 唯一命中才给偏移。档位 1（块内）与兜底共用这套 tries，
+     tries 由「pre+text+suf」到「text」逐级放宽，宽到多义就不落。 */
+  function bracketLoc(full, text, sp) {
+    var tries = [];
+    sp = sp || {};
+    if (text && sp.pre) tries.push([sp.pre + text + (sp.suf || ""), sp.pre.length]);
+    if (text && sp.suf) tries.push([text + sp.suf, 0]);
+    if (text && sp.pre) tries.push([sp.pre + text, sp.pre.length]);
+    if (text) tries.push([text, 0]);
+    for (var t = 0; t < tries.length; t++) {
+      var at = occAt(full, tries[t][0]);
+      if (at.length === 1) {
+        var from = at[0] + tries[t][1];
+        return { from: from, to: from + text.length };
+      }
+    }
+    return null;
+  }
+
+  /* 全篇唯一：只有「整本书恰有一处」才敢跨块迁移。coarse=true 先用源文本粗筛（便宜），
+     命中块再用渲染文本复核唯一性；返回 null = 一处没有，false = 多义（都不落，不猜）。 */
+  function scanUnique(text, coarse) {
+    var found = null;
+    for (var bi = 0; bi < BLOCK_TEXT.length; bi++) {
+      if (coarse && (!BLOCK_TEXT[bi] || BLOCK_TEXT[bi].indexOf(text) < 0)) continue;
+      var at = occAt(blockRT(bi), text);
+      if (!at.length) continue;
+      if (at.length > 1 || found) return false;
+      found = { bi: bi, from: at[0], to: at[0] + text.length };
+    }
+    return found;
+  }
+
+  /* 粗筛一处不中时不许就此判死：源文本里的行内标记（**加粗**、软换行、链接）在渲染文本里
+     根本不存在，被标记跨过的句子在源空间永远匹配不上 —— 那是粗筛的盲区，不是批注的错。
+     补一趟渲染空间的全书复扫（建出来的 blockRT 进缓存，整本书只付一次）。 */
+  function uniqueAnywhere(text) {
+    var r = scanUnique(text, true);
+    if (r === false) return null;
+    if (r) return r;
+    r = scanUnique(text, false);
+    return r === false ? null : r;
+  }
+
+  /* 一条批注 → 块空间的位置。四档顺序即优先级，任何一步异常都当「没命中」处理：
+     定位失败只是少一层装饰，绝不许它把渲染打断。 */
+  function resolveLoc(n) {
+    var text = n.text || "";
+    try {
+      /* 档位 0 精确：块号 + 校验和 + [cs,cs+len) 逐字相等 */
+      if (n.bi != null && n.cs != null && blocks[n.bi]) {
+        var full0 = blockRT(n.bi);
+        if (n.bs == null || n.bs === hash32(full0)) {
+          var from = n.cs, to = n.cs + (n.len || text.length);
+          if (text && full0.slice(from, to) === text) return { tier: 0, bi: n.bi, from: from, to: to };
+        }
+      }
+      /* 档位 1 块内迁移：还认得这块，只是块内文字前后挪了 */
+      if (n.bi != null && blocks[n.bi] && text) {
+        var b1 = bracketLoc(blockRT(n.bi), text, n.sp);
+        if (b1) return { tier: 1, bi: n.bi, from: b1.from, to: b1.to };
+      }
+      /* 档位 2 全文唯一：块没了、号也挪了，但全篇只此一处 */
+      if (text) { var u = uniqueAnywhere(text); if (u) return { tier: 2, bi: u.bi, from: u.from, to: u.to }; }
+    } catch (e) { /* 解析异常 = 定位不了，不是崩溃理由 */ }
+    return { tier: 3 };
+  }
+
+  function locate(n) {
+    var key = n.id || ("t" + (state.notes.indexOf(n)));
+    var c = LOC_CACHE[key];
+    if (c) {
+      /* 缓存的是块空间的结论；正文一改就由 locReset 清，这里只防「文本又对不上了」 */
+      if (c.tier < 3 && blockRT(c.bi).slice(c.from, c.to) === (n.text || "")) return c;
+    }
+    c = resolveLoc(n);
+    if (key) LOC_CACHE[key] = c;
+    return c;
+  }
+
+  /* 「摘录型」= text 是从正文取来的句子，才有资格说「它该在正文的哪一处」。
+     反面是用户自撰的话：页边随笔（kind=margin）、画板草稿（带 sketch）、笔记页与助手写的整段笔记 ——
+     它们天生只认到节。若不分开，档位 3 会把这几十条自撰笔记全刷成「定位待确认」，
+     把真正需要用户看一眼的错位埋在里面。老数据没标记，靠「划词批注必带 sp（新数据带 bi）」认出。 */
+  function isQuote(n) {
+    if (n.quote === false) return false;
+    if (n.kind === "margin" || n.sketch) return false;
+    if (n.quote === true) return true;
+    return n.kind === "highlight" || !!n.sp || n.bi != null;
+  }
+  /* 待确认 = 摘录型且解析不到位置。自撰型的「没位置」是常态，不算待确认。
+     L 由调用方把已算好的 locate() 结果递进来：档位 3 每次都要全文扫一遍，不能在这里重算。 */
+  function isUnsure(n, L) { return isQuote(n) && (L || locate(n)).tier >= 3; }
+
+  /* 块文本区间 → 当页各分片的 (文本节点, 节点内下标) 切点。
+     分片不在本页时返回空数组 —— 那是「这一页没有它」，不是「定位失败」。 */
+  function cutPoints(bi, from, to) {
+    var f = fragStarts(bi), out = [];
+    for (var k = 0; k < f.els.length; k++) {
+      var flow = fragFlow(f.els[k], f.starts[k]);
+      if (!flow.length) continue;
+      var a = Math.max(from, flow[0].start), b = Math.min(to, flow[flow.length - 1].end);
+      if (b <= a) continue;
+      var hit = { el: f.els[k], pieces: [] };
+      for (var q = 0; q < flow.length; q++) {
+        var s = Math.max(a, flow[q].start), e = Math.min(b, flow[q].end);
+        if (e > s) hit.pieces.push({ node: flow[q].node, s: s - flow[q].start, e: e - flow[q].start });
+      }
+      if (hit.pieces.length) out.push(hit);
+    }
+    return out;
+  }
+
+  /* 包高亮：逐片逐文本节点切开再包同一个 span。跨 <strong>/<br> 的句子也能整段亮起来 ——
+     旧口径要求 needle 落在单个文本节点内，加粗句与换行句是整条不亮。
+     tl 只给目录链子用（S5b 路径 A）：span 上多挂一个 data-tl，点击委托据此认「这是第几条链」。
+     批注仍走 noteId，两条链子各用各的键，不会互相冒领。 */
+  function paintRange(bi, from, to, cls, noteId, tl) {
+    var cut = cutPoints(bi, from, to), done = 0;
+    cut.forEach(function (frag) {
+      frag.pieces.forEach(function (p) {
+        var after = p.node.splitText(p.s);
+        var mid = after.splitText(p.e - p.s);
         var span = document.createElement("span");
         span.className = cls;
         span.setAttribute("data-note", noteId || "");
+        if (tl != null) span.setAttribute("data-tl", tl);
         after.parentNode.replaceChild(span, after);
         span.appendChild(after);
-        return true;
-      }
-    }
-    return false;
+        done++;
+      });
+    });
+    return done > 0;
   }
 
+  /* 惰性迁移：首次解析成功就把位置盖成精确锚，原 anchor / sp / page / text 一个都不改。
+     只在「真的画到了这一页」时才盖 —— 没照面的块不落笔，冷数据就留在冷处。
+     去抖 2 秒整批走 API.saveNote（upsertNote 是 Object.assign 合并，新键加进去、旧键原样）。 */
+  var MIG_DIRTY = {}, migTimer = 0;
+  function migrate(n, L) {
+    if (!n.id) return;
+    var bs = hash32(blockRT(L.bi));
+    if (n.bi === L.bi && n.cs === L.from && n.len === L.to - L.from && n.bs === bs) return;
+    n.bi = L.bi; n.cs = L.from; n.len = L.to - L.from; n.bs = bs; n.am = 1;
+    MIG_DIRTY[n.id] = n;
+    if (migTimer) return;
+    migTimer = setTimeout(function () {
+      migTimer = 0;
+      var list = MIG_DIRTY; MIG_DIRTY = {};
+      Object.keys(list).forEach(function (id) { API.saveNote(list[id]); });
+    }, 2000);
+  }
+
+  /* 选区 → 块坐标（写入侧）：起点所在块 + 该块完整渲染文本里的字符区间 + 校验和。
+     偏移一律用 Range.toString() 量：它给的是「拍平的字符流」，选区跨 <br> 时不会像
+     Selection.toString() 那样凭空插一个换行（实测：Selection 给「前\n后」，Range 给「前后」），
+     而块的 textContent 同样没有那个换行 —— 两边同口径，cs/len 才对得上。
+     对「起点落在元素边界」（三击整段）与「落在文本节点中间」也是同一个口径，不必分情况。
+     最后一道复核：块里取出的这段必须与用户看到的那句话同字（只许差在换行上），
+     并把入库文本改写成块空间的那一份 —— 否则 locate() 的逐字比对永远认不出它。
+     复核不过就当没定位到，宁可退回 anchor + sp 的老口径，也不让错位的位置入库。 */
+  function selBlockInfo(range, head, tail, text) {
+    var out = { bi: null, cs: null, len: (text || "").length, bs: 0, text: text };
+    try {
+      var n = range.startContainer;
+      var el = n && (n.nodeType === 1 ? n : n.parentElement);
+      var blk = el && el.closest ? el.closest("#doc [data-bi]") : null;
+      if (!blk) return out;
+      var bi = biOf(blk, null);
+      if (bi == null || isNaN(bi) || !blocks[bi]) return out;
+      var f = fragStarts(bi), k = f.els.indexOf(blk);
+      if (k < 0) return out;
+      var r = document.createRange();
+      r.selectNodeContents(blk);
+      r.setEnd(range.startContainer, range.startOffset);
+      var full = blockRT(bi);
+      var from = f.starts[k] + r.toString().length + (head || 0);
+      var to = from + range.toString().length - (head || 0) - (tail || 0);
+      var slice = full.slice(from, to);
+      if (slice && slice.replace(/\n/g, "") === (text || "").replace(/\n/g, "")) {
+        out.bi = bi; out.cs = from; out.len = to - from; out.bs = hash32(full); out.text = slice;
+      }
+      if (out.bi == null) return out;
+    } catch (e) { return { bi: null, cs: null, len: out.len, bs: 0, text: text }; }
+    return out;
+  }
+
+  /* ============================================================
+     2.11 目录一等公民（S5b · 定案 §3.1 / §3.2）
+     ------------------------------------------------------------
+     目录是叠加在正文之上的另一份数据，不进 blocks（§九：块的字节形状不动）。
+     两个来源、同一个形状：
+       · 服务端随书落盘 —— EPUB 的 nav/ncx 条目（路径 C）+ 正文内链的字面（路径 A）
+       · 读侧现场派生 —— 标题当节点，正文里那一段「自带目录」当可点项（路径 B）
+     整本书只装配一次并落库（inkread.toc.v1，按 docId 存），此后每次开局直接读账。
+     绑定（链子字面落在哪一处、目标块还在不在）只在内存里按页重算，绝不回写账本：
+     正文一改（修改模式 / 恢复原文都会 rebuildIndexes）字面就失配，把失配的结果
+     盖回账本等于把一次编辑固化成灾难。
+     诚实降级（§3.2）：认不出位置的项**不给可点样式**，面板里显式标「未绑定」——
+     跳错的目录比没有目录更坏，读者会以为自己点的是第三章。
+     ============================================================ */
+  var TOC = { src: "", nodes: [], links: [] };
+  var BI_BY_ID = null, HEAD_KEYS = null, TL_BY_BI = null;
+
+  /* 块上挂着的 id（标题 / 注块 / nav 补出来的条目）→ 块号。
+     nav 的 anchor 与路径 A 的 #frag 都靠它换回块号；一次线性扫描建好，正文一改就作废。
+     Object.create(null)：作者给块起的 id 可能就叫 "constructor"，原型键不能碰。 */
+  function biById() {
+    if (!BI_BY_ID) {
+      BI_BY_ID = Object.create(null);
+      blocks.forEach(function (b, i) { if (typeof b.id === "string" && BI_BY_ID[b.id] == null) BI_BY_ID[b.id] = i; });
+    }
+    return BI_BY_ID;
+  }
+
+  /* 归一键：全角折半角、去空白与成对/装饰标点、小写。目录项与正文标题过同一个函数，
+     「第三章 变量」「第三章　变量」「第三章《变量》」才是同一个键。 */
+  function tocKey(s) {
+    return String(s == null ? "" : s)
+      .replace(/[\uFF01-\uFF5E]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+      .replace(/[{}()\[\]【】《》〈〉「」『』“”"'’‘、。，．·…‥—–\-：:;；!！?？.,;:!?~～\s]/g, "")
+      .toLowerCase();
+  }
+
+  /* 「第三章 变量 ……… 42」→ { x:"第三章 变量", page:42 }。页码只从尾巴剥，
+     标题中间的编号（第 3 章 / 1.2.3）不动。三种写法由宽到窄：
+     点线+页码 → 两个以上空格+页码 → 单个空格+页码。 */
+  var TOC_LEADER = /[.\u2026\u00b7\u22ef_\-—–]{2,}\s*(\d{1,4})\s*$/;
+  var TOC_GAP = /\s{2,}(\d{1,4})\s*$/;
+  var TOC_TAIL = /\s(\d{1,4})\s*$/;
+  function tocPage(s) {
+    var t = String(s == null ? "" : s), m = t.match(TOC_LEADER) || t.match(TOC_GAP) || t.match(TOC_TAIL);
+    if (!m || m.index <= 0) return { x: t, page: null };
+    return { x: t.slice(0, m.index).replace(/[.\u2026\u00b7\u22ef_\-—–\s]+$/, ""), page: +m[1] };
+  }
+
+  /* 目录节点：块号就是位置（改字不增删块，见 rebuildIndexes），
+     账上的 bi 认不出块了才回退去认 anchor。两处都认不到 → bi=-1，面板标未绑定。 */
+  function bindNode(n) {
+    if (!n) return;
+    if (n.bi != null && blocks[n.bi]) return;
+    var k = n.anchor ? biById()[n.anchor] : null;
+    n.bi = k == null ? -1 : k;
+  }
+  function tocTarget(l) {
+    if (l.tbi != null && l.tbi >= 0 && blocks[l.tbi]) return l.tbi;
+    var k = l.anchor ? biById()[l.anchor] : null;
+    l.tbi = k == null ? -1 : k;
+    return l.tbi;
+  }
+
+  /* 路径 A 的字面落点：先认账上的 cs（逐字相等最稳），不中就在这块的渲染文本里穷举该字面，
+     取**离 cs 最近**的一处 —— 同一句在目录页印了两遍时，cs 指的那一遍才是这条链所在，
+     取第一处或最后一处都可能点亮到别家。一处也没有 → 不点亮（不猜）。
+     每次按页重算，所以正文改过字之后它会自己挪回新的落点。 */
+  function bindRange(l) {
+    if (!l.x) return false;
+    var full = blockRT(l.bi);
+    if (!full) return false;
+    if (full.slice(l.cs, l.cs + l.len) === l.x) return true;
+    var at = occAt(full, l.x), best = -1;
+    for (var i = 0; i < at.length; i++) {
+      if (best < 0 || Math.abs(at[i] - l.cs) < Math.abs(best - l.cs)) best = at[i];
+    }
+    if (best < 0) return false;
+    l.cs = best; l.len = l.x.length;
+    return true;
+  }
+
+  /* 没随书落盘的书（PDF / 纯文本 / markdown）：标题即节点 */
+  function deriveNodes() {
+    var out = [];
+    blocks.forEach(function (b, i) {
+      if (b.type !== "h1" && b.type !== "h2" && b.type !== "h3") return;
+      out.push({ lv: +b.type.charAt(1), x: String(b.x || ""), bi: i, cs: 0, len: 0, bs: 0,
+        anchor: typeof b.id === "string" ? b.id : (b.type === "h1" ? "doc-top" : ""), kids: [], open: true });
+    });
+    return out;
+  }
+
+  function headKeys() {
+    if (!HEAD_KEYS) {
+      HEAD_KEYS = [];
+      blocks.forEach(function (b, i) {
+        if (b.type === "h1" || b.type === "h2" || b.type === "h3") HEAD_KEYS.push({ bi: i, key: tocKey(b.x) });
+      });
+    }
+    return HEAD_KEYS;
+  }
+  /* 只往**这一项之后**找同名标题（定案 §3.2）：往前找会先撞上目录自己 ——
+     verify-v102-pdf.js:242 量过这一点，首个文本命中就是目录块本身。 */
+  function tocMatch(key, fromBi) {
+    if (!key || key.length < 2) return -1;
+    var hk = headKeys();
+    for (var k = 0; k < hk.length; k++) if (hk[k].bi > fromBi && hk[k].key === key) return hk[k].bi;
+    return -1;
+  }
+
+  /* 一个块里的「逐项」结构只有 list / olist / refs；其余块整块算一项。 */
+  function tocItems(b) {
+    if (!b || !Array.isArray(b.items) || !b.items.length) return null;
+    if (b.type !== "list" && b.type !== "olist" && b.type !== "refs") return null;
+    return b.items.map(function (it) { return typeof it === "string" ? it : String(it.x || ""); });
+  }
+
+  var TOC_HEAD_KEY = { 目录: 1, 目次: 1, contents: 1, tableofcontents: 1, toc: 1 };
+
+  /* 判据三条同时成立才算「这一段是目录」（定案 §3.2 的不猜原则）：
+       ① ≥3 项；② ≥半数项带页码或点线；③ ≥半数项能在其后找到同名标题。
+     参考文献、脚注表、诗句排比都可能长得像目录，但它们的项对不上正文标题 ——
+     第③条正是把它们筛掉的那一刀。 */
+  function isTocRun(items, fromBi) {
+    if (!items || items.length < 3) return false;
+    var paged = 0, matched = 0, x;
+    for (var i = 0; i < items.length; i++) {
+      x = tocPage(items[i]);
+      if (x.page != null) paged++;
+      if (tocMatch(tocKey(x.x), fromBi) >= 0) matched++;
+    }
+    return paged * 2 >= items.length && matched * 2 >= items.length;
+  }
+
+  /* preserve = 服务端已给出的路径 A 链子：同一块里同一个字面不再补第二遍，
+     作者自己写的链接比按文本猜的准。 */
+  function deriveTocLinks(preserve) {
+    var out = [], seen = Object.create(null), i = 0;
+    (preserve || []).forEach(function (l) { seen[l.bi + ":" + tocKey(l.x)] = 1; });
+    var add = function (l) {
+      var k = l.bi + ":" + tocKey(l.x);
+      if (seen[k]) return;
+      seen[k] = 1;
+      out.push(l);
+    };
+    while (i < blocks.length) {
+      var b = blocks[i], its = tocItems(b), j = i + 1;
+      if (its && isTocRun(its, i)) {
+        for (var q = 0; q < its.length; q++) {
+          var x = tocPage(its[q]).x;
+          add({ m: "li", bi: i, cs: 0, len: 0, x: x, anchor: "", tbi: tocMatch(tocKey(x), i) });
+        }
+        i++; continue;
+      }
+      /* 标题写着「目录」的那一段：其后连续 p 块，每块一项（纯文本 / markdown 常这么排） */
+      if ((b.type === "h1" || b.type === "h2" || b.type === "h3") && TOC_HEAD_KEY[tocKey(b.x)]) {
+        var run = [];
+        while (j < blocks.length && blocks[j].type === "p" && String(blocks[j].x || "").trim()) {
+          run.push(j); j++;
+        }
+        if (isTocRun(run.map(function (bi) { return String(blocks[bi].x); }), i)) {
+          run.forEach(function (bi) {
+            var xx = tocPage(String(blocks[bi].x)).x;
+            add({ m: "blk", bi: bi, cs: 0, len: 0, x: xx, anchor: "", tbi: tocMatch(tocKey(xx), bi) });
+          });
+        }
+        i = j; continue;
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  /* 装配一次：有账读账，没账就地派生并落库（定案 §3.1「导入后首次用到时派生一次」）。
+     账上 scanned=1 表示路径 B 扫过了，不再重扫；src="manual"（用户手改过）同样不再覆写。 */
+  function loadToc() {
+    if (TOC.src || !API.tocOf || !API.tocSave) return TOC;   /* api.js 是旧的（离线包没更）：目录退化为无，别拖垮首屏 */
+    var rec = null;
+    try { rec = API.tocOf(docId); } catch (e) { rec = null; }
+    TOC.src = (rec && rec.src) || "headings";
+    TOC.nodes = (rec && rec.nodes && rec.nodes.length) ? rec.nodes : deriveNodes();
+    TOC.nodes.forEach(bindNode);
+    if (rec && (rec.scanned || TOC.src === "manual")) { TOC.links = rec.links || []; return TOC; }
+    TOC.links = (rec && rec.links) ? rec.links.slice() : [];
+    var extra = deriveTocLinks(TOC.links);
+    TOC.links = TOC.links.concat(extra);
+    API.tocSave(docId, { rev: 1, src: TOC.src, scanned: 1, nodes: TOC.nodes, links: TOC.links });
+    return TOC;
+  }
+
+  /* 正文一改（改字 / 恢复原文）：块上挂的 id 与标题文字都可能变，这两张表作废重算。
+     链子的落点不必在这里清 —— bindRange 每次都逐字复核，改过自然挪位。 */
+  function tocInvalidate() { BI_BY_ID = null; HEAD_KEYS = null; TL_BY_BI = null; }
+
+  /* ---------- 人工更正（定案 §3.3）：账是唯一的写入口 ----------
+     改名 / 增删 / 拖层级 / 固化都从 tocWrite 出去：改完即重绑、即校验、即落账，并把 src 转 manual。
+     src 一转，loadToc 此后只读账不覆写（定案 line 61）—— 读者的手改不会被下次自动扫描冲掉。
+     面板就是账的视图，不存在「改了但没存上」的中间态；blocks 一个字节不动（§九）。 */
+  function tocWrite(mut) {
+    mut();
+    TOC.nodes.forEach(bindNode);
+    TOC.src = "manual";
+    tocIssues = tocRefresh();
+    tocBsDirty = false;              /* 下面这次落账把 lint 刚补的 bs 一起带进去了 */
+    API.tocSave(docId, { rev: 1, src: TOC.src, scanned: 1, nodes: TOC.nodes, links: TOC.links });
+    renderToc();
+  }
+
+  /* 大纲在账上是一张平铺表（层级靠 lv 表达），所以「这一节」= 它自己加上其后所有更深的行。
+     拖拽与删除都以这个块为单位，否则子节会留在原地认别的爹。 */
+  function tocBlockEnd(i) {
+    var lv = TOC.nodes[i].lv;
+    for (var k = i + 1; k < TOC.nodes.length; k++) if (TOC.nodes[k].lv <= lv) return k;
+    return TOC.nodes.length;
+  }
+
+  /* 整块搬到「第 to 行之前」。只许整体上提：新位置的前一行就是新父行，
+     它比块根浅时整块一起抬同样的级；比块根深时保持原级（挂着并不违例）。
+     与笔记页大纲 moveBlockTo（notes.html:1323）同一个算法，差别只在这里最深三档。 */
+  function tocMoveTo(from, to) {
+    var nodes = TOC.nodes, lv = nodes[from].lv, block = nodes.slice(from, tocBlockEnd(from));
+    var rest = nodes.slice(0, from).concat(nodes.slice(from + block.length));
+    var t = Math.max(0, Math.min(rest.length, to > from ? to - block.length : to));
+    var d = Math.min(0, (t > 0 ? rest[t - 1].lv : 0) + 1 - lv);
+    block.forEach(function (n) { n.lv = Math.max(1, Math.min(3, n.lv + d)); });
+    TOC.nodes = rest.slice(0, t).concat(block, rest.slice(t));
+    return t;
+  }
+
+  /* 硬规则校验（定案 §3.3 6.4）：不接 AI 也恒跑，疑似项一条不藏地全数列出。
+     块指纹 bs 在这里第一次补齐（hash32(blockRT)，与批注同一个口径），此后每次校验都比对。 */
+  var tocBsDirty = false;
+  function tocLint() {
+    var out = [], seenAnchor = Object.create(null), prevBi = -1;
+    TOC.nodes.forEach(function (n, i) {
+      if (n.bi >= blocks.length) { out.push({ i: i, why: "指向的正文块已经不在书里了" }); return; }
+      if (n.anchor) {
+        if (seenAnchor[n.anchor] != null) out.push({ i: i, why: "与第 " + (seenAnchor[n.anchor] + 1) + " 节挂同一个锚点" });
+        else seenAnchor[n.anchor] = i;
+      }
+      if (n.bi < 0) return;                       /* 未绑定在行上已写明「未绑定」，不重复报 */
+      var sig = hash32(blockRT(n.bi));
+      if (!n.bs) { n.bs = sig; tocBsDirty = true; return; }
+      if (n.bs !== sig) out.push({ i: i, why: "这一节的正文改过字，位置得重新认" });
+      if (prevBi >= 0 && n.bi < prevBi) out.push({ i: i, why: "顺序与正文相反：它在上一节之前" });
+      if (n.bi > prevBi) prevBi = n.bi;
+    });
+    return out;
+  }
+
+  /* ---------- AI 模糊复核（定案 §五 toc.lint）----------
+     硬规则管「对不上账」：同一节挂两个锚点、顺序颠倒、正文改过字。它看不见「名不副实」——
+     条目写着「第三章 雨夜」而指过去那段正文在讲集市，账面上一切正常。这一路只有模型判得了。
+     三条边界：① 一个字都不自动改，采纳要读者自己点，写还走 tocWrite；
+     ② 硬规则与模型各存各的（tocIssues 每次由 tocLint 重算，模型那份留在 tocAiItems 里按节点对象认人），
+        所以改一次名不会把整屏提示一起冲掉；③ 没配模型时这一整块根本不出现，硬规则跑得像以前一样。 */
+  var TOC_AI_MAX = 200;
+  var tocAiItems = [];
+  var tocAi = { busy: false, ran: false, note: "", err: "", cut: "", stale: 0 };
+
+  function tocAiReset() { tocAiItems = []; tocAi.ran = false; tocAi.note = ""; tocAi.err = ""; tocAi.cut = ""; tocAi.stale = 0; }
+
+  /* 模型那份按**节点对象**存，行号渲染时现取：插一行、删一节、拖一下都会让行号认错人，
+     而对象跟着它自己走。它当时看到的 bi 与现在的对不上，说明这一行已被人动过，作废。 */
+  function tocRefresh() {
+    var hard = tocLint(), held = Object.create(null), out = hard, stale = 0;
+    hard.forEach(function (x) { held[x.i] = 1; });
+    tocAiItems = tocAiItems.filter(function (x) {
+      var i = TOC.nodes.indexOf(x.node);
+      if (i < 0) { stale++; return false; }
+      if (x.to != null) {
+        if (TOC.nodes[i].bi >= 0) { stale++; return false; }   /* 已经挂上了：这条建议办完了 */
+      } else if (TOC.nodes[i].bi !== x.at) { stale++; return false; }
+      if (held[i]) return false;                               /* 硬规则已报这一行，不重复刷一遍 */
+      out = out.concat({ i: i, why: x.why, ai: 1, to: x.to });
+      return true;
+    });
+    tocAi.stale = stale;
+    return out;
+  }
+
+  function tocAiPlain(s, n) {
+    return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n || 60);
+  }
+
+  /* 喂给模型的是两份对照表：目录现在怎么说，正文里有哪些标题、各落在第几块。
+     两头都封顶（TOC_AI_MAX），超出就在面板上写明「只列了前 N 条」——悄悄截断会让读者
+     以为模型看过了全书。 */
+  /* 正文标题清单：复核与认目录共用这一份说法。两处给同一个块号、同一个层级叫法，
+     模型才可能在两趟里对回同一个标题；各写各的会变成两套坐标。 */
+  function tocHeadLines() {
+    var hs = [], tot = 0;
+    blocks.forEach(function (b, i) {
+      if (b.type !== "h1" && b.type !== "h2" && b.type !== "h3") return;
+      tot++;
+      if (hs.length >= TOC_AI_MAX) return;
+      hs.push("# " + i + " 第" + b.type.charAt(1) + "级「" + tocAiPlain(b.x) + "」");
+    });
+    return { txt: hs.join("\n"), cut: tot > hs.length ? "正文标题共 " + tot + " 条，只列前 " + hs.length + " 条" : "" };
+  }
+
+  function tocAiVars() {
+    var lines = [], cut = [];
+    TOC.nodes.forEach(function (n, i) {
+      if (i >= TOC_AI_MAX) return;
+      lines.push(i + ". 第" + n.lv + "级「" + tocAiPlain(n.x, 40) + "」→ " +
+        (n.bi < 0 ? "未绑定"
+          : "# " + n.bi + "：" + (tocAiPlain(blocks[n.bi] && blocks[n.bi].x) || "（这一块的正文是空的）")));
+    });
+    if (TOC.nodes.length > TOC_AI_MAX) cut.push("目录条目只列前 " + TOC_AI_MAX + " 条");
+    var h = tocHeadLines();
+    if (h.cut) cut.push(h.cut);
+    return {
+      vars: { nodes: lines.join("\n") || "（这份目录还没有条目）", heads: h.txt || "（正文里没认出标题）" },
+      cut: cut.join(" · ")
+    };
+  }
+
+  function tocAiScan() {
+    if (tocAi.busy || !TOC.nodes.length) return;
+    if (!API.hasModel()) { toast("还没有配模型：AI 页填好地址与密钥再来复核", "alert-triangle"); return; }
+    var built = tocAiVars();
+    tocAi.busy = true; tocAi.err = ""; tocAi.note = ""; tocAi.cut = built.cut;
+    paintTocLint();
+    API.run("toc.lint",
+      "编号说明：i 用目录那段行首的数字，h 用正文那段 # 后面的块号，两个都必须是上面出现过的号。" +
+      "对不上就空着，宁可一条不给。",
+      { vars: built.vars })
+      .then(function (got) {
+        var j = (got && got.j) || {}, said = 0;
+        if (Array.isArray(j.suspect)) j.suspect.forEach(function (s) {
+          var i = s && s.i;
+          if (typeof i !== "number" || i < 0 || i >= TOC.nodes.length || !tocAiPlain(s.why)) return;
+          tocAiItems.push({ node: TOC.nodes[i], why: "模型：" + tocAiPlain(s.why, 40), at: TOC.nodes[i].bi });
+          said++;
+        });
+        if (Array.isArray(j.bind)) j.bind.forEach(function (b) {
+          var i = b && b.i, h = b && b.h, n = TOC.nodes[i];
+          if (!n || n.bi >= 0) return;                    /* 只给「还空着」的条目找位置 */
+          if (typeof h !== "number" || !blocks[h] || !/^h[123]$/.test(String(blocks[h].type))) return;
+          tocAiItems.push({ node: n, why: "模型认它该挂「" + tocAiPlain(blocks[h].x, 24) + "」", to: h });
+          said++;
+        });
+        tocAi.note = tocAiPlain(j.note, 80);
+        tocAi.ran = true;
+        /* 结构是从文本里硬捞出来的（fields 那一级）时 suspect/bind 多半根本不存在：
+           与其报「没有新发现」，不如说清这一趟没拿到可用的结构。 */
+        if (!said && !tocAiItems.length) tocAi.err =
+          got && got.via === "fields" ? "模型没有按格式回话，这一趟复核没成" : "模型这回没有给出关于目录的判断";
+      })
+      .catch(function (e) {
+        tocAi.err = e && e.name === "UnstructuredError"
+          ? "模型没有按格式回话，这一趟复核没成（不硬拆它的话，拆出来的多半是假的）"
+          : "复核失败：" + API.netErrPhrase(e);
+      })
+      .then(function () { tocAi.busy = false; tocIssues = tocRefresh(); paintTocLint(); });
+  }
+
+  /* ---------- AI 认目录页（定案 §五 toc.parse）----------
+     路径 B 的认法是「字面一样才算挂上」：目录印「三、雨夜」而正文标题写「第三章 雨夜」，
+     这一条就永远停在未绑定 —— 读者点了没反应，正是「书里自带目录想点着跳」的那道坎。
+     模型认得比字面宽，让它把目录条目对到正文标题号上。三条边界与复核同一条：
+     ① 认得到也只给一颗「挂过去」，落不落由读者点；
+     ② 建议按**链子对象**存，落到哪一条仍用本地那把 tocKey 认法去对，不认模型报的序号
+        （序号会随删行认错人，而对象跟着它自己走）；
+     ③ 没配模型时这颗钮根本不出现，路径 B 的本地认法照常跑。 */
+  var tocPgItems = [];
+  var tocPg = { busy: false, ran: false, note: "", err: "", cut: "" };
+
+  function tocPgReset() { tocPgItems = []; tocPg.ran = false; tocPg.note = ""; tocPg.err = ""; tocPg.cut = ""; }
+
+  function tocPgPending() {
+    var n = 0;
+    TOC.links.forEach(function (l) { if (tocTarget(l) < 0) n++; });
+    return n;
+  }
+
+  /* 过期判定与复核同一条规矩：链子不在了（删项 / 还原自动）或已经挂上了，这条建议就退场。 */
+  function tocPgLive() {
+    var out = [];
+    tocPgItems = tocPgItems.filter(function (s) {
+      var k = TOC.links.indexOf(s.link);
+      if (k < 0 || tocTarget(s.link) >= 0) return false;
+      out.push({ k: k, to: s.to, why: s.why });
+      return true;
+    });
+    return out;
+  }
+  function tocPgSug(k) {
+    var hit = null;
+    tocPgLive().forEach(function (s) { if (!hit && s.k === k) hit = s; });
+    return hit;
+  }
+
+  function tocPgVars() {
+    var lines = [], cut = [];
+    TOC.links.forEach(function (l, k) {
+      if (k >= TOC_AI_MAX) return;
+      var t = tocTarget(l);
+      lines.push(k + ". 「" + tocAiPlain(l.x, 40) + "」→ " + (t < 0 ? "没挂上" : "已挂 # " + t));
+    });
+    if (TOC.links.length > TOC_AI_MAX) cut.push("目录项只列前 " + TOC_AI_MAX + " 条");
+    var h = tocHeadLines();
+    if (h.cut) cut.push(h.cut);
+    return {
+      vars: { tocText: lines.join("\n") || "（正文里没认出目录页）", heads: h.txt || "（正文里没认出标题）" },
+      cut: cut.join(" · ")
+    };
+  }
+
+  function tocPgScan() {
+    if (tocPg.busy || !TOC.links.length) return;
+    if (!API.hasModel()) { toast("还没有配模型：AI 页填好地址与密钥再来认目录", "alert-triangle"); return; }
+    var built = tocPgVars();
+    tocPg.busy = true; tocPg.err = ""; tocPg.note = ""; tocPg.cut = built.cut;
+    tocPgItems = [];                       /* 重新一趟就整批换掉：上一趟没认出的那些不该继续挂着 */
+    paintTocLint();
+    API.run("toc.parse",
+      "编号说明：h 用正文那段 # 后面的块号，必须是上面出现过的号；x 照抄目录清单里的写法。" +
+      "只给「没挂上」的那些条，已经挂上的别再给。对不上就整条省略，宁可少给。",
+      { vars: built.vars })
+      .then(function (got) {
+        var j = (got && got.j) || {}, said = 0;
+        (Array.isArray(j.nodes) ? j.nodes : []).forEach(function (nd) {
+          var key = tocKey(nd && nd.x), h = nd && nd.h;
+          if (!key || typeof h !== "number" || !blocks[h] || !/^h[123]$/.test(String(blocks[h].type))) return;
+          for (var k = 0; k < TOC.links.length; k++) {
+            var l = TOC.links[k];
+            if (tocTarget(l) >= 0 || tocKey(l.x) !== key) continue;
+            tocPgItems.push({ link: l, to: h, why: "模型认它该挂「" + tocAiPlain(blocks[h].x, 24) + "」" });
+            said++; break;
+          }
+        });
+        tocPg.note = tocAiPlain(j.note, 80);
+        tocPg.ran = true;
+        if (!said) tocPg.err = got && got.via === "fields"
+          ? "模型没有按格式回话，这一趟没成" : "模型这回没认出新的一条（认不出比硬猜好）";
+      })
+      .catch(function (e) {
+        tocPg.err = e && e.name === "UnstructuredError"
+          ? "模型没有按格式回话，这一趟没成（不硬拆它的话，拆出来的多半是假的）"
+          : "认目录失败：" + API.netErrPhrase(e);
+      })
+      .then(function () {
+        tocPg.busy = false;
+        tocIssues = tocRefresh();
+        renderToc(); paintTocLint();
+      });
+  }
+
+  /* 重新定位：拿这一节的字面在它上一节之后找同名标题（与路径 B 同一把认法的反向用途）。
+     认得到就搬 bi/anchor 并补 bs，认不到就明说，绝不「差不多就近挪一个」。 */
+  function tocRelocate(i) {
+    var n = TOC.nodes[i];
+    if (!n) return false;
+    var from = -1;
+    for (var k = i - 1; k >= 0; k--) if (TOC.nodes[k].bi >= 0) { from = TOC.nodes[k].bi; break; }
+    var t = tocMatch(tocKey(n.x), from);
+    if (t < 0) return false;
+    tocBindAt(n, t);
+    return true;
+  }
+
+  /* 钉到一个正文块上必须三件一起改（bi / anchor / bs）：少一件，下一次校验就报
+     「正文改过字，位置得重新认」或「与上一节挂同一个锚点」——那是自己造出来的假可疑项。 */
+  function tocBindAt(n, bi) {
+    n.bi = bi; n.anchor = typeof blocks[bi].id === "string" ? blocks[bi].id : ""; n.bs = hash32(blockRT(bi));
+  }
+
+  /* 「加一节」的落点：分页态＝本页首块，通栏态＝上方基准线之上的最后一块。
+     基准线与 markToc 同一条 —— 面板高亮的「当前章」与新节认的位置必须是同一个说法。 */
+  function visibleBi() {
+    var els = qsa("#doc [data-bi]");
+    if (!els.length) return -1;
+    if (!state.scroll) return biOf(els[0], -1);
+    var rect = qs("#sheet").getBoundingClientRect();
+    var line = rect.top + Math.min(140, rect.height * 0.22), cur = biOf(els[0], -1);
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].getBoundingClientRect().top > line) break;
+      cur = biOf(els[i], cur);
+    }
+    return cur;
+  }
+
+  function tocNewNode(bi, lv, x) {
+    var b = blocks[bi] || {};
+    return { lv: lv, x: x, bi: bi < 0 ? -1 : bi, cs: 0, len: 0, bs: bi < 0 ? 0 : hash32(blockRT(bi)),
+      anchor: typeof b.id === "string" ? b.id : "", kids: [], open: true };
+  }
+  /* 默认名取该块的字（标题块用它自己的，其余截前 20 字）：紧接着就进改名态，
+     读者看到的是「这一节现在叫什么」，而不是一个空框。 */
+  function tocDefaultName(bi) {
+    var b = blocks[bi] || {}, x = String(b.x || "").replace(/\s+/g, " ").trim();
+    if (b.type === "h1" || b.type === "h2" || b.type === "h3") return x.slice(0, 40);
+    return x.slice(0, 20) || "未命名一节";
+  }
+
+  /* 上移 / 下移＝与**同级**节整块对调。直接挪到上一行会把自己抬到父节之上（层级账就乱了），
+     所以先越过相邻节的那片子树找到同级；没有同级可换时如实说不，不做静默 no-op。 */
+  function tocShift(i, dir) {
+    var nodes = TOC.nodes, lv = nodes[i].lv;
+    if (dir < 0) {
+      var p = i - 1;
+      while (p >= 0 && nodes[p].lv > lv) p--;
+      if (p < 0 || nodes[p].lv !== lv) return false;
+      tocMoveTo(i, p);
+      return true;
+    }
+    var end = tocBlockEnd(i);
+    if (end >= nodes.length || nodes[end].lv !== lv) return false;
+    tocMoveTo(i, tocBlockEnd(end));
+    return true;
+  }
+
+  /* 点亮当页的目录项。翻页会重建 #doc 的 innerHTML，所以这一步必须幂等，
+     且挂在批注之后（与高亮共用同一套「每次重绘都补画」的时机）。
+     三种认法：r = 块内字符区间（路径 A，交给 paintRange）；
+     li = 该 list 块里文本相等的 <li>；blk = 那一块自己。
+     li / blk 按**文本**认领而不按序号：长列表被 v2.19.3 的分页拆到几页上，
+     序号在跨页时就对不上了，而目录项的字面在每一片上都还是那一句。 */
+  function renderTocLinks() {
+    loadToc();
+    if (!TOC.links.length) return;
+    if (!TL_BY_BI) {
+      TL_BY_BI = {};
+      TOC.links.forEach(function (l, i) { (TL_BY_BI[l.bi] = TL_BY_BI[l.bi] || []).push(i); });
+    }
+    var map = TL_BY_BI;
+    qsa("#doc [data-bi]").forEach(function (el) {
+      var idxs = map[biOf(el, -1)];
+      if (!idxs) return;
+      var hit = Object.create(null);
+      idxs.forEach(function (k) {
+        var l = TOC.links[k];
+        if (tocTarget(l) < 0) return;                     /* 目标块不在了：不给可点样式 */
+        var marked = false;
+        if (l.m === "li") {
+          var key = tocKey(l.x);
+          if (key && !hit["li" + key]) {
+            hit["li" + key] = 1;
+            var lis = el.getElementsByTagName("li");
+            for (var q = 0; q < lis.length; q++) {
+              if (tocKey(tocPage(lis[q].textContent).x) !== key) continue;
+              lis[q].classList.add("toc-link"); lis[q].setAttribute("data-tl", k); marked = true;
+            }
+          }
+        } else if (l.m === "blk") {
+          el.classList.add("toc-link"); el.setAttribute("data-tl", k); marked = true;
+        } else if (bindRange(l)) {
+          var rk = "r" + l.cs + "_" + l.len;
+          if (!hit[rk]) {
+            hit[rk] = 1;
+            marked = paintRange(l.bi, l.cs, l.cs + l.len, "toc-link", "", k);
+          }
+        }
+        if (!marked) return;
+        /* 悬停提示说清「这一项会跳去哪」，与目录面板里同一句话 */
+        var tip = "跳到「" + String(l.x || "").slice(0, 40) + "」";
+        qsa('#doc [data-tl="' + k + '"]').forEach(function (n) { n.title = tip; });
+      });
+    });
+  }
+
+  function tocJump(k, el) {
+    var l = TOC.links[k];
+    if (!l) return;
+    /* 账被重排过（删项 / 还原自动）时，页面上那些 data-tl 就成了挂着旧号的钩子。
+       拿字面复核一次：对不上就摘掉这层可点样式并说明，绝不顺着旧号跳到别家。 */
+    if (el && l.x && tocKey(el.textContent).indexOf(tocKey(l.x)) < 0) {
+      el.classList.remove("toc-link"); el.removeAttribute("data-tl");
+      toast("这一项已经从目录账里去掉了", "alert-triangle"); return;
+    }
+    var t = tocTarget(l);
+    if (t < 0) { toast("这一项目录没能定位到正文", "alert-triangle"); return; }
+    gotoBlock(t);
+  }
+
+  /* ============================================================
+     3. 渲染当前页 + 批注标记
+     ============================================================ */
   function paintAnnotations() {
     var d = qs("#doc");
     /* 修改模式下不叠加批注装饰：正文此刻可编辑，标记 span 混在可编辑文本里会被顺手删掉，
        且「改过的文字」与「按原文定位的高亮」必然对不上 —— 退出修改后自动恢复。 */
     if (EDIT.on) return;
     state.notes.forEach(function (n) {
-      if (n.kind === "highlight" || (n.kind === "note" && n.text)) {
-        wrapFirst(d, n.text, "hl hl-" + (n.color || "accent"), n.id);
-      }
+      if (n.kind !== "highlight" && !(n.kind === "note" && n.text)) return;
+      var L = locate(n);
+      /* 档位 3 = 定位待确认：不画高亮。亮在猜的位置比不亮更坏 —— 读者会以为
+         「原来我标的是这句」，而真实的那处已经找不回来了。角标仍给，但标成待确认。 */
+      if (L.tier >= 3) return;
+      /* 画是照画（译写生词、整段笔记的首句若在正文里唯一命中，标出来对读者有用），
+         但块坐标只盖给摘录型：自撰型一旦被盖上 bi，正文一改就会跳进「定位待确认」，
+         而那句话本来就不属于正文 —— 不该拿它去挤占真正需要用户看一眼的错位。 */
+      if (paintRange(L.bi, L.from, L.to, "hl hl-" + (n.color || "accent"), n.id) && isQuote(n)) migrate(n, L);
     });
+    /* 正文自带目录的可点项（S5b）：批注之后、角标之前 —— 角标是插在文本节点之后的元素，
+       先包好链子再插角标，角标才不会掉进链子的 span 里。 */
+    renderTocLinks();
     renderNoteRefs(d);
   }
 
   /* 正文 → 标注：类型角标锚在「选中文本末尾之后」（v2.5 字符级锚定）。
      旧版只在锚点标题后挂一枚朱砂数字角标，说不出「是这句话的哪一处」；
-     新版每条标注都按 text 在正文里定位（有 sp 时用前后文夹逼 —— 同一句重复出现也落得准），
-     找不到才退到锚点元素末尾兜底。四类各有图标，同一处多条并排成组。 */
+     新版每条标注都走高亮**同一个**解析器（locate），四类各有图标，同一处多条并排成组。
+     共用是要点：两条路径各自找位置时，重复句会出现「亮在甲处、角标在乙处」这种
+     谁也解释不了的落点。 */
   var REF_ICON = { highlight: "highlighter", note: "notebook-pen", bookmark: "bookmark", margin: "pen-line" };
 
-  /* 在 root 的文本里找 needle 的首次出现（跳过自己插的角标），返回 {node, i} */
-  function findText(root, needle) {
-    if (!needle) return null;
-    var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-    while (w.nextNode()) {
-      var nd = w.currentNode;
-      if (nd.parentNode && nd.parentNode.closest && nd.parentNode.closest(".nref, .nref-group")) continue;
-      var i = nd.nodeValue.indexOf(needle);
-      if (i >= 0) return { node: nd, i: i };
+  /* 块文本偏移 → 当页的文本节点切点；该片不在本页返回 null（正常，不是定位失败） */
+  function pointAt(bi, off) {
+    var f = fragStarts(bi);
+    for (var k = 0; k < f.els.length; k++) {
+      var flow = fragFlow(f.els[k], f.starts[k]);
+      for (var q = 0; q < flow.length; q++) {
+        if (off >= flow[q].start && off <= flow[q].end) return { node: flow[q].node, i: off - flow[q].start };
+      }
     }
     return null;
   }
@@ -782,39 +1605,37 @@
     state.notes.forEach(function (n) {
       if (!REF_ICON[n.kind]) return;
       var text = n.text || "";
-      var sp = n.sp || {};
 
-      /* ① 定位：sp 夹逼 → 纯文本，四档依次试，命中即停 */
-      var hit = null, cut = 0, tries = [];
-      if (text && sp.pre) tries.push([sp.pre + text + (sp.suf || ""), sp.pre.length]);
-      if (text && sp.suf) tries.push([text + sp.suf, 0]);
-      if (text && sp.pre) tries.push([sp.pre + text, sp.pre.length]);
-      if (text) tries.push([text, 0]);
-      for (var i = 0; i < tries.length && !hit; i++) {
-        var f = findText(d, tries[i][0]);
-        if (f) { hit = f; cut = f.i + tries[i][1] + text.length; }
-      }
+      /* ① 定位：与高亮共用 locate() —— 同一档位、同一切点，两条路径不再各说各话。
+         摘录型且落到档位 3 才叫「待确认」（不假装知道是哪句：仍挂锚点末尾，但带 .nref-unsure 明说）；
+         自撰型（随笔 / 草稿 / 整段笔记）本就只能认到节，按老样子挂锚点，不给虚线。 */
+      var L = locate(n);
+      var un = isUnsure(n, L);
+      var hit = L.tier < 3 ? pointAt(L.bi, L.to) : null;
+      if (L.tier < 3 && !hit) return;          /* 命中块不在本页：这一页本来就不该有它 */
 
       /* ② 造角标：图标按类型，高亮描边随其颜色 */
       var btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "nref nref-" + n.kind;
+      btn.className = "nref nref-" + n.kind + (un ? " nref-unsure" : "");
       btn.dataset.note = n.id;
       if (n.kind === "highlight") btn.style.setProperty("--nref-c", COLOR_HEX[n.color] || COLOR_HEX.accent);
       /* 角标是空按钮 + 图标：读屏念不出「这是什么、点了会怎样」，名字得由 aria-label 给；
          title 只服务鼠标，留作摘录预览。 */
-      btn.setAttribute("aria-label", "查看这条" + (KIND_LABEL[n.kind] || "标注"));
+      btn.setAttribute("aria-label", "查看这条" + (KIND_LABEL[n.kind] || "标注") +
+        (un ? "（定位待确认）" : ""));
       btn.title = (KIND_LABEL[n.kind] || "标注") + "：" +
-        (text ? text.slice(0, 30) + (text.length > 30 ? "…" : "") : "（无摘录）");
+        (text ? text.slice(0, 30) + (text.length > 30 ? "…" : "") : "（无摘录）") +
+        (un ? " · 原句已在正文里找不着，位置待确认" : "");
       btn.innerHTML = icon(REF_ICON[n.kind], 11);
 
-      /* ③ 落位：找不到文本（随笔等摘录不在正文里）就挂到锚点元素末尾兜底 */
-      if (!hit) {
+      /* ③ 落位：待确认的挂锚点元素末尾（只知道在哪一节），其余落在选区末尾之后 */
+      if (L.tier >= 3) {
         var host = n.anchor ? d.querySelector("#" + CSS.escape(n.anchor)) : null;
         if (host) host.appendChild(btn);
         return;
       }
-      var after = hit.node.splitText(cut);          /* 文本一分为二，角标落在切点上 */
+      var after = hit.node.splitText(hit.i);
       var holder = after.parentNode;
       var span = holder && holder.closest ? holder.closest(".hl") : null;
       if (span && !textAfterIn(span, after)) drop(span.parentNode || holder, span.nextSibling, btn);
@@ -904,6 +1725,9 @@
          分页本该把多余的留白留在页底，而不是变成一条能拖动的缝。 */
       if (!state.scroll && docEl.lastElementChild) docEl.lastElementChild.classList.add("frag-last");
       paintAnnotations();
+      /* v1.1-S3 D1：朗读中重绘（翻页/设置变更）后句高亮跟着补画 —— span 已被上面
+         的 innerHTML 重建抹掉。TTS/SPEAK_UNITS 是后置 var，首绘时还是 undefined，靠 && 短路。 */
+      if (TTS && TTS.eng && TTS.eng.playing() && SPEAK_UNITS && SPEAK_UNITS.length) paintTtsSent(TTS.eng.idx());
       syncTaskFlags();
       /* 模式层必须在 paint 之后重画：翻页动画会把 paint 推迟到 renderPage 尾部之后，
          而 paint 会重置 docEl 的 className 与 innerHTML，先跑的模式层会被抹掉
@@ -1105,15 +1929,12 @@
       return "- " + o.k + "（" + InkTheme.DEN_NAME[o.k] + "）：" + o.pages + " 页 · 页底空白率 " +
         Math.round(o.blank * 100) + "% · 跨页拆分 " + o.splitN + " 处 · 成本 " + (Math.round(o.cost * 1000) / 10);
     }).join("\n");
-    var sys = "你是中文书刊的排版顾问。读者点「一键推荐疏密」时，你会拿到这本书在本机五档疏密下的实测排版表。"
-      + "档位键从紧到疏：" + InkTheme.DEN_ORDER.join(" / ") + "。只可从这些键里选一个。"
-      + "取舍原则：页底空白率越低越好、跨页拆分越少越好；两档成本差在 1% 内时取接近适中的一档；"
-      + "再结合文体（对话密集偏紧凑、散文诗歌偏疏朗）。"
-      + "严格输出一行 JSON，不要任何多余文字：{\"den\":\"档位键\",\"reason\":\"一句话中文理由（不超过 40 字）\"}";
+    var sysTxt = API.promptSys("density.suggest", { denKeys: InkTheme.DEN_ORDER.join(" / ") });
     var usr = "《" + (doc.title || "未命名") + "》· 文体 " + (doc.type || "book") + " · 共 " + blocks.length +
       " 块（本次量了 " + out.n + (out.sampled ? "，抽样" : "") + "）· 块型分布 " + JSON.stringify(types) +
       " · 平均块长 " + (cnt ? Math.round(sum / cnt) : 0) + " 字\n实测表（成本 = 空白率 + 0.5×拆分率）：\n" + table;
-    return API.llm(sys, usr, { temp: 0.2, maxTokens: 200, timeout: 15000 }).then(function (txt) {
+    var pr = API.promptParams("density.suggest");
+    return API.llm(sysTxt, usr, Object.assign({ cfg: pr.cfg }, pr.send)).then(function (txt) {
       var m = String(txt || "").match(/\{[\s\S]*\}/);
       if (!m) return null;
       var j = null;
@@ -1212,8 +2033,11 @@
     return doc.title || "";
   }
 
-  /* ---------- 检索索引：每块一条，带上所属章节与锚点 ---------- */
-  var SEARCH_INDEX = (function () {
+  /* ---------- 检索索引：每块一条，带上所属章节与锚点 ----------
+     写成函数而不是一次性 IIFE：这张表把「块号 + 章名 + 块文本」全钉死了，正文一改
+     （排版重排块号、修改模式改字）就必须整份重算，否则检索卡拿着旧块号，摘要与所指
+     块各说各话，点「跳转」还会跳错地方（v1.1-S5d 统装 X1，实测：搜「镍壳」落到绪论）。 */
+  function searchIndex() {
     var out = [], ch = "", chAnchor = "";
     blocks.forEach(function (b, i) {
       if (b.type === "h1" || b.type === "h2" || b.type === "h3") { ch = b.x || ""; chAnchor = b.id || "doc-top"; }
@@ -1222,7 +2046,8 @@
       out.push({ bi: i, chapter: ch, anchor: chAnchor, text: t });
     });
     return out;
-  })();
+  }
+  var SEARCH_INDEX = searchIndex();
 
   function escRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
@@ -1312,30 +2137,261 @@
   }
 
   /* ---------- 章节列表 ---------- */
+  /* 面板读的是 TOC.nodes（定案 §3.1）而不是当场扫标题：nav/ncx 的层级、用户改过的
+     条目名（§3.3 手改）都只存在那份账里，扫标题会把它们冲掉。
+     认不出位置的项照列，但标「未绑定」且不给点击 —— 一条悄悄消失的目录项，
+     读者会以为是这本书没有这一章。
+     更正态（tocFix）只在每行前后添上手柄与 ⋯，行本身还是那枚 .toc-item：
+     阅读态的标记与判据（lv3 / unb / cur / ti-pg）一个都不必跟着改。 */
+  var tocFix = false, tocMenuI = -1, tocRenaming = -1, tocIssues = [], tocDrag = null;
+
   function renderToc() {
-    var heads = [];
-    blocks.forEach(function (b, i) { if (b.type === "h1" || b.type === "h2" || b.type === "h3") heads.push({ b: b, i: i }); });
-    qs("#tocCount").textContent = heads.length + " 节";
-    qs("#tocList").innerHTML = heads.map(function (o) {
-      var lv = o.b.type === "h1" ? 1 : o.b.type === "h2" ? 2 : 3;
-      var anchor = o.b.id || (o.b.type === "h1" ? "doc-top" : "");
-      return '<button class="toc-item' + (lv === 3 ? " lv3" : "") + '" data-anchor="' + anchor + '" data-bi="' + o.i + '">' +
-        '<span class="ti-x">' + esc(o.b.x) + '</span><em class="ti-pg" data-pg="' + o.i + '"></em></button>';
-    }).join("");
-    qsa("#tocList .toc-item").forEach(function (el) {
+    loadToc();
+    var nodes = TOC.nodes;
+    qs("#tocCount").textContent = nodes.length + " 节";
+    qs("#tocFix").setAttribute("aria-pressed", tocFix ? "true" : "false");
+    qs("#tocFix").classList.toggle("on", tocFix);
+    qs("#tocFix").textContent = tocFix ? "更正中" : "更正";
+    qs("#tocTools").hidden = !tocFix;
+    qs("#tocFixHint").hidden = !tocFix;
+    var rows = nodes.map(function (n, i) { return tocRowHtml(n, i); });
+    TOC.links.forEach(function (l, k) {
+      if (l.m === "r" || tocTarget(l) >= 0) return;   /* 路径 A 的字面要按页才判得出，不进这张账 */
+      rows.push(tocUnboundHtml(l, k));
+    });
+    qs("#tocList").innerHTML = rows.join("");
+    qsa("#tocList .toc-item:not(.unb)").forEach(function (el) {
       var bi = +el.dataset.bi;
-      el.addEventListener("click", function () { gotoBlock(bi); InkFX.ripple(el); });
-      el.addEventListener("mouseenter", function () { pvShow(blockPreview(bi), el); });
+      el.addEventListener("click", function (e) {
+        if (e.target.closest("input")) return;        /* 改名态里点输入框不该顺手跳页 */
+        gotoBlock(bi); InkFX.ripple(el);
+      });
+      el.addEventListener("mouseenter", function () { if (+el.dataset.i !== tocRenaming) pvShow(blockPreview(bi), el); });
       el.addEventListener("mouseleave", pvHide);
       el.addEventListener("focus", function () { pvShow(blockPreview(bi), el); });
       el.addEventListener("blur", pvHide);
     });
+    if (tocRenaming >= 0) {
+      var ip = qs('#tocList .toc-item[data-i="' + tocRenaming + '"] .ti-rename');
+      if (ip) { ip.focus(); ip.select(); } else tocRenaming = -1;
+    }
     paintTocPages();
+    paintTocLint();
   }
 
-  /* 页码 / 百分比徽标：分页一变就得重刷 */
+  function tocRowHtml(n, i) {
+    var un = n.bi < 0, re = tocRenaming === i;
+    /* 改名态把整枚换成 div：<button> 里装 <input> 是不合法的嵌套，Chrome 会让那枚输入框
+       既点不进也打不了字 —— 改名就成了死控件。类名一个不改，读态的判据（lv3/unb/cur）照旧。 */
+    var tag = re ? "div" : "button";
+    var item = '<' + tag + ' class="toc-item' + (n.lv === 3 ? " lv3" : "") + (un ? " unb" : "") + '"' +
+      ' data-i="' + i + '" data-anchor="' + esc(n.anchor || "") + '" data-bi="' + n.bi + '"' +
+      (un && !re ? " disabled" : "") + '>' +
+      (re ? '<input class="field ti-rename" value="' + esc(n.x) + '" aria-label="这一节的名称">'
+          : '<span class="ti-x">' + esc(n.x) + '</span>') +
+      (un ? '<em class="ti-pg ti-unb">未绑定</em>' : '<em class="ti-pg" data-pg="' + n.bi + '"></em>') +
+      '</' + tag + '>';
+    if (!tocFix) return item;
+    return '<div class="toc-row lv' + n.lv + '" data-i="' + i + '" data-lv="' + n.lv + '"' +
+      (tocDrag && tocDrag.n === n ? ' data-drag="on"' : "") + '>' +
+      '<i class="toc-grip" title="拖动改层级与顺序">' + icon("grip-vertical", 13) + '</i>' + item +
+      '<button class="toc-more" aria-label="这一节的操作" aria-expanded="' + (tocMenuI === i) + '">' +
+        icon("ellipsis", 13) + '</button>' +
+      (tocMenuI === i ? tocMenuHtml(i, n) : "") + '</div>';
+  }
+
+  /* 未绑定的目录项在更正态里给一枚「不要这一项」：读者有权把书里带进来的噪声从账上划掉。
+     行上不留 disabled 的反色 —— 这一条现在是可以操作的，只是操作是删而不是跳。 */
+  function tocUnboundHtml(l, k) {
+    var x = '<button class="toc-item lv3 unb" disabled><span class="ti-x">' + esc(l.x) +
+      '</span><em class="ti-pg ti-unb">未绑定</em></button>';
+    if (!tocFix) return x;
+    var sg = tocPgSug(k);
+    return '<div class="toc-row lv3 unbound" data-i="-1" data-lv="0">' + x +
+      (sg ? '<button class="toc-fixbtn" data-adoptlk="' + k + '" data-to="' + sg.to + '" ' +
+        'aria-label="把这一项挂到正文标题' + esc(tocAiPlain(blocks[sg.to].x, 12)) + '">挂过去</button>' : "") +
+      '<button class="toc-more" data-lk="' + k + '" aria-label="把这一项从目录账里去掉">' +
+        icon("trash-2", 13) + '</button></div>';
+  }
+
+  /* 定案写的是右键菜单。面板只有 344px 且 .tpc-body 带 overflow，绝对定位的浮层会被裁掉，
+     所以菜单内联展开在该行下方（同一条行、同一个层级）；右键与点 ⋯ 都唤它，触屏也就有了入口。 */
+  var TOC_OPS = [
+    { op: "rename", x: "改名", ic: "pen-line" },
+    { op: "child", x: "增子节", ic: "list-tree" },
+    { op: "up", x: "上移", ic: "arrow-up" },
+    { op: "down", x: "下移", ic: "arrow-down" },
+    { op: "out", x: "升级", ic: "indent-decrease" },
+    { op: "in", x: "降级", ic: "indent-increase" },
+    { op: "del", x: "删除", ic: "trash-2", danger: 1 }
+  ];
+  /* 这一节的块有多深：整块升降级要按最深的一行算，不然三级子节会被压成第四级（平铺表只有三档）。 */
+  function tocBlockH(i) {
+    var mx = 0, end = tocBlockEnd(i);
+    for (var k = i; k < end; k++) mx = Math.max(mx, TOC.nodes[k].lv);
+    return mx;
+  }
+  function tocOpState(i, n) {
+    var nodes = TOC.nodes, prev = i > 0 ? nodes[i - 1] : null, end = tocBlockEnd(i);
+    var p = i - 1;
+    while (p >= 0 && nodes[p].lv > n.lv) p--;
+    return {
+      up: p >= 0 && nodes[p] && nodes[p].lv === n.lv,
+      down: end < nodes.length && nodes[end].lv === n.lv,
+      out: n.lv > 1,
+      "in": !!prev && n.lv < 3 && n.lv <= prev.lv && tocBlockH(i) < 3,
+      why: { up: "上面没有同级节可换", down: "下面没有同级节可换", out: "已经是最上一级",
+        "in": !prev ? "第一行没有上一级可挂" : (tocBlockH(i) >= 3 ? "下面已有三级的子节，压不进第四级" : "上面那节不比它浅，挂不上去") }
+    };
+  }
+  function tocMenuHtml(i, n) {
+    var st = tocOpState(i, n);
+    return '<div class="toc-menu" role="menu">' + TOC_OPS.map(function (o) {
+      var off = o.op === "rename" || o.op === "child" || o.op === "del" ? false : !st[o.op];
+      return '<button class="chip chip-btn toc-op' + (o.danger ? " danger" : "") + '" role="menuitem"' +
+        ' data-op="' + o.op + '"' + (off ? ' disabled title="' + esc(st.why[o.op] || "") + '"' : "") + '>' +
+        icon(o.ic, 12) + o.x + '</button>';
+    }).join("") + "</div>";
+  }
+
+  /* 校验结果常驻在这一节底下：硬规则跑到什么程度就说话，不因为没接 AI 就装没这回事。
+     每条都带一个去处（跳过去看一眼 / 重新定位 / 采纳模型认的位置），只列不改是半拉子。 */
+  function paintTocLint() {
+    var box = qs("#tocLint");
+    if (!tocFix) { box.hidden = true; box.innerHTML = ""; return; }
+    var hardN = 0, aiN = 0;
+    tocIssues.forEach(function (x) { if (x.ai) aiN++; else hardN++; });
+    var body = "";
+    if (!tocIssues.length) {
+      body = '<p class="card-note">' + icon("circle-check", 12) + " 硬规则没有发现可疑项" +
+        (TOC.src === "manual" ? " · 这份目录已固化" : " · 尚未固化") + "</p>";
+    } else {
+      body = '<p class="card-note">' + icon("alert-triangle", 12) + " 可疑 " + tocIssues.length + " 项" +
+        (aiN ? "（硬规则 " + hardN + " · 模型 " + aiN + "）" : "") + "</p>" +
+        tocIssues.map(function (x) {
+          var n = TOC.nodes[x.i] || {};
+          return '<div class="ln-row' + (x.ai ? " ai" : "") + '" data-i="' + x.i + '">' +
+            '<button class="ln-go" data-go="' + x.i + '">' + esc(String(n.x || "（空）").slice(0, 16)) + "</button>" +
+            '<em>' + esc(x.why) + "</em>" +
+            (x.to != null
+              ? '<button class="toc-fixbtn" data-adopt="' + x.i + '" data-to="' + x.to + '">挂过去</button>'
+              : '<button class="toc-fixbtn" data-re="' + x.i + '">重新定位</button>') +
+            "</div>";
+        }).join("");
+    }
+    box.hidden = false;
+    box.innerHTML = body + tocAiBar();
+  }
+
+  /* 复核条：没配模型就明说「只有硬规则」，而不是摆一颗点了报错的钮。
+     跑过之后把模型的自述（note）与截断说明（cut）留在原地 —— 读者要能看出这一眼看了多少书。 */
+  function tocAiBar() {
+    var can = API.hasModel && API.hasModel();
+    var btn = can
+      ? '<button class="toc-fixbtn" data-ai-run' + (tocAi.busy ? " disabled" : "") + '>' +
+        icon(tocAi.busy ? "loader-circle" : "scan-text", 11) +
+        (tocAi.busy ? "复核中…" : tocAi.ran ? "再复核一次" : "让模型复核文本近似") + "</button>"
+      : '<span class="ln-ai">未配模型 · 只有硬规则</span>';
+    /* 认目录这一颗只在「真有条目点不动」时出现：全部挂上了还摆一颗钮，是让人白点一次。 */
+    var pend = can ? tocPgPending() : 0;
+    if (pend) btn += '<button class="toc-fixbtn" data-pg-run' + (tocPg.busy ? " disabled" : "") + '>' +
+      icon(tocPg.busy ? "loader-circle" : "link-2", 11) +
+      (tocPg.busy ? "认目录中…" : "让模型认没挂上的 " + pend + " 条") + "</button>";
+    var extra = "";
+    if (tocAi.err) extra += '<em class="ln-bad">' + esc(tocAi.err) + "</em>";
+    if (tocAi.note) extra += "<em>" + esc(tocAi.note) + "</em>";
+    if (tocAi.cut) extra += '<em class="ln-cut">' + esc("本次只看了一部分：" + tocAi.cut) + "</em>";
+    if (tocAi.stale) extra += '<em class="ln-cut">' + esc(tocAi.stale + " 条模型判断已随改动作废") + "</em>";
+    if (tocPg.err) extra += '<em class="ln-bad">' + esc(tocPg.err) + "</em>";
+    if (tocPg.note) extra += "<em>" + esc(tocPg.note) + "</em>";
+    if (tocPg.cut) extra += '<em class="ln-cut">' + esc("本次只看了一部分：" + tocPg.cut) + "</em>";
+    var live = tocPgLive().length;
+    if (live) extra += '<em>' + esc("模型认出了 " + live + " 条，逐条挂在下面「未绑定」那几行右边") + "</em>";
+    return '<div class="ln-act">' + btn + extra + "</div>";
+  }
+
+  /* ---------- 更正态的操作（每一条都从 tocWrite 落账） ---------- */
+  function tocOp(op, i) {
+    var n = TOC.nodes[i];
+    if (!n) return;
+    if (op === "rename") { tocRenaming = i; tocMenuI = -1; renderToc(); return; }
+    if (op === "child") {
+      var at = tocBlockEnd(i), lv = Math.min(3, n.lv + 1), bi = visibleBi();
+      tocMenuI = -1; tocRenaming = at;
+      tocWrite(function () { TOC.nodes.splice(at, 0, tocNewNode(bi, lv, tocDefaultName(bi))); });
+      toast(bi < 0 ? "已加到末尾，这一节还没有正文位置" : "已在「" + String(n.x).slice(0, 12) + "」下加一节", "plus");
+      return;
+    }
+    if (op === "up" || op === "down") {
+      var dir = op === "up" ? -1 : 1, ok = false;
+      tocWrite(function () { ok = tocShift(i, dir); });
+      if (!ok) toast(dir < 0 ? "上面没有同级节可换" : "下面没有同级节可换", "alert-triangle");
+      return;
+    }
+    if (op === "out" || op === "in") {
+      var delta = op === "in" ? 1 : -1, h = tocBlockH(i);
+      if (delta > 0 && !(i > 0 && n.lv <= TOC.nodes[i - 1].lv && n.lv < 3 && h < 3)) {
+        tocMenuI = -1; renderToc();
+        toast(i < 1 ? "第一行没有上一级可挂" : (h >= 3 ? "下面已有三级的子节，压不进第四级" : "上面那节不比它浅，挂不上去"), "alert-triangle"); return;
+      }
+      if (delta < 0 && n.lv <= 1) return;
+      /* 整块一起走：只改自己那一行，子节会凭空比父行深一级 —— 平铺表上「lv ≤ 上一行+1」这条就破了。 */
+      var blkEnd = tocBlockEnd(i);
+      tocMenuI = -1;
+      tocWrite(function () { for (var k = i; k < blkEnd; k++) TOC.nodes[k].lv += delta; });
+      toast("「" + String(n.x).slice(0, 12) + "」现在是第 " + n.lv + " 级" +
+        (blkEnd - i > 1 ? "（带着 " + (blkEnd - i - 1) + " 个子节）" : ""), n.lv === 1 ? "indent-decrease" : "indent-increase");
+      return;
+    }
+    if (op === "del") {
+      var cnt = tocBlockEnd(i) - i;
+      tocMenuI = -1;
+      tocWrite(function () { TOC.nodes.splice(i, cnt); });
+      toast("已删除这一节" + (cnt > 1 ? "及其 " + (cnt - 1) + " 个子节" : ""), "trash-2");
+    }
+  }
+
+  /* 改名：Enter 与失焦都算提交，Esc 作废。空名不受理 —— 目录里出现一条空白，
+     读者只会以为是这本书少了这一章，比跳错更难解释。 */
+  function commitRename() {
+    var i = tocRenaming;
+    if (i < 0) return;                      /* 提交过一次就别再提交第二遍：Enter 之后紧跟的 focusout 就是这种 */
+    var ip = qs('#tocList .toc-item[data-i="' + i + '"] .ti-rename');
+    tocRenaming = -1;
+    if (!ip) { renderToc(); return; }
+    var v = String(ip.value || "").replace(/\s+/g, " ").trim();
+    if (!v || v === TOC.nodes[i].x) { renderToc(); return; }
+    tocWrite(function () { TOC.nodes[i].x = v; });
+  }
+
+  /* ---------- 拖手柄改层级与顺序：整块（含子级）落到目标行 ---------- */
+  function tocIndexOfNode() {
+    for (var i = 0; i < TOC.nodes.length; i++) if (TOC.nodes[i] === tocDrag.n) return i;
+    return -1;
+  }
+  /* 落点按行算：指针在某一行的上半 → 插到它前面，过中线 → 插到它后面。
+     未绑定的补行（data-i=-1）不参与：那不是一个可以插进去的块。 */
+  function tocDropAt(clientY) {
+    var rows = qsa("#tocList .toc-row").filter(function (r) { return +r.dataset.i >= 0; });
+    if (!rows.length) return 0;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return +rows[i].dataset.i;
+    }
+    return tocBlockEnd(+rows[rows.length - 1].dataset.i);
+  }
+  function tocDropLine(to) {
+    qsa("#tocList .toc-row").forEach(function (r) { r.classList.remove("drop-line", "drop-end"); });
+    if (to < 0) return;                     /* 落在自己块内：不画线，免得看着像能放 */
+    var el = qs('#tocList .toc-row[data-i="' + to + '"]');
+    if (el) { el.classList.add("drop-line"); return; }
+    var last = TOC.nodes.length - 1, tail = qs('#tocList .toc-row[data-i="' + last + '"]');
+    if (tail) tail.classList.add("drop-line", "drop-end");
+  }
+
+  /* 页码 / 百分比徽标：分页一变就得重刷（未绑定的那几行写的是「未绑定」，不能被徽标盖掉） */
   function paintTocPages() {
-    qsa("#tocList .ti-pg").forEach(function (em) {
+    qsa("#tocList .ti-pg:not(.ti-unb)").forEach(function (em) {
       var bi = +em.dataset.pg;
       if (state.scroll) { em.textContent = pctOfBlock(bi) + "%"; return; }
       var p = pageOfBlock(bi);
@@ -1416,6 +2472,8 @@
   function closeToc() {
     if (!tocPanel || !tocOpen) return;
     tocOpen = false;
+    if (tocRenaming >= 0) commitRename();   /* 关面板不该让改名悬着：悬着的那条既没进账也看不见 */
+    tocMenuI = -1;
     tocPanel.classList.remove("on");
     pwApply("toc");                       /* 状态位已翻：立刻撤掉这一侧的让位账 */
     tocPanel.setAttribute("aria-hidden", "true");
@@ -1722,6 +2780,195 @@
   qs("#tDir").addEventListener("click", function () { toggleToc(); InkFX.ripple(qs("#tDir")); });
   qs("#tpcClose").addEventListener("click", closeToc);
 
+  /* ---------- 目录更正态接线（定案 §3.3）----------
+     菜单是内联展开的，所以「点 ⋯」与「右键这一行」都只改 tocMenuI 再整段重画；
+     重画会拆掉行 DOM，但委托与指针捕获都挂在 #tocList 上，事件一条不丢。 */
+  qs("#tocFix").addEventListener("click", function () {
+    if (tocFix) commitRename();             /* 退更正态前把在改的名字落账：改名不写账等于白改 */
+    tocFix = !tocFix;
+    tocMenuI = -1;
+    if (!tocFix) { tocAiReset(); tocPgReset(); }     /* 退更正态：模型那两份随面板一起收走，再进来重新问一遍 */
+    tocIssues = tocFix ? tocRefresh() : [];
+    /* 校验第一次跑到某节时补的块指纹要跟着落账：bs 只留在内存里，账与屏就成了两份，
+       面板显示的层级与 localStorage 的字段对不上，事后判「手改有没有被覆写」也就没了基准。
+       这一下不动任何用户可见字段（名 / 层级 / 位置 / src 全是原样），只是给账补上指纹。 */
+    if (tocBsDirty) {
+      tocBsDirty = false;
+      API.tocSave(docId, { rev: 1, src: TOC.src, scanned: 1, nodes: TOC.nodes, links: TOC.links });
+    }
+    renderToc();
+  });
+
+  qs("#tocList").addEventListener("click", function (e) {
+    var op = e.target.closest("[data-op]");
+    if (op) {
+      var orow = op.closest(".toc-row");
+      if (orow) tocOp(op.dataset.op, +orow.dataset.i);
+      return;
+    }
+    /* 未绑定补行的删除钮借用了 .toc-more 的壳（同一套尺寸与热区），必须先按 data-lk 判：
+       顺序反过来它会被当成「展开菜单」，读者点了一下只是菜单开合 —— 划不掉那一行。
+       「挂过去」与删除钮并排，同样要抢在 data-lk 与 .toc-more 之前判。 */
+    var ak = e.target.closest("[data-adoptlk]");
+    if (ak) {
+      var al = TOC.links[+ak.dataset.adoptlk], to = +ak.dataset.to;
+      if (!al || !blocks[to]) return;
+      tocWrite(function () {
+        al.tbi = to;
+        al.anchor = typeof blocks[to].id === "string" ? blocks[to].id : "";
+      });
+      renderTocLinks();          /* 正文里那一条要当场变成能点的样子，不等下一次翻页 */
+      toast("已挂到「" + tocAiPlain(blocks[to].x, 12) + "」，正文里这一条能点了", "circle-check");
+      return;
+    }
+    var lk = e.target.closest("[data-lk]");
+    if (lk) {
+      var k = +lk.dataset.lk, l = TOC.links[k];
+      if (!l) return;
+      TOC.links.splice(k, 1);
+      tocWrite(function () {});
+      toast("已从目录账里去掉「" + String(l.x).slice(0, 12) + "」", "trash-2");
+      return;
+    }
+    var more = e.target.closest(".toc-more");
+    if (more) {
+      var i = +more.closest(".toc-row").dataset.i;
+      tocMenuI = tocMenuI === i ? -1 : i;
+      renderToc(); return;
+    }
+    if (tocMenuI >= 0 && !e.target.closest(".toc-row")) { tocMenuI = -1; renderToc(); }
+  });
+
+  /* 校验区在列表之外（它是「这一页的诊断」，不属于任何一行），单独一条委托。
+     「重新定位」认不到时如实说认不到 —— 把 bi 挪到差不多的地方，是把错藏起来而不是改掉；
+     「挂过去」同理只搬模型点名那一条，搬完这条就从 tocAiItems 里退场，不留着反复点。 */
+  qs("#tocLint").addEventListener("click", function (e) {
+    var go = e.target.closest("[data-go]");
+    if (go) {
+      var n = TOC.nodes[+go.dataset.go];
+      if (!n) return;
+      if (n.bi < 0) { toast("这一项还没有正文位置，先重新定位或改名", "alert-triangle"); return; }
+      gotoBlock(n.bi); return;
+    }
+    if (e.target.closest("[data-ai-run]")) { tocAiScan(); return; }
+    if (e.target.closest("[data-pg-run]")) { tocPgScan(); return; }
+    var ad = e.target.closest("[data-adopt]");
+    if (ad) {
+      var node = TOC.nodes[+ad.dataset.adopt], to = +ad.dataset.to;
+      if (!node || !blocks[to]) return;
+      tocWrite(function () { tocBindAt(node, to); });
+      toast("已挂到「" + tocAiPlain(blocks[to].x, 12) + "」", "circle-check");
+      return;
+    }
+    var re = e.target.closest("[data-re]");
+    if (!re) return;
+    var ok = false;
+    tocWrite(function () { ok = tocRelocate(+re.dataset.re); });
+    toast(ok ? "已重新定位到正文" : "正文里认不出这一节的字面，位置先空着", ok ? "circle-check" : "alert-triangle");
+  });
+
+  qs("#tocList").addEventListener("contextmenu", function (e) {
+    var row = e.target.closest(".toc-row");
+    if (!row || !tocFix || +row.dataset.i < 0) return;
+    e.preventDefault();
+    tocMenuI = +row.dataset.i;
+    renderToc();
+  });
+  qs("#tocList").addEventListener("dblclick", function (e) {
+    var row = e.target.closest(".toc-row");
+    if (!tocFix || !row || +row.dataset.i < 0) return;
+    tocOp("rename", +row.dataset.i);
+  });
+
+  /* 改名框：Enter 与失焦都算提交，Esc 作废。拦下冒泡，别让 Enter 顺手翻页、Esc 顺手关面板。 */
+  qs("#tocList").addEventListener("keydown", function (e) {
+    if (!e.target.classList || !e.target.classList.contains("ti-rename")) return;
+    if (e.key === "Enter") { e.preventDefault(); commitRename(); e.stopPropagation(); }
+    else if (e.key === "Escape") { e.preventDefault(); tocRenaming = -1; renderToc(); e.stopPropagation(); }
+  });
+  qs("#tocList").addEventListener("focusout", function (e) {
+    if (e.target.classList && e.target.classList.contains("ti-rename")) commitRename();
+  });
+
+  /* 拖手柄：整块（含子级）跟着走，落点由行的中线决定，指示线画在目标行上缘。
+     与笔记页大纲同一套 pointer 捕获 + 逐帧重画；松手才 tocWrite 落账（拖途中不写库）。 */
+  qs("#tocList").addEventListener("pointerdown", function (e) {
+    var grip = e.target.closest(".toc-grip");
+    if (!grip || !tocFix) return;
+    var row = grip.closest(".toc-row"), i = row ? +row.dataset.i : -1;
+    if (i < 0 || !TOC.nodes[i]) return;
+    e.preventDefault();
+    tocMenuI = -1;
+    tocDrag = { n: TOC.nodes[i], moved: false };
+    renderToc();
+    var list = qs("#tocList");
+    if (list.setPointerCapture) { try { list.setPointerCapture(e.pointerId); } catch (err) {} }
+  });
+  qs("#tocList").addEventListener("pointermove", function (e) {
+    if (!tocDrag) return;
+    var from = tocIndexOfNode();
+    if (from < 0) { tocDrag = null; return; }
+    e.preventDefault();
+    var to = tocDropAt(e.clientY), end = tocBlockEnd(from);
+    if (to > from && to < end) { tocDropLine(-1); return; }   /* 落在自己块内：无意义 */
+    if (to !== from && to !== end) {
+      tocMoveTo(from, to);
+      tocDrag.moved = true;
+      renderToc();
+      tocDropLine(tocDropAt(e.clientY));   /* 行号已变，按当前布局重算指示位置 */
+    } else tocDropLine(to);
+  });
+  function endTocDrag() {
+    if (!tocDrag) return;
+    var moved = tocDrag.moved;
+    tocDrag = null;
+    if (moved) tocWrite(function () {});
+    else { qsa("#tocList .toc-row").forEach(function (r) { r.classList.remove("drop-line", "drop-end"); }); renderToc(); }
+  }
+  qs("#tocList").addEventListener("pointerup", endTocDrag);
+  qs("#tocList").addEventListener("pointercancel", endTocDrag);
+
+  qs("#tocAdd").addEventListener("click", function () {
+    var bi = visibleBi(), at = TOC.nodes.length;
+    tocMenuI = -1; tocRenaming = at;
+    tocWrite(function () { TOC.nodes.push(tocNewNode(bi, 1, tocDefaultName(bi))); });
+    toast(bi < 0 ? "已加在末尾，这一节还没有正文位置" : "已加一节，指向当前看到的位置", "plus");
+  });
+
+  /* 固化 = 把 src 转成 manual（tocWrite 已经做了），这一枚是「我知道它存下来了」的确认口 */
+  qs("#tocFreeze").addEventListener("click", function () {
+    var was = TOC.src === "manual";
+    tocWrite(function () {});
+    toast(was ? "已再次固化，改动都在这份账上" : "已固化：重开与重扫都不会盖掉这份目录", "lock");
+  });
+
+  /* 还原自动＝丢掉全部手改，回到当场扫出来的那份。不可撤销，所以先上膛再点一次（同「恢复原文」）。
+     只清 nodes：路径 A 认出来的正文内链（m="r"）是这本书正文里真有的字面，不是「目录条目」，
+     跟着清会把能点的链接弄丢。不写 scanned → 下次开面板会重新补扫路径 B。 */
+  qs("#tocAuto").addEventListener("click", function () {
+    var b = this;
+    if (!b.dataset.armed) {
+      b.dataset.armed = "1"; b.classList.add("armed");
+      toast("再点一次确认：手改的目录会还给自动扫描");
+      setTimeout(function () { b.dataset.armed = ""; b.classList.remove("armed"); }, 3200);
+      return;
+    }
+    b.dataset.armed = ""; b.classList.remove("armed");
+    if (tocRenaming >= 0) { tocRenaming = -1; }
+    var keep = TOC.links.filter(function (l) { return l.m === "r"; });
+    TOC.nodes = deriveNodes();
+    TOC.nodes.forEach(bindNode);
+    TOC.links = keep.concat(deriveTocLinks(keep));
+    TOC.src = "headings";
+    tocAiReset();                 /* 整本换了一茬节点，模型那份判断没有一条还关于这本书 */
+    tocPgReset();                 /* 链子也全部重派生了，认目录那一份建议同样作废 */
+    tocIssues = tocLint();
+    API.tocSave(docId, { rev: 1, src: "headings", nodes: TOC.nodes, links: TOC.links });
+    tocInvalidate();
+    renderToc();
+    toast("已还原为自动目录", "rotate-ccw");
+  });
+
   qsa("#findModes .seg-btn").forEach(function (b) {
     b.addEventListener("click", function () {
       setFindMode(b.dataset.fmode);
@@ -1831,21 +3078,66 @@
     return out;
   }
 
-  /* 防重复高亮（v2.5）：同一位置只留一条 —— 锚点 + 文本 + 上下文三者相同即判为同一处，
-     颜色不同也算同一处（否则同一句反复点色会叠出多条重影高亮，删起来还得一条条认）。
-     双方都有 sp 才比对 sp；任一方没有（旧数据 / 跨元素选区）则退到锚点 + 文本判重。 */
-  function findSameHighlight(text, anchor, sp) {
+  /* 防重复高亮（S2-C2 改口径）：先比块坐标 —— 同一块里两段选区相交就是同一处，
+     换颜色、多划两个字都不该再压一条重影。老数据（没有 bi/cs）才退到
+     「锚点 + 文本 + 上下文」三件比对。 */
+  function hlOverlap(sel, n) {
+    if (sel.bi == null || n.bi == null || sel.bi !== n.bi) return false;
+    if (sel.cs == null || n.cs == null) return false;
+    var a0 = sel.cs, a1 = a0 + (sel.len || (sel.text || "").length);
+    var b0 = n.cs, b1 = b0 + (n.len || (n.text || "").length);
+    return a1 > b0 && b1 > a0;
+  }
+  function findSameHighlight(sel) {
     return state.notes.find(function (n) {
-      if (n.kind !== "highlight" || n.anchor !== anchor || n.text !== text) return false;
-      var a = n.sp || {}, b = sp || {};
+      if (n.kind !== "highlight") return false;
+      /* 「定位待确认」的记录连自己在哪都不知道，不许占住一个位置挡住重新高亮 ——
+         挡住就等于把这条记录的修复通道焊死（用户重新划选会被当成重复而拒绝）。 */
+      if (isUnsure(n)) return false;
+      if (sel.bi != null && n.bi != null && n.cs != null) return hlOverlap(sel, n);
+      if (n.anchor !== sel.anchor || n.text !== sel.text) return false;
+      var a = n.sp || {}, b = sel.sp || {};
       var hasA = !!(a.pre || a.suf), hasB = !!(b.pre || b.suf);
       if (hasA && hasB) return (a.pre || "") === (b.pre || "") && (a.suf || "") === (b.suf || "");
       return true;
     });
   }
+
+  /* 收编（S2-C2）：在同句上重新高亮 = 用户亲手把位置给对了。
+     那条「定位待确认」的旧记录就地改字段 —— 沿用它的 id / 时间 / 正文，
+     既不新增一条重影，也不删掉用户写过的话。 */
+  function absorbTarget(note) {
+    if (note.kind !== "highlight" || note.bi == null || !note.text) return null;
+    return state.notes.find(function (n) {
+      return n.id !== note.id && n.kind === "highlight" && n.text === note.text && isUnsure(n);
+    }) || null;
+  }
+
+  /* 存一条批注（两处入口共用）：先问要不要收编，再落库并同步内存副本。 */
+  async function putNote(note) {
+    var abs = absorbTarget(note);
+    if (abs) {
+      note.id = abs.id; note.at = abs.at;
+      if (!note.body) note.body = abs.body;
+      if (!note.title) note.title = abs.title;
+    }
+    await API.saveNote(note);
+    delete LOC_CACHE[note.id];
+    var i = abs ? state.notes.findIndex(function (n) { return n.id === abs.id; }) : -1;
+    if (i >= 0) state.notes[i] = Object.assign({}, state.notes[i], note);
+    else state.notes.unshift(note);
+    return !!abs;
+  }
   function dupHighlightToast(dup) {
     return "该位置已有高亮（" + (COLOR_NAME[dup.color] || "朱砂") + "）· 先到批注列表删除再重标";
   }
+
+  /* 只认到节的批注（随笔 / 画板草稿 / 整段笔记）：位置诚实写成「约在某一节」，不编页码 */
+  function anchorChapter(n) {
+    var i = n.anchor ? blocks.findIndex(function (b) { return b.id === n.anchor; }) : -1;
+    return i >= 0 ? chapterOf(i) : (doc.title || "本文");
+  }
+  function anchorChapterLabel(n) { return "约在「" + esc(anchorChapter(n)) + "」"; }
 
   function renderNotes() {
     var list = state.notes.filter(function (n) { return state.filter === "all" || n.kind === state.filter; });
@@ -1853,22 +3145,40 @@
     var nc2 = qs("#noteCount2"); if (nc2) nc2.textContent = state.notes.length;
     qs("#notesSummary").textContent = "共 " + state.notes.length + " 条 · 本文";
     if (!list.length) { qs("#noteList").innerHTML = '<div class="empty">' + icon("notebook-pen", 28) + "<p>暂无批注<br>选中正文文字即可高亮或写笔记</p></div>"; return; }
-    qs("#noteList").innerHTML = list.map(function (n) {
-      var body = n.body ? MD.render(n.body) : "";
-      return '<div class="note-card" data-note="' + n.id + '">' +
+    /* 定位待确认的单列一组：它们的高亮没画出来（宁可空着也不亮在猜的地方），
+       所以读者必须有一个地方能看到「这一条还在、只是位置没对上」，否则像是被删了。
+       自撰型的笔记不进这一组 —— 它们本来就不该有正文位置，混进来会把真要看的错位埋掉。 */
+    var L = {};
+    list.forEach(function (n) { L[n.id] = locate(n); });
+    var unsure = function (n) { return isUnsure(n, L[n.id]); };
+    var sure = list.filter(function (n) { return L[n.id].tier < 3; });
+    var uns = list.filter(unsure);
+    var plain = list.filter(function (n) { return L[n.id].tier >= 3 && !unsure(n); });
+
+    function card(n) {
+      var body = n.body ? MD.render(n.body) : "", l = L[n.id], un = unsure(n);
+      return '<div class="note-card' + (un ? " nc-unsure" : "") + '" data-note="' + n.id + '">' +
         '<div class="nc-head"><span class="dot" style="background:' + (COLOR_HEX[n.color] || COLOR_HEX.accent) + '"></span>' +
         (KIND_LABEL[n.kind] || "批注") + "<span class=\"spacer\"></span><span>" + esc(n.at || "") + "</span>" +
         '<button class="nc-del" data-del="' + n.id + '" aria-label="删除这条批注" title="删除">' + icon("trash-2", 14) + "</button></div>" +
         (n.text ? '<div class="nc-text">' + esc(n.text) + "</div>" : "") +
         (body ? '<div class="nc-body">' + body + "</div>" : "") +
-        '<div class="nc-src">' + esc(doc.title) + " · 第 " + (n.page || 1) + " 页</div>" +
+        /* 位置一律现算（第 n.page 是当年翻页时的页号，换疏密/换栏宽就过期了） */
+        '<div class="nc-src">' + esc(doc.title) + " · " +
+        (l.tier < 3 ? esc(locLabel(l.bi)) : un ? "定位待确认 · " + anchorChapterLabel(n) : anchorChapterLabel(n)) + "</div>" +
         "</div>";
-    }).join("");
+    }
+    qs("#noteList").innerHTML = sure.map(card).join("") +
+      (uns.length ? '<div class="nc-group">定位待确认 ' + uns.length + " 条 · 原句在正文里找不着，点卡片跳到最近的一节</div>" +
+        uns.map(card).join("") : "") +
+      (plain.length ? '<div class="nc-group">只认到节 ' + plain.length + " 条 · 随笔与整段笔记不指向具体句子</div>" +
+        plain.map(card).join("") : "");
     qsa("#noteList .nc-del").forEach(function (b) {
       b.addEventListener("click", async function (e) {
         e.stopPropagation();
         await API.deleteNote(b.dataset.del);
         state.notes = state.notes.filter(function (n) { return n.id !== b.dataset.del; });
+        delete LOC_CACHE[b.dataset.del];
         renderNotes(); renderBookmarks(); renderPage(0, false);
         toast("批注已删除", "trash-2");
       });
@@ -1876,9 +3186,22 @@
     qsa("#noteList .note-card").forEach(function (c) {
       c.addEventListener("click", function () {
         var n = state.notes.find(function (x) { return x.id === c.dataset.note; });
-        if (n) gotoAnchor(n.anchor);
+        if (n) gotoNote(n);
       });
     });
+  }
+
+  /* 点批注跳正文：解析得出块就跳那一块并点亮它（n.page 是当年翻页时的页号，会过期，
+     所以位次一律现算）；档位 3 只敢说「约在这一节」，就真只跳到那一节，不假装更准。 */
+  function gotoNote(n) {
+    var L = locate(n);
+    if (L.tier >= 3) { gotoAnchor(n.anchor); return; }
+    gotoBlock(L.bi);
+    var el = qs('#doc .hl[data-note="' + n.id + '"]');
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.add("hl-pulse");
+    setTimeout(function () { el.classList.remove("hl-pulse"); }, 1100);
   }
 
   function focusNote(id) {
@@ -1893,7 +3216,7 @@
       card.classList.add("on");
       card.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-    gotoAnchor(n.anchor);
+    gotoNote(n);
   }
 
   /* ---------- 选中工具条 ---------- */
@@ -1917,10 +3240,13 @@
       var head = raw.indexOf(text);
       if (head < 0) head = 0;
       var tail = raw.length - head - text.length;
-      state.sel = {
+      /* selBlockInfo 成功时把 text 改写成块空间的那一份（跨 <br> 的选区带来换行，
+         块文本里没有它 —— 不改写，locate() 的逐字比对就永远认不出这条批注）。 */
+      var blk = selBlockInfo(range, head, tail > 0 ? tail : 0, text);
+      state.sel = Object.assign({
         text: text, anchor: currentAnchor(range), page: state.cur + 1,
         sp: selContext(range, head, tail > 0 ? tail : 0)
-      };
+      }, blk);
       selBar.style.display = "flex";
       /* 助手开着时划了新的一段，携带条要当场跟上 —— 它是「这一问带了什么」的唯一凭据，
          划完不换就成了一句读者无法核对的承诺（W1e 的「自动携带选中段」）。 */
@@ -1946,7 +3272,10 @@
         heads.forEach(function (id) {
           var h = hel(id);
           if (!h) return;
-          if (h === startEl || (h.compareDocumentPosition(startEl) & (Node.DOCUMENT_POSITION_PRECEDING | Node.DOCUMENT_POSITION_CONTAINS))) best = id;
+          /* compareDocumentPosition 的标志说的是「选区相对这个标题」：
+             FOLLOWING = 选区在标题之后（即标题在前），CONTAINED_BY = 选区在标题里面。
+             写成 PRECEDING|CONTAINS 会反向选中下一节 —— 批注全钉晚一节。 */
+          if (h === startEl || (h.compareDocumentPosition(startEl) & (Node.DOCUMENT_POSITION_FOLLOWING | Node.DOCUMENT_POSITION_CONTAINED_BY))) best = id;
         });
         if (best) return best;
       }
@@ -1967,15 +3296,16 @@
       if (!state.sel) return;
       /* 防重复高亮（v2.5）：同一位置已有高亮就不再新建 —— 不创建、给提示、工具条留着，
          用户可以直接换个颜色再试（提示里会说明已有的是哪个颜色），不必重新划选。 */
-      var dup = findSameHighlight(state.sel.text, state.sel.anchor, state.sel.sp);
+      var dup = findSameHighlight(state.sel);
       if (dup) { toast(dupHighlightToast(dup), "alert-triangle"); return; }
-      var note = { docId: docId, kind: "highlight", color: d.dataset.color, text: state.sel.text, body: "", anchor: state.sel.anchor, page: state.sel.page, sp: state.sel.sp };
-      await API.saveNote(note);
-      state.notes.unshift(note);
+      var note = { docId: docId, kind: "highlight", color: d.dataset.color, text: state.sel.text, body: "", anchor: state.sel.anchor, page: state.sel.page, sp: state.sel.sp,
+        bi: state.sel.bi, cs: state.sel.cs, len: state.sel.len, bs: state.sel.bs };
+      var absorbed = await putNote(note);
       hideSel();
       renderNotes(); renderBookmarks(); renderPage(0, false);
       InkFX.flash();
-      toast("已高亮 · " + KIND_LABEL.highlight + "（" + (COLOR_NAME[d.dataset.color] || d.dataset.color) + "）", "highlighter");
+      toast("已高亮 · " + KIND_LABEL.highlight + "（" + (COLOR_NAME[d.dataset.color] || d.dataset.color) + "）" +
+        (absorbed ? " · 已把那条待确认归位" : ""), "highlighter");
     });
   });
 
@@ -1992,7 +3322,8 @@
     if (!state.sel) return;
     /* 书签存完整选区文本（旧版截 40 字）：角标要锚在「选中文本末尾之后」，
        截断的文本会让定位停在句中，宁可多存几十字也不让位置跑偏。 */
-    var note = { docId: docId, kind: "bookmark", color: "ink", text: state.sel.text, body: "", anchor: state.sel.anchor, page: state.sel.page, sp: state.sel.sp };
+    var note = { docId: docId, kind: "bookmark", color: "ink", text: state.sel.text, body: "", anchor: state.sel.anchor, page: state.sel.page, sp: state.sel.sp,
+      bi: state.sel.bi, cs: state.sel.cs, len: state.sel.len, bs: state.sel.bs };
     await API.saveNote(note);
     state.notes.unshift(note);
     hideSel(); renderNotes(); renderBookmarks();
@@ -2586,7 +3917,7 @@
     var noteAnchor = (onSel && state.sel.anchor) ? state.sel.anchor : currentAnchor();
     /* 同一条链路也要防重复高亮：这里存「高亮 + 引用」时同样会压出一条重影高亮 */
     if (onSel && quickKind === "highlight") {
-      var dup = findSameHighlight(state.sel.text, noteAnchor, state.sel.sp);
+      var dup = findSameHighlight(state.sel);
       if (dup) { toast(dupHighlightToast(dup), "alert-triangle"); return; }
     }
     var b = qs("#noteSave"); b.disabled = true;
@@ -2594,16 +3925,17 @@
       docId: docId, kind: quickKind, color: quickColor,
       text: onSel ? state.sel.text : "",
       body: v, anchor: noteAnchor, page: state.cur + 1,
-      sp: onSel ? state.sel.sp : null
+      sp: onSel ? state.sel.sp : null,
+      bi: onSel ? state.sel.bi : null, cs: onSel ? state.sel.cs : null,
+      len: onSel ? state.sel.len : null, bs: onSel ? state.sel.bs : 0
     };
-    await API.saveNote(note);
-    state.notes.unshift(note);
+    var absorbed = await putNote(note);
     b.disabled = false;
     qs("#noteInput").value = ""; qs("#quoteRef").style.display = "none"; syncPreview();
     InkFX.flash();
     renderNotes(); renderBookmarks(); renderPage(0, false);
     switchNoteTab("list");
-    toast("批注已保存 · 双端已同步", "circle-check");
+    toast("批注已保存 · 双端已同步" + (absorbed ? " · 已把那条待确认归位" : ""), "circle-check");
   });
 
   /* ---------- 写笔记 · 字号三档（v17）：15 / 17 / 20px，默认「中」17px ----------
@@ -2820,6 +4152,276 @@
   /* ============================================================
      6. 设置 / 排版
      ============================================================ */
+  /* ============================================================
+     6.0 一键排版（v1.1-S5d · M3）
+     ------------------------------------------------------------
+     定案 §六 的三步在这里接线：判文体 → 出可撤销 diff → 预览改动计数 → 确认才落库。
+     引擎是纯函数，住在 layout.js；这一段只做面板、落库与重建 —— 与 srs.js 同一条分工。
+     三条边界（每条都是能被消融砍红的）：
+       ① 模型只判层级，正文一个字都由本机保留：让它重写文本等于让它重写整本书；
+       ② 模型回话里有一条对不上本地（块号越界 / 类型不在四档 / 同一块判两次）就整单不收，
+          本地那一份照常摆在预览里 —— 半张处方比不开药更危险；
+       ③ 落库前先把「正文锁」改过的字折进正文，再清掉那份按块号记账的覆盖表：
+          重排会挪块号，不折就等于把读者改的那一句挂到别的段上去。
+     书仓书（EPUB）的正文在磁盘书仓里，写 inkread.contents.v1 盖不住它，
+     所以这类书只排本次打开的这一份、不落库，面板上把这话说明白，不给「已保存」的假承诺。
+     ============================================================ */
+  var LAY_AI_MAX = 300;    /* 送进模型的块数上限：与角色表同一口径（面板可以长，出口要有限） */
+  var LAY_SHOW = 60;       /* 预览最多列这么多条，其余只报数（几百条 diff 铺进 DOM 会拖死首帧） */
+  var LAY = { open: false, busy: false, kind: "book", conf: 0.45, by: "rule", why: "",
+    off: { type: false, fuse: false, join: false }, diffs: [], count: null, skipJoin: false,
+    ai: null, aiNote: "", err: "", base: null, base0: null, edits0: null, applied: false, store: true };
+
+  function layRulesText() {
+    var on = [];
+    if (!LAY.off.type) on.push("标题层级归一");
+    if (!LAY.off.fuse) on.push("伪标题合段");
+    if (!LAY.off.join) on.push("正文段重拼");
+    return on.length ? "本次启用：" + on.join(" / ") : "三条规则都被勾掉了 —— 那什么都不该改。";
+  }
+
+  /* 重算本地 diff（勾动的每一颗都走这里）；模型那份层级判定存着不丢，重新并一次 */
+  function layReplan() {
+    var p = InkLayout.plan(blocks, { kind: LAY.kind, off: LAY.off });
+    LAY.err = "";
+    if (LAY.ai) {
+      var v = InkLayout.vetAI(blocks, LAY.ai);
+      if (!v.ok) { LAY.ai = null; LAY.err = "模型回话里有一条对不上（" + v.why + "），那一批整单没收；下面是本机自己判的。"; }
+      else p = InkLayout.mergeAI(blocks, p, v.edits);
+    }
+    LAY.diffs = p.diffs; LAY.count = p.count; LAY.skipJoin = p.skipJoin;
+  }
+
+  /* 排版把 p 提成了 hN，目录那张表却还是排版前派生的 —— 不跟着重算一次，「标题归位」
+     的回报就看不见（面板里仍只有原来那几行）。只重算机器派生的那份：
+       · src=manual 是读者手改过的大纲，机器不许覆写（S5b 的铁律）；
+       · src=nav 是书自带的目录，那是作者的原文，同样不动；
+       · 书仓书（LAY.store=false）只改内存、不写 toc.v1 —— 这次排版不落库，账上却按
+         新块号存了节点，下次重开取的是没排过版的正文，整张目录会集体错位。 */
+  function layTocSync() {
+    if (TOC.src === "manual" || TOC.src === "nav") return;
+    TOC.nodes = deriveNodes();
+    TOC.nodes.forEach(bindNode);
+    TOC.links = deriveTocLinks([]);
+    if (tocFix) tocIssues = tocRefresh();
+    if (LAY.store && API.tocSave)
+      API.tocSave(docId, { rev: 1, src: TOC.src || "headings", scanned: 1, nodes: TOC.nodes, links: TOC.links });
+    if (tocOpen) renderToc();
+  }
+
+  function layPaintKind() {
+    var c = LAY.count || { total: 0, type: 0, fuse: 0, join: 0 };
+    qs("#layKind").textContent = "文体：「" + API.kindCN(LAY.kind) + "」" +
+      (LAY.by === "ai" ? "（模型判的，置信 " + LAY.conf + "）" : "（本机判的，置信 " + LAY.conf + "）") +
+      " · 本次改动 " + c.total + " 处（层级 " + c.type + " · 合段 " + c.fuse + " · 重拼 " + c.join + "）";
+  }
+
+  var LAY_TY = { p: "正文", h1: "标题 1", h2: "标题 2", h3: "标题 3" };
+  function layTag(d) {
+    var t = (d.to && d.to.lay) || "type";
+    return t === "fuse" ? "合段" : t === "join" ? "重拼" : t === "ai" ? "模型判" : "层级";
+  }
+  function layPlain(s, n) {
+    s = String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+    return n && s.length > n ? s.slice(0, n) + "…" : s;
+  }
+  function layBody(b) {   /* 预览要说「这一块现在长什么样」：list / table 没有 x，从单元格拼一句 */
+    if (!b) return "";
+    if (typeof b.x === "string") return b.x;
+    if (Array.isArray(b.items)) return b.items.join(" / ");
+    return "";
+  }
+
+  function layPaint() {
+    layPaintKind();
+    var ds = LAY.diffs || [], out = [], i;
+    for (i = 0; i < ds.length && i < LAY_SHOW; i++) {
+      var d = ds[i], from = d.from || [], to = d.to || {};
+      out.push('<li class="lay-row"><div class="lay-line"><b class="lay-no">块 ' + d.bi + "</b>" +
+        '<span class="lay-tag' + (to.lay === "ai" ? " ai" : "") + '">' + layTag(d) + "</span>" +
+        '<span class="lay-way">' + esc(layPlain(from[0] && from[0].type, 8)) +
+        (from.length > 1 ? " +" + (from.length - 1) + " 块" : "") + " → " + esc(LAY_TY[to.type] || to.type || "正文") +
+        "</span></div><p class=\"lay-tx\">" + esc(layPlain(to.x, 46)) + "</p></li>");
+    }
+    if (ds.length > LAY_SHOW) out.push('<li class="lay-more">还有 ' + (ds.length - LAY_SHOW) + " 处没列出，一并算进改动数。</li>");
+    qs("#layList").innerHTML = out.join("") || '<li class="lay-none">本机挑不出要改的地方 —— 这一本的标题和段落本来就是齐的。</li>';
+    var note = [];
+    if (LAY.skipJoin) note.push("这本书多半是短行（诗、目录残行一类），正文重拼整条规则没开：硬拼会把一行一句挤成一坨。");
+    if (LAY.aiNote) note.push(LAY.aiNote);
+    if (LAY.err) note.push(LAY.err);
+    if (!LAY.store) note.push("这一本的正文在本机书仓里，写不动 inkread.contents.v1 —— 排版只在这次打开的书上生效。");
+    var np = qs("#layNote");
+    np.hidden = !note.length;
+    np.textContent = note.join(" ");
+    var ab = qs("#layAi");
+    ab.hidden = !API.hasModel();
+    ab.disabled = LAY.busy;
+    ab.textContent = LAY.ai ? "收掉模型那份" : "让模型判层级";
+    qs("#layOk").disabled = !ds.length || LAY.busy;
+    qs("#layUndo").hidden = !LAY.applied;
+  }
+
+  function layReadRules() {
+    LAY.off = { type: !qs("#layRType").checked, fuse: !qs("#layRFuse").checked, join: !qs("#layRJoin").checked };
+  }
+
+  /* 文体：先问本机（classifyHeuristic 已在，文件名与文首最能定型），只有本机自己说
+     「没把握」才去问模型 —— 高置信度还打电话，等于每次开面板都烧一次 token。 */
+  function layDetect(ask) {
+    var d = InkLayout.detect(blocks, { fileName: (doc && (doc.title || doc.desc)) || "", fmt: (doc && doc.fmt) || "" });
+    LAY.kind = d.kind; LAY.conf = d.conf; LAY.by = d.by; LAY.why = d.why; LAY.aiNote = "";
+    if (!ask || LAY.busy || d.conf >= 0.6 || !API.hasModel()) { layReplan(); layPaint(); return; }
+    LAY.busy = true; layPaint();
+    var sample = blocks.slice(0, 40).map(function (b) { return layPlain(layBody(b), 80); }).join("\n");
+    API.run("layout.detect", "只判文体，不要改任何字。", { vars: { kinds: API.kinds().join(" / "), sample: sample || "（正文是空的）" } })
+      .then(function (got) {
+        var j = (got && got.j) || {}, k = String(j.kind || ""), c = Number(j.conf);
+        if (API.kinds().indexOf(k) < 0)
+          LAY.aiNote = "模型回的文体「" + (layPlain(k, 12) || "空") + "」不在清单里，仍按本机判的「" + API.kindCN(LAY.kind) + "」。";
+        else if (k === "paper" && !d.paperish)
+          LAY.aiNote = "模型说是论文，可正文里既没有摘要也没有参考文献，这条不采信，仍按「" + API.kindCN(LAY.kind) + "」。";
+        else {
+          LAY.kind = k; LAY.by = "ai"; LAY.conf = Math.max(0.4, Math.min(0.7, isFinite(c) ? c : 0.5));
+          LAY.aiNote = "模型判成「" + API.kindCN(k) + "」" + (j.reason ? "：" + layPlain(j.reason, 40) : "。");
+        }
+      })
+      .catch(function (e) {
+        LAY.aiNote = "文体没问成：" + (e && e.name === "UnstructuredError" ? "模型没有按格式回话" : API.netErrPhrase(e)) +
+          "，用本机判的「" + API.kindCN(LAY.kind) + "」。";
+      })
+      .then(function () { LAY.busy = false; layReplan(); layPaint(); });
+  }
+
+  function layOpen() {
+    if (LAY.open) return;
+    LAY.open = true;
+    LAY.store = !(doc && doc.src === "disk");
+    qs("#layDoc").textContent = doc.title || "";
+    panelWin("lay", { el: qs("#layPanel"), id: "lay", label: "一键排版", handle: ".lay-head", bar: ".lay-head",
+      x: "#layClose", width: 380, wmin: 300, side: "right", shown: function () { return LAY.open; }, close: layClose });
+    var el = qs("#layPanel");
+    el.hidden = false;
+    void el.offsetWidth;
+    el.classList.add("on");
+    pwApply("lay");
+    el.setAttribute("aria-hidden", "false");
+    qs("#tLay").setAttribute("aria-expanded", "true");
+    layReadRules();
+    layDetect(true);
+    InkFX.flash();
+  }
+
+  function layClose() {
+    if (!LAY.open) return;
+    LAY.open = false;
+    var el = qs("#layPanel");
+    el.classList.remove("on");
+    pwApply("lay");
+    el.setAttribute("aria-hidden", "true");
+    qs("#tLay").setAttribute("aria-expanded", "false");
+    setTimeout(function () { if (!LAY.open) el.hidden = true; }, 280);
+  }
+
+  /* 层级判定这一腿：模型只给 {bi,type}，正文一个字都由本机保留。
+     送出去的块号是真的数组下标，回来的还得经 vetAI 逐条对账 —— 对不上就整单不收。 */
+  function layAiRun() {
+    if (LAY.busy) return;
+    if (LAY.ai) { LAY.ai = null; LAY.aiNote = "模型那份层级判定已经收掉，下面只剩本机规则。"; layReplan(); layPaint(); return; }
+    if (!API.hasModel()) { toast("还没有配模型：AI 页填好地址与密钥再来判层级", "alert-triangle"); return; }
+    var lines = [];
+    for (var i = 0; i < blocks.length && lines.length < LAY_AI_MAX; i++) {
+      var t = String(blocks[i].type);
+      if (t !== "p" && !/^h[123]$/.test(t)) continue;
+      var x = layPlain(blocks[i].x, 90);
+      if (x) lines.push(i + ". " + x);
+    }
+    LAY.busy = true; layPaint();
+    API.run("layout.apply",
+      "块号只能用上面出现过的号；回话里不要带 x 字段，正文由本机原样保留。",
+      { vars: { kind: API.kindCN(LAY.kind) + "（本机置信 " + LAY.conf + "）", rules: layRulesText(), blocks: lines.join("\n") || "（没有可判的段落）" } })
+      .then(function (got) {
+        var j = (got && got.j) || {};
+        if (!Array.isArray(j.edits) || !j.edits.length) {
+          LAY.ai = null;
+          LAY.aiNote = got && got.via === "fields" ? "模型没有按格式回话，这一趟层级判定没成" : "模型这回没给出层级判断，下面只有本机规则的改动";
+        } else { LAY.ai = j.edits; LAY.aiNote = "模型补了 " + j.edits.length + " 处层级判断（已逐条对过本机块号）。"; }
+      })
+      .catch(function (e) {
+        LAY.ai = null;
+        LAY.aiNote = "判层级失败：" + (e && e.name === "UnstructuredError"
+          ? "模型没有按格式回话（不硬拆它的话，拆出来的多半是假的）" : API.netErrPhrase(e));
+      })
+      .then(function () { LAY.busy = false; layReplan(); layPaint(); });
+  }
+
+  /* 确认才落库。n 必须在 layReplan 之前取：重算会在**已排版**的 blocks 上再挑一遍，
+     那之后 count 只剩「新产生的」，拿它当 toast 数字等于给用户报 0 处。 */
+  function layApply() {
+    if (LAY.busy || !LAY.diffs.length) return;
+    flushEdit();                       /* 正在改的那一句先落账，别让它悬在即将废弃的 DOM 上 */
+    var off = curOffset();
+    var n = LAY.diffs.length;
+    if (!LAY.applied) {                /* 一个面板会话只留最早那份底：连排两次，撤销也回到开面板之前 */
+      LAY.base = blocks.slice();
+      /* 落库的底要单存一份**没折正文锁**的原文：blocks 已经盖过覆盖表，
+         拿它当撤销底写回去，等于把读者改的字烙进正文 —— 日后「恢复原文」就没原文可回了。 */
+      LAY.base0 = sourceBlocks();
+      LAY.edits0 = Object.assign({}, InkStore.getDocEdits(docId));
+    }
+    blocks = InkLayout.apply(blocks, LAY.diffs);
+    LAY.applied = true;
+    rebuildIndexes();
+    if (LAY.store) {
+      var r = API.contentSave(docId, blocks);
+      /* 正文锁按块号记账，重排挪了号，留着那条覆盖就等于把读者改的字挂到别的段上去。
+         文字已经折进 blocks 一起落库，这里清掉不丢字。 */
+      if (r.ok) InkStore.setDocEdits(docId, {});
+      else { LAY.store = false; toast("没写进本机存储：" + API.storedNote(r.why) + " · 排版只在这一页有效", "alert-triangle"); }
+    }
+    layTocSync();
+    if (state.scroll) { renderPage(0, false); restoreScroll(off); }
+    else { paginate(); restorePaged(off); renderPage(0, false); }
+    setEditable(EDIT.on);
+    paintProg();
+    paintEditBar();
+    layReplan();
+    layPaint();
+    toast("已排版 " + n + " 处" + (LAY.store ? " · 不满意可以撤销" : " · 不落库"), "heading");
+  }
+
+  function layUndo() {
+    if (!LAY.applied || !LAY.base) return;
+    var off = curOffset();
+    blocks = LAY.base.map(function (b) { return Object.assign({}, b); });
+    LAY.base = null; LAY.applied = false;
+    if (LAY.store) {
+      API.contentSave(docId, LAY.base0 || blocks);
+      if (LAY.edits0) InkStore.setDocEdits(docId, LAY.edits0);
+    }
+    LAY.base0 = null;
+    LAY.edits0 = null;
+    rebuildIndexes();
+    layTocSync();
+    if (state.scroll) { renderPage(0, false); restoreScroll(off); }
+    else { paginate(); restorePaged(off); renderPage(0, false); }
+    setEditable(EDIT.on);
+    paintProg();
+    paintEditBar();
+    layReplan();
+    layPaint();
+    toast("已撤销：正文回到排版前", "rotate-ccw");
+  }
+
+  qs("#tLay").addEventListener("click", function () { LAY.open ? layClose() : layOpen(); });
+  qs("#layClose").addEventListener("click", layClose);
+  qs("#layDrop").addEventListener("click", layClose);
+  qs("#layAi").addEventListener("click", layAiRun);
+  qs("#layOk").addEventListener("click", layApply);
+  qs("#layUndo").addEventListener("click", layUndo);
+  ["layRType", "layRFuse", "layRJoin"].forEach(function (id) {
+    qs("#" + id).addEventListener("change", function () { layReadRules(); layReplan(); layPaint(); });
+  });
+
   function paintSettings() {
     qs("#swMarks").classList.toggle("on", read.marks);
     qs("#swMarks").setAttribute("aria-pressed", String(!!read.marks));
@@ -2947,6 +4549,10 @@
     if (ref && ref.dataset.note) { location.href = noteLink(ref.dataset.note); return; }
     var f = e.target.closest(".task-flag");
     if (f) { openTasks(f.dataset.task); return; }
+    /* 正文自带目录（S5b 路径 A/B）：排在 .hl 之前 —— 目录项落在高亮句里时，
+       读者点它是为了跳转，不是为了看那条批注。 */
+    var tl = e.target.closest(".toc-link");
+    if (tl && tl.dataset.tl != null) { tocJump(+tl.dataset.tl, tl); return; }
     var hl = e.target.closest(".hl");
     if (hl && hl.dataset.note) focusNote(hl.dataset.note);
   });
@@ -3237,6 +4843,7 @@
     else if (InkModes.panelKey()) InkModes.closePanel();
     else if (tOpen) closeTasks();
     else if (tocOpen) closeToc();
+    else if (LAY.open) layClose();
     else if (imm.on) exitImm();
     else hideSel();
   });
@@ -3305,12 +4912,25 @@
      ③ 华为阅读「边听边看」：朗读进度驱动阅读页（自动翻页 / 滚动 + 当前段高亮）。
      只要有可朗读的文字段落就开放（书 / 论文 / 计划都行）；漫画没有文字段落才禁用。
      引擎在 api.js 的 API.ttsEngine()（段落队列 + 神经语音边播边预取）。 */
-  var SPEAK_UNITS = [];
-  blocks.forEach(function (b, i) {
-    var t = (b.type === "p" || b.type === "h1" || b.type === "h2" || b.type === "h3" ||
-             b.type === "quote" || b.type === "abstract");
-    if (t && String(BLOCK_TEXT[i] || "").trim()) SPEAK_UNITS.push({ bi: i, text: BLOCK_TEXT[i] });
-  });
+  /* v1.1-S3 D1：单元从「块」细到「句」。切分与高亮必须共用 blockRT 这一个坐标空间
+     （cs 是句在整块渲染文本里的起点，paintRange 直接拿它下刀），所以这里不再用
+     BLOCK_TEXT[i] 而用 blockRT(i) —— 读哪句、亮哪句，两把尺必须是一把。
+     写成函数（不是一次性 forEach）：正文一改，朗读单元必须按新文本重建，
+     否则「读的是新字、亮的是旧位」（v1.1-S5a A6）。 */
+  function buildPlainUnits() {
+    var out = [];
+    blocks.forEach(function (b, i) {
+      var t = (b.type === "p" || b.type === "h1" || b.type === "h2" || b.type === "h3" ||
+               b.type === "quote" || b.type === "abstract");
+      if (!t) return;
+      var full = blockRT(i);
+      if (!String(full).trim()) return;
+      var sns = (window.InkCast && InkCast.sentences) ? InkCast.sentences(full) : [{ text: full, cs: 0 }];
+      sns.forEach(function (sn) { out.push({ bi: i, cs: sn.cs, text: sn.text }); });
+    });
+    return out;
+  }
+  var SPEAK_UNITS = buildPlainUnits();
   var CAN_SPEAK = doc.type !== "comic" && SPEAK_UNITS.length > 0;
   var ttsBtn = qs("#tSpeak");
   if (!CAN_SPEAK) {
@@ -3341,7 +4961,8 @@
   paintVoiceSel();
   qs("#ttsVoice").addEventListener("change", function () {
     InkVoice.setCurrent(this.value);
-    if (TTS.eng) TTS.eng.setVoice(this.value);
+    castReVoice();                        /* 旁白占走了池子里那一款：撞上它的角色要重排（换新队列） */
+    if (TTS.eng) TTS.eng.setVoice(this.value);   /* 紧跟的一次重起用的是上面换好的新队列，同 tick 内不再有第三次 */
     toast("朗读音色： " + InkVoice.meta(this.value).name, "audio-lines");
   });
 
@@ -3374,6 +4995,95 @@
       }
     }
   }
+  /* v1.1-S3 D1 句级高亮：复用 C2 的 paintRange（跨 <strong>/<br> 也能整句亮）。
+     翻页 paint() 重建 innerHTML 会把 span 抹掉，所以两个时机补画：onSegment 的
+     ttsFollow 之后（含刚翻到新页那一刻），以及每次 paint() 的尾部。 */
+  function unwrapTtsSent(id) {
+    qsa('#doc span[data-note="' + (id || "tts-live-sent") + '"]').forEach(function (s) {
+      var p = s.parentNode;
+      while (s.firstChild) p.insertBefore(s.firstChild, s);
+      p.removeChild(s);
+      p.normalize();
+    });
+  }
+  function paintTtsSent(i) {
+    unwrapTtsSent();
+    var u = SPEAK_UNITS && SPEAK_UNITS[i];
+    if (!u || u.cs == null) return;
+    paintRange(u.bi, u.cs, u.cs + String(u.text).length, "tts-sent", "tts-live-sent");
+  }
+  /* ---------- v1.1-S3 D2：朗读进度书签（设备本地，不入同步，键在 app.js SKIP） ----------
+     按 docId 分桶，每册只记最后听到的句（bi + cs）。句边界节流 2s，stop/pause/
+     beforeunload 立写 —— 「回到朗读位置」的账不能差一句。 */
+  var TTSPOS_KEY = "inkread.ttspos.v1";
+  function ttsPosAll() { try { return JSON.parse(localStorage.getItem(TTSPOS_KEY) || "{}") || {}; } catch (e) { return {}; } }
+  var ttsPosTimer = 0;
+  function ttsPosWrite() {
+    ttsPosTimer = 0;
+    if (!TTS.eng || !SPEAK_UNITS || !SPEAK_UNITS.length) return;
+    var i = Math.max(0, Math.min(SPEAK_UNITS.length - 1, TTS.eng.idx() || 0));
+    var u = SPEAK_UNITS[i];
+    if (!u) return;
+    var all = ttsPosAll();
+    /* text 存的是截断后的 48 字，len 就必须按这 48 字算 —— resolveLoc 档 0 是拿
+       slice(cs, cs+len) 与 text 逐字比，两者口径不一致就永远对不上。
+       bs 用 blockRT 的哈希，与目录节点 bindNode 同一把尺（不另起校验和口径）。 */
+    var tx = String(u.text).slice(0, 48);
+    all[docId] = { bi: u.bi, cs: u.cs == null ? 0 : u.cs, len: tx.length,
+      bs: hash32(blockRT(u.bi)), text: tx, at: Date.now() };
+    try { localStorage.setItem(TTSPOS_KEY, JSON.stringify(all)); } catch (e) {}
+    paintResumeBtn();
+  }
+  function ttsPosSoon() { if (!ttsPosTimer) ttsPosTimer = setTimeout(ttsPosWrite, 2000); }
+  var resumeBtn = qs("#tResume");
+  /* 存档那句还在不在正文里 —— 交给批注那套四档解析（resolveLoc），不另起一把尺：
+     排版会重排块号、重导入会改字，旧判据只验「块号还存在」，等于每次都能跳、
+     但跳到哪儿没人管（v1.1-S5d 统装 X3：静默落到别的句子）。
+     档 1/2 是正路（块内挪了、整块前移了都还能对回）；档 3 就明说对不上，不猜。
+     老存档没有 bs/len：档 0 的校验和判据本就允许缺省，仍按逐字比走。 */
+  function ttsPosGet() {
+    var p = ttsPosAll()[docId];
+    if (!p || typeof p.cs !== "number" || !p.text) return null;
+    var r = resolveLoc({ bi: p.bi, cs: p.cs, len: p.len, text: p.text, bs: p.bs });
+    if (r.tier === 3) return { tier: 3, text: p.text };
+    return { tier: r.tier, bi: r.bi, cs: r.from, text: p.text };
+  }
+  function paintResumeBtn() {
+    var g = ttsPosGet();
+    var ok = !!(g && g.tier < 3);
+    resumeBtn.disabled = !ok;
+    resumeBtn.classList.toggle("is-off", !ok);
+    resumeBtn.title = !g ? "这本书还没有朗读记录" : (ok ? "" : "上次听到的那句在现在的正文里对不上了");
+  }
+  paintResumeBtn();
+  resumeBtn.addEventListener("click", function () {
+    var g = ttsPosGet();
+    if (!g || g.tier === 3) return;
+    var bi = g.bi, cs = g.cs;
+    var el = unitEl(bi);
+    if (!el && !state.scroll) {
+      restorePaged(BLOCK_OFF[bi] || 0);
+      state.cur = Math.max(0, Math.min(state.pages.length - 1, state.cur));
+      renderPage(0, false);
+      el = unitEl(bi);
+    }
+    if (el && state.scroll) {
+      var sheet = qs("#sheet"), r = el.getBoundingClientRect(), sr = sheet.getBoundingClientRect();
+      if (r.top < sr.top + 8 || r.bottom > sr.bottom - 8) {
+        el.scrollIntoView({ block: "start", behavior: read.reduce ? "auto" : "smooth" });
+      }
+    }
+    /* 闪现 6s 自清：能对回当前单元就闪整句，对不回（重导入改了字）就闪存档的前 48 字 */
+    var u = null;
+    for (var k = 0; SPEAK_UNITS && k < SPEAK_UNITS.length; k++) {
+      if (SPEAK_UNITS[k].bi === bi && SPEAK_UNITS[k].cs === cs) { u = SPEAK_UNITS[k]; break; }
+    }
+    unwrapTtsSent("tts-flash-sent");
+    paintRange(bi, cs, cs + String(u ? u.text : g.text).length, "tts-sent", "tts-flash-sent");
+    setTimeout(function () { unwrapTtsSent("tts-flash-sent"); }, 6000);
+    toast("上次听到这句，可从这续读", "rotate-ccw");
+  });
+  window.addEventListener("beforeunload", function () { if (TTS.eng) ttsPosWrite(); });
   function paintPlayBtn(playing) {
     qs("#icTtsPlay").innerHTML = icon(playing ? "pause" : "play", 16);
     qs("#ttsPlay").classList.toggle("active", !!playing);
@@ -3409,6 +5119,7 @@
     var b = qs("#ttsEng");
     if (b) { b.hidden = true; b.textContent = ""; b.classList.remove("warn"); }
     if (TTS.liveEl) { TTS.liveEl.classList.remove("tts-live"); TTS.liveEl = null; }
+    unwrapTtsSent();
     paintPlayBtn(false);
   }
   function bindEngineEvents() {
@@ -3420,6 +5131,8 @@
       qs("#ttsNow").textContent = String(u.text).slice(0, 48) + (u.text.length > 48 ? "…" : "");
       qs("#ttsFrac").textContent = (i + 1) + " / " + SPEAK_UNITS.length;
       ttsFollow(bi);
+      paintTtsSent(i);
+      ttsPosSoon();
     });
     e.on("onTick", function (f) {
       qs("#ttsBarFill").style.width = Math.round(f * 100) + "%";
@@ -3445,23 +5158,25 @@
       b.classList.toggle("warn", m.mode === "none" || m.mode === "sim" || !!m.note);
     });
     e.on("onState", function (s, why) {
-      if (s === "done") { ttsCleanup(); toast(why || "朗读结束", "volume-2"); }
-      else if (s === "stopped") ttsCleanup();
+      if (s === "done") { ttsPosWrite(); ttsCleanup(); toast(why || "朗读结束", "volume-2"); }
+      else if (s === "stopped") { ttsPosWrite(); ttsCleanup(); }
       /* 「这台音色念不出这段」的停机：**只把播放键拨回 ▶，条子与音色下拉原地留着** ——
          条子一关，换音色的入口就没了，用户只能拿同一款音色再错一次（实测复现过）。 */
-      else if (s === "halted") { paintPlayBtn(false); toast(why || "朗读已停止", "alert-triangle"); }
-      else if (s === "paused") paintPlayBtn(false);
+      else if (s === "halted") { paintPlayBtn(false); toast(why || "朗读已停止", "alert-triangle"); ttsPosWrite(); }
+      else if (s === "paused") { paintPlayBtn(false); ttsPosWrite(); }
       else if (s === "playing") paintPlayBtn(true);
     });
   }
-  /* fromBi：从该块号起找第一个可朗读段（点段起读 / 「旁听当前页」共用） */
-  function startTTS(fromBi) {
+  /* fromBi：从该块号起找第一个可朗读段（点段起读 / 「旁听当前页」共用）。
+     fromIdx：句号直入（▶ 重起、回到朗读位置），给了就不再按块倒退 ——
+     D3 之后停过再点必须落在**停住的那一句**，落到块头就是回退。 */
+  function startTTS(fromBi, fromIdx) {
     if (!CAN_SPEAK) return;
     if (!TTS.eng) TTS.eng = API.ttsEngine();
     bindEngineEvents();
     TTS.eng.setSpeed(TTS.speed);
     TTS.eng.setVoice(qs("#ttsVoice").value || InkVoice.current());
-    TTS.eng.start(SPEAK_UNITS, unitIdxOf(fromBi));
+    TTS.eng.start(SPEAK_UNITS, fromIdx != null ? fromIdx : unitIdxOf(fromBi));
     openTTSBar();
     paintPlayBtn(true);
     hideTtsPop();
@@ -3477,8 +5192,9 @@
   qs("#ttsPlay").addEventListener("click", function () {
     if (!TTS.eng) return;
     if (TTS.eng.playing()) { TTS.eng.toggle(); return; }
-    var u = SPEAK_UNITS[TTS.eng.idx()];
-    startTTS(u ? u.bi : blockAt(curOffset()));
+    var i = TTS.eng.idx();
+    if (SPEAK_UNITS[i]) startTTS(SPEAK_UNITS[i].bi, i);
+    else startTTS(blockAt(curOffset()));
   });
   qs("#ttsPrev").addEventListener("click", function () { if (TTS.eng) TTS.eng.seekIdx(TTS.eng.idx() - 1); });
   qs("#ttsNext").addEventListener("click", function () { if (TTS.eng) TTS.eng.seekIdx(TTS.eng.idx() + 1); });
@@ -3562,29 +5278,82 @@
     return rest.length >= 2 ? rest : all;
   }
   var SPEAK_UNITS_PLAIN = SPEAK_UNITS;      /* 原始单元（无角色）；开了多角色才换成带角色的那份 */
+  /* 角色表面板列多少句、让模型一次判多少句 —— 两个数不是一回事，写死在一个常量上会互相牵制：
+     面板要能翻到几百句（300 一屏够用、DOM 也不炸），模型那边受 maxTokens=1200 的出口限制，
+     超过约 120 句就会被截半（截半比不判更容易错），所以只送前 120 句并在面板说清。 */
+  var CAST_LINE_MAX = 300;
+  var CAST_AI_MAX = 120;
 
+  /* 池子 + 旁白那款交给 cast.js 去排（谁撞款谁重排、谁共用谁偏移音高）。 */
+  function castVoices(chars) {
+    if (!window.InkCast) return chars;
+    return InkCast.assignVoices(chars, castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }),
+      window.InkVoice ? InkVoice.current() : "");
+  }
   /* 重识别（L1）：把上一版角色表传进去，用户的音色指派与手改归属不会被冲掉 */
   function castScan() {
     var keep = (CAST && CAST.chars && Object.keys(CAST.chars).length) ? { chars: CAST.chars, lines: CAST.lines } : null;
     var next = window.InkCast ? InkCast.build(blocks, keep) : null;
     if (!next) return;
     next.on = !!CAST.on;
-    InkCast.assignVoices(next.chars, castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }));
+    castVoices(next.chars);
     CAST = next;
     castPut(CAST);
   }
-  /* 按角色表重建播放单元：旁白 null（用户选的音色），台词带角色名与角色音色 */
+  /* 按角色表重建播放单元：旁白 cast 空（用用户选的音色），台词带角色名、角色音色与音高偏移。
+     v1.1-S5a A5：cs 不再靠 indexOf 回填 —— 归属表（cast.js 按原文扫）与播放层（blockRT 渲染文本）
+     过去是两套坐标，重复句会错位、找不到就退整块起点。现在 unitsFor 走 textOf=blockRT 这一把尺，
+     span 自己带 at，句自己带 cs，相加即真起点；顺带把多角色单元也细到句（与普通朗读对齐）。 */
   function castUnits() {
     if (!CAST.on || !CAST.lines || !CAST.lines.length || !window.InkCast) return null;
-    return InkCast.unitsFor(blocks, CAST).map(function (u) {
+    var units = InkCast.unitsFor(blocks, CAST, { textOf: function (b, i) { return blockRT(i); } });
+    return units.map(function (u) {
       var c = u.cast ? CAST.chars[u.cast] : null;
-      return { bi: u.bi, text: u.text, cast: u.cast || "", voiceK: (c && c.voiceK) || "" };
+      return { bi: u.bi, cs: u.cs, text: u.text, cast: u.cast || "", voiceK: (c && c.voiceK) || "", pitch: (c && c.pitch) || 0 };
     });
   }
+  /* 换队列时接着播，不能硬用老下标：开关多角色会把旁白与台词拆成不同形状（单元数整个变），
+     老下标在新阵列里指的不是同一句话。所以拿「老单元落在哪个块的哪个起点」去新阵列里
+     找同一句（找不到就退到该块之后的第一句），再让引擎带着**新阵列**从那儿重起。
+     A6 的病根正在这两处：旧写法只 castApplyUnits() 改了外层变量 + seekIdx(老下标)，
+     而引擎的 st.units 是 start() 时抓走的旧数组引用 —— 换队列它根本看不见，
+     结果「改完角色表听上去毫无反应，句高亮倒是按新表画」（念的和亮的两套坐标）。 */
+  function swapSpeakUnits(next) {
+    var old = SPEAK_UNITS;
+    var eng = TTS.eng;
+    var i = eng && eng.playing() ? eng.idx() : -1;
+    SPEAK_UNITS = next;
+    if (i < 0 || !old || !old.length || !SPEAK_UNITS.length) return;
+    var at = old[Math.min(i, old.length - 1)];
+    var k = i;
+    for (var z = 0; z < SPEAK_UNITS.length; z++) {
+      var u = SPEAK_UNITS[z];
+      if (u.bi > at.bi || (u.bi === at.bi && (u.cs || 0) >= (at.cs || 0))) { k = z; break; }
+    }
+    eng.seekIdx(k, SPEAK_UNITS);
+  }
   function castApplyUnits() {
-    SPEAK_UNITS = castUnits() || SPEAK_UNITS_PLAIN;
     if (CAST.on && !CAST.lines.length) castScan();      /* 开了但还没识别过：先按 L1 认一遍 */
-    if (!CAST.on) SPEAK_UNITS = SPEAK_UNITS_PLAIN;
+    swapSpeakUnits((CAST.on ? castUnits() : null) || SPEAK_UNITS_PLAIN);
+  }
+  /* 旁白换了音色 → castPool 里那款被旁白占走，撞上它的角色必须重排（其余声线一律不动，
+     否则换一次旁白音听着像整本书换了配音组）。没开多角色时不用管：引擎自己重起队列。 */
+  function castReVoice() {
+    if (!CAST.on) return;
+    castVoices(CAST.chars);
+    castPut(CAST);
+    castApplyUnits();
+    if (qs("#castBody")) castRender();
+  }
+  /* 正文一改（编辑落库 / 恢复原文）：blocks 与渲染文本都变了，朗读单元和角色表必须跟着重建。
+     旧版一刀不做 → 「读的是新字、亮的是旧位」，角色表还按旧 (bi,si) 对齐（A6）。
+     castScan 会把上一版的用户手改与音色指派带过来，所以重建不吞用户的吩咐。 */
+  function castSyncDoc() {
+    if (!CAST) return;                    /* 首绘时 rebuildIndexes 早在本段之前跑，var CAST 还没赋上 */
+    SPEAK_UNITS_PLAIN = buildPlainUnits();
+    if (CAST.on && (CAST.lines || []).length) castScan();
+    castApplyUnits();
+    if (qs("#castBody")) castRender();
   }
   /* 面板：角色行（性别 + 音色）与对白行（改归属） */
   function castRender() {
@@ -3620,8 +5389,8 @@
     h.push("</section>");
     var lines = (CAST.lines || []);
     if (lines.length) {
-      h.push('<section class="ap-sec"><h4>对白归属<span class="ap-sec-note">手改一次即写回本书角色表</span></h4>');
-      lines.slice(0, 300).forEach(function (l, i) {
+      h.push('<section class="ap-sec"><h4>对白归属<span class="ap-sec-note">手改一次即写回本书角色表 · 只列前 ' + CAST_LINE_MAX + ' 句</span></h4>');
+      lines.slice(0, CAST_LINE_MAX).forEach(function (l, i) {
         h.push('<div class="ap-row"><span class="ap-k" style="max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(l.text) + '">“' + esc(String(l.text).slice(0, 16)) + "”</span>" +
           '<span class="ap-c"><select class="ap-sel" data-cast-line="' + i + '" aria-label="第 ' + (i + 1) + ' 句对白是谁说的">' +
           '<option value="">旁白</option>' +
@@ -3642,7 +5411,6 @@
       castPut(CAST); castApplyUnits(); castRender();
       var box = qs("#ttsCast"); if (box) box.checked = CAST.on;
       toast(CAST.on ? "多角色朗读：已开启（旁白仍用你选的音色）" : "多角色朗读：已关闭", "users");
-      if (TTS.eng && TTS.eng.playing()) TTS.eng.seekIdx(TTS.eng.idx());
     });
     var sc = qs("#castScan");
     if (sc) sc.addEventListener("click", function () { castScan(); castApplyUnits(); castRender(); toast("已按对白重新识别角色", "users"); });
@@ -3654,7 +5422,7 @@
       sel.addEventListener("change", function () {
         var c = CAST.chars[sel.dataset.castGender]; if (!c) return;
         c.gender = sel.value; c.locked = !!sel.value;
-        InkCast.assignVoices(CAST.chars, castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }));
+        castVoices(CAST.chars);
         castPut(CAST); castApplyUnits(); castRender();
       });
     });
@@ -3662,6 +5430,7 @@
       sel.addEventListener("change", function () {
         var c = CAST.chars[sel.dataset.castVoice]; if (!c) return;
         if (sel.value) { c.voiceK = sel.value; c.locked = true; } else { delete c.voiceK; c.locked = false; }
+        castVoices(CAST.chars);      /* 手改后重算音高偏移：指到别人那一款就得让两者听得出区别 */
         castPut(CAST); castApplyUnits(); castRender();
       });
     });
@@ -3680,21 +5449,22 @@
     var names = Object.keys(CAST.chars || {});
     if (names.length < 2) { toast("先认出两个以上角色再让模型判", "info"); return; }
     toast("正在让模型判对白归属…", "brain");
-    var lines = CAST.lines.slice(0, 120);
+    var lines = CAST.lines.slice(0, CAST_AI_MAX);
     var list = lines.map(function (l, i) { return (i + 1) + ". " + String(l.text).slice(0, 80); }).join("\n");
-    var sys = "你是中文小说的对白归属标注器。只输出 JSON 数组，不要解释、不要代码块。";
+    var sysTxt = API.promptSys("cast.assign");
+    var prm = API.promptParams("cast.assign");
     var usr = "已知角色：" + names.join("、") + "\n下面是按顺序出现的对白。给每一句判一个说话人；判不出就用 null。\n" +
       "输出格式：[{\"i\":1,\"speaker\":\"角色名\"},…]（i 从 1 开始，对应下面的序号）\n\n" + list;
     try {
       /* API.llm 的签名是 (sys, user) —— 别按变量名顺序顺手写反（v2.25.0 首版就反过一次） */
-      var txt = String(await API.llm(sys, usr, { temp: 0.1, maxTokens: 1200, timeout: 45000 }) || "");
+      var txt = String(await API.llm(sysTxt, usr, Object.assign({ cfg: prm.cfg }, prm.send)) || "");
       var m = txt.match(/\[[\s\S]*\]/);
       var arr = m ? JSON.parse(m[0]) : null;
       if (!Array.isArray(arr)) { toast("模型没给出可用的 JSON，保留规则识别结果", "alert-triangle"); return; }
       var pairs = arr.map(function (x) { return { i: Number(x && x.i) - 1, speaker: x && x.speaker }; }).filter(function (x) { return x.i >= 0; });
       InkCast.applyModel(CAST, pairs);
       castPut(CAST); castApplyUnits(); castRender();
-      toast("模型归属已并入（" + pairs.length + " 句）", "circle-check");
+      toast("模型归属已并入（" + pairs.length + " 句" + (CAST.lines.length > CAST_AI_MAX ? "，只判前 " + CAST_AI_MAX + " 句" : "") + "）", "circle-check");
     } catch (e) {
       toast("模型判归属失败，保留规则结果：" + String((e && e.message) || e).slice(0, 40), "alert-triangle");
     }
@@ -3708,7 +5478,6 @@
         if (CAST.on && !(CAST.lines || []).length) castScan();
         castPut(CAST); castApplyUnits();
         toast(CAST.on ? "多角色朗读：已开启" : "多角色朗读：已关闭", "users");
-        if (TTS.eng && TTS.eng.playing()) TTS.eng.seekIdx(TTS.eng.idx());
       });
     }
     var open = qs("#ttsCastOpen");
@@ -3810,6 +5579,7 @@
     if (tvo) tvo.addEventListener("input", function () { applyVol(this.value); });
     qs("#rsVoice").addEventListener("change", function () {
       InkVoice.setCurrent(this.value);
+      castReVoice();                      /* 与 #ttsVoice 同一刀：旁白换嗓后撞款的角色要重排 */
       if (TTS.eng) TTS.eng.setVoice(this.value);
       paintVoiceSel();
       toast("朗读音色： " + InkVoice.meta(this.value).name, "audio-lines");
@@ -3829,7 +5599,6 @@
       var box = qs("#ttsCast"); if (box) box.checked = on;
       this.classList.toggle("on", on); this.setAttribute("aria-pressed", String(on));
       toast(on ? "多角色朗读：已开启" : "多角色朗读：已关闭", "users");
-      if (TTS.eng && TTS.eng.playing()) TTS.eng.seekIdx(TTS.eng.idx());
     });
     /* 排版：转发 Aa 面板（先收起自己，等滑动动画起步再叫版式） */
     qs("#rsAa").addEventListener("click", function () {
@@ -3904,7 +5673,7 @@
   }
   qs("#doc").addEventListener("click", function (e) {
     if (!CAN_SPEAK || EDIT.on) return;
-    if (e.target.closest(".hl, .nref, .note-ref, .task-flag, .task-src, .tool-btn, .sel-bar")) return;
+    if (e.target.closest(".hl, .nref, .note-ref, .task-flag, .task-src, .tool-btn, .sel-bar, .toc-link")) return;
     var sel = window.getSelection();
     if (sel && String(sel).trim()) return;
     var el = e.target.closest("[data-bi]");
@@ -4180,6 +5949,23 @@
   qs("#icNotesClose").innerHTML = icon("x", 14);
   function closeNotesPanel() { qs("#reader").dataset.notes = "closed"; }
   qs("#notesClose").addEventListener("click", function () { closeNotesPanel(); immWake(); });
+  /* 导出走 app.js 的 InkExport（书架、笔记页、这里三条入口共用一份格式实现），本页只把
+     「本文批注」摆成行。章节与位置一律现算而不是抄 n.page：那个页号是当年翻页时定格的，
+     换个疏密就过期。落到位的按块号取真章节真页码；只认到节的写节名、位置留空；
+     定位待确认的既不编页码也不装作知道是哪句 —— 导出件里一行假位置比空一行难查得多。 */
+  qs("#icNotesExport").innerHTML = icon("download", 14);
+  qs("#notesExport").addEventListener("click", function () {
+    var rows = state.notes.map(function (n) {
+      var L = locate(n), chapter, loc;
+      if (L.tier < 3 && L.bi != null) { chapter = chapterOf(L.bi); loc = locLabel(L.bi); }
+      else { chapter = anchorChapter(n); loc = isUnsure(n, L) ? "定位待确认" : ""; }
+      /* 篇首那节的标题往往就是书名本身（单卷文档十有八九）：重复一列没信息，
+         还把「书名 · 章节 · 页位」这行拉得看不出层次。 */
+      if (chapter === doc.title) chapter = "";
+      return InkExport.row(n, { doc: doc.title, chapter: chapter, loc: loc, title: n.title || "" });
+    });
+    InkExport.open({ rows: rows, mdTitle: "墨读批注导出", base: "inkread-book", scope: "《" + doc.title + "》" });
+  });
   document.addEventListener("keydown", function (e) {
     if (window.InkKeys && InkKeys.isOpen()) return;   /* 命令面板 / 总览置顶：Esc 先归它们 */
     if (e.key !== "Escape" || e.__inkEscHandled) return;   /* 层栈已收过最上面一层：本链让路 */
@@ -4336,7 +6122,7 @@
   }
   qs("#book").addEventListener("click", function (e) {
     if (Date.now() - (imm.lastDrag || 0) < 320) return;
-    if (e.target.closest(".hl, .nref, .note-ref, .task-flag, .task-src, .sel-bar, .tool-btn, a, button")) return;
+    if (e.target.closest(".hl, .nref, .note-ref, .task-flag, .task-src, .sel-bar, .tool-btn, .toc-link, a, button")) return;
     var sel = window.getSelection();
     if (sel && String(sel).trim()) return;
     if (!state.scroll && !EDIT.on) {
@@ -4473,15 +6259,31 @@
   }
 
   /* 正文文字变了 → 同步 blocks / BLOCK_HTML / BLOCK_TEXT / BLOCK_OFF，
-     否则目录名、检索摘要、进度百分比仍按旧文字算，越读越对不上。 */
+     否则目录名、检索摘要、进度百分比一旦改动就与实况对不上，越改越偏。
+     BLOCK_HTML 必须经 biAttr 重注 data-bi：批注定位、点段起读、朗读跟读、改字回写
+     全靠它把 DOM 元素锚回块号，漏了就是「编辑过一次正文后，这四件事集体失效」。 */
   function rebuildIndexes() {
     BLOCK_HTML.length = 0;
-    blocks.forEach(function (b) { BLOCK_HTML.push(renderBlock(b)); });
+    blocks.forEach(function (b, i) { BLOCK_HTML.push(biAttr(renderBlock(b), i)); });
     BLOCK_TEXT.length = 0;
     blocks.forEach(function (b) { BLOCK_TEXT.push(blockText(b)); });
     var acc = 0;
     BLOCK_OFF.length = 0;
     BLOCK_TEXT.forEach(function (s) { BLOCK_OFF.push(acc); acc += Math.max(1, s.length); });
+    locReset();   /* 块文本变了：缓存的渲染文本与每条批注的裁决全部作废重算 */
+    tocInvalidate();  /* 目录的两张反查表（id→块号、标题键）同样按文本吃饭，一起作废 */
+    /* v1.1-S5d 统装：这两张表也按块号吃饭，必须跟着重算，位置在 BLOCK_TEXT 之后 ——
+       searchIndex 逐块读 BLOCK_TEXT[i]，早一步就拿着旧文本建新索引，等于没重算。
+       漏掉它们的症状是静默跳错：检索卡摘要还是排版前那句，点跳转落到了别的块。 */
+    SEARCH_INDEX = searchIndex();
+    DOC_CHARS = docChars();
+    castSyncDoc(); /* A6：朗读队列与角色表也按新正文重建（否则读的是新字、亮的是旧位） */
+    /* v1.1-S5d 统装 D5：面板那一侧的两个消费端一起当场收敛。两者都现走
+       locate() / resolveLoc()，所以必须排在表重建与 locReset() 之后 —— 早一步是用旧账裁决。
+       漏掉的症状（闸 C7 实测抓到的）：正文高亮跟着新块号走了，卡片位置还念着启动期那句
+       「通栏 24%」，对不上的那条既不标「定位待确认」也不换禁用态，读者看不出错在哪。 */
+    renderNotes();
+    paintResumeBtn();
   }
 
   /* 失焦即存：只存「与原文不同」的块；改回原文 = 删掉这条覆盖 */
@@ -5243,22 +7045,20 @@
       var o1 = await Brain.offline(q, { docId: docId });
       return { reply: o1.reply, mode: "offline", miss: o1.miss };
     }
-    var sys = "你是墨读里的阅读助手，正陪着读者读这一本书。回答贴着下面给出的原文，别泛泛而谈；"
-      + "原文里没有的就直说没有，不要编。" + (arRefs.length ? "引到某段时在该句末尾标它的编号，例如「[2]」；只给结论也要标出处。" : "")
-      /* 排版约束：这扇窗只有 396px 宽、正文 13px。模型默认按「一页文档」的写法答，
-         三级标题套大表格在窄栏里必然挤成一团 —— 让它按一栏的尺子写，比事后用 CSS 硬压有效。 */
-      + "回答是贴在书页旁的一小段话，不是整篇文章：控制在几句之内，"
-      + "要列举就用一层短列表，一条一句；不要多级标题、不要表格、不要代码块（读者点名要除外）；"
-      + "术语解释用「术语：解释」这样的行，别另起标题。"
-      + "\n\n" + arMaterial(pack, sel);
-    try { if (window.Brain && Brain.preamble) sys += "\n\n" + Brain.preamble("chat"); } catch (e) {}
+    var pre = "";
+    try { if (window.Brain && Brain.preamble) pre = Brain.preamble("chat") || ""; } catch (e) {}
+    var sysTxt = API.promptSys("assistant", {
+      cite: arRefs.length ? "引到某段时在该句末尾标它的编号，例如「[2]」；只给结论也要标出处。" : "",
+      material: arMaterial(pack, sel), preamble: pre
+    });
+    var prm = API.promptParams("assistant");
     arCtl = window.AbortController ? new AbortController() : null;
     var out = "";
     try {
-      await API.llmMsgs([{ role: "system", content: sys }, { role: "user", content: q }], {
-        temp: 0.6, timeout: 60000, signal: arCtl && arCtl.signal,
+      await API.llmMsgs([{ role: "system", content: sysTxt }, { role: "user", content: q }], Object.assign({
+        cfg: prm.cfg, signal: arCtl && arCtl.signal,
         onDelta: function (p, all) { out = all != null ? all : out + p; onPiece(out); }
-      });
+      }, prm.send));
       return { reply: out, mode: "online" };
     } catch (e) {
       /* 停止 ≠ 失败：半截话照原样交回去，不去兜离线库（同 brain.js ask 的判据） */
@@ -5317,13 +7117,9 @@
       q: "列出这一章出现的人物及其关系，每人一行：人物 — 身份或与谁的关系 — 依据（标引用编号）。原文里没出现的人物不要编。" },
     { t: "术语表", hint: "术语与专名逐条解释，附出处",
       q: "汇总这一章的术语与专名，每条一行：术语 — 一句话解释 — 出处编号。" },
-    { t: "出 5 张闪卡", tool: "cards.create", key: "quotes", hint: "模型从原文逐字挑 5 句 → 逐条回原文查证 → 确认卡上点头才落",
-      sys: "从下面给出的原文里挑 5 句最值得记住的话。要求：逐字照抄原文，不改写、不拼接、不加引号、不缩略，"
-        + "长短以 8-60 字为宜；只能从给的原文里挑，原文不够 5 句就少给几条。只回 JSON，不要解释。",
+    { t: "出 5 张闪卡", tool: "cards.create", key: "quotes", feat: "assistant.cards", hint: "模型从原文逐字挑 5 句 → 逐条回原文查证 → 确认卡上点头才落",
       usr: "挑 5 句原文。格式：{\"quotes\":[\"原文句子1\",\"原文句子2\"]}" },
-    { t: "生成本章任务", tool: "tasks.create", key: "titles", hint: "模型按本章拟 4-6 条可执行任务 → 确认卡上点头才落",
-      sys: "针对读者正在读的这一章，拟 4-6 条可执行的学习任务。要求：每条不超过 20 字、动词开头"
-        + "（如「复述…」「整理…」「对照…」），彼此不重复，不要写「阅读本章」这类空话。只回 JSON，不要解释。",
+    { t: "生成本章任务", tool: "tasks.create", key: "titles", feat: "assistant.tasks", hint: "模型按本章拟 4-6 条可执行任务 → 确认卡上点头才落",
       usr: "生成本章任务。格式：{\"titles\":[\"任务1\",\"任务2\"]}" }
   ];
   if (arPreset) {
@@ -5359,7 +7155,7 @@
     try { if (window.Brain && Brain.buildContextPack) pack = Brain.buildContextPack({ docId: docId, bi: arBi(), query: p.t, budget: 5200 }); } catch (e) {}
     var got = null, bad = "";
     try {
-      got = await API.aiJson(p.sys + "\n\n" + arMaterial(pack, sel), p.usr, { timeout: 40000 });
+      got = await API.run(p.feat, p.usr, { vars: { material: arMaterial(pack, sel) } });
     } catch (e) {
       if (e && e.name === "UnstructuredError") bad = "模型没有按格式回话，所以这一条没有落地（不硬拆它的话，拆出来的多半是假的）。";
       else bad = "请求失败：" + API.netErrPhrase(e);
@@ -5531,6 +7327,7 @@
       refresh: function () {
         return API.fetchNotes(docId).then(function (r) {
           state.notes = ((r && r.data) || []).slice();
+          locReset();          /* 批注表整份换新：旧 id 的裁决与块文本缓存都不该再复用 */
           renderNotes(); renderBookmarks(); renderPage(0, false);
         });
       }

@@ -1338,35 +1338,25 @@
   var history = [];      /* [{role, content}] 最近 8 条，页面内保留 */
   var MAX_TURNS = 8;
 
+  /* 人设文本搬到 M2 提示词注册表（featureKey brain.chat）—— 这里只交「怎么称呼这位读者」。 */
   function persona() {
     var name = window.InkProfile ? InkProfile.name() : "读者";
-    return [
-      "你是「墨读」的主脑 —— 这套水墨屏阅读器的中枢智能。" +
-        (window.InkProfile && !InkProfile.isDefault() ? "读者希望被称为「" + name + "」。" : ""),
-      "",
-      "【你的职责】",
-      "你不只是对话框里的助手。本程序里所有用到 AI 的地方 —— 翻译、溯源（出处考证）、解析、检索、内容模式识别 —— 都由你完成。这里是你的对话入口，主要用于讨论读者已导入文档的内容、做总结与提炼，但你具备你所接入模型应有的全部能力：写作、编程、数学、翻译、常识、推理、创意，任何通用问题都直接、完整、认真地回答。不要因为「这是阅读器」就拒绝或敷衍与文档无关的问题。",
-      "",
-      "【作答要求】",
-      "1. 先直接给答案，再补理由；不要用「作为 AI」之类的空话开场。",
-      "2. 结合下面的读者记忆与文档上下文作答；引用原文时标明《书名》· 章节 · 页码。",
-      "3. 拿不准就说不确定，绝不编造出处、数据或引文。",
-      "4. 用中文回答（读者用其他语言提问时跟随其语言）。",
-      "5. 篇幅按问题需要，不为了显得详细而灌水。"
-    ].join("\n");
+    return API.promptSys("brain.chat", {
+      honor: window.InkProfile && !InkProfile.isDefault() ? "读者希望被称为「" + name + "」。" : ""
+    });
   }
 
   function buildMessages(q, mems, passages, docId) {
-    var sys = [persona()];
+    var parts = [persona()];
     var pre = preamble("chat");
-    if (pre) sys.push("", pre);
+    if (pre) parts.push("", pre);
     if (passages.length) {
-      sys.push("", "【相关原文 · 已从书里检索出来，可直接引用】");
-      sys.push(passages.map(function (p) {
+      parts.push("", "【相关原文 · 已从书里检索出来，可直接引用】");
+      parts.push(passages.map(function (p) {
         return "· 《" + (p.docTitle || docTitle(docId) || "本书") + "》" + (p.chapter || "") + " · 第 " + (p.page || "?") + " 页：" + String(p.text || "").slice(0, 200);
       }).join("\n"));
     }
-    var msgs = [{ role: "system", content: sys.join("\n") }];
+    var msgs = [{ role: "system", content: parts.join("\n") }];
     history.slice(-MAX_TURNS).forEach(function (h) { msgs.push(h); });
     msgs.push({ role: "user", content: q });
     return msgs;
@@ -1386,15 +1376,16 @@
       /* 在线才需要先捞正文候选喂给模型；离线时 offline() 自己会捞，不必捞两遍 */
       var passages = await retrieve(q, docId, 6);
       var msgs = buildMessages(q, mems, passages, docId);
+      var pr = API.promptParams("brain.chat");
       var out = "";
       try {
-        await API.llmMsgs(msgs, {
-          temp: 0.6, timeout: 60000, signal: o.signal || null,
+        await API.llmMsgs(msgs, Object.assign({
+          cfg: pr.cfg, signal: o.signal || null,
           onDelta: function (piece, all) {
             out = all != null ? all : out + piece;
             if (o.onDelta) o.onDelta(piece, out);
           }
-        });
+        }, pr.send));
         history.push({ role: "user", content: q });
         history.push({ role: "assistant", content: out });
         if (history.length > MAX_TURNS * 2) history = history.slice(-MAX_TURNS * 2);
@@ -1471,21 +1462,19 @@
     /* {total} 只填「X 小时 Y 字」，前缀「累计已读」由模板自己写 —— 免得拼出重复的句子 */
     var totalText = spanText(tot.sec) + " " + wordText(tot.words);
 
-    if (window.API && API.llm && API.hasModel && API.hasModel()) {
+    if (window.API && API.run && API.hasModel && API.hasModel()) {
       try {
         var mems = enabledMems().slice(0, 5);
-        var parts = [persona(), ""];
-        if (mems.length) parts.push("【关于这位读者 · 主脑从行为中学到的】", mems.map(memLine).join("\n"), "");
-        parts.push(
-          "【这次的任务 · 里程碑鼓励】",
-          "这位读者" + (anni ? "连续打卡满 " + days + " 天 —— 第 " + round + " 个周年" : "连续打卡满 " + days + " 天") + "，" + totalText + "。",
-          "请写 2-3 句真诚、有分寸、不油腻的鼓励：承认坚持本身的分量，但不夸张吹捧、不喊口号；",
-          "可以用一个和阅读、坚持有关的小意象；感叹号不超过两个；不用 emoji，不用 markdown 标题与列表。",
-          "只输出鼓励文本本身 —— 不要前后缀，不要解释你在做什么。"
-        );
         var usr = "读者数据：连续打卡 " + days + " 天" + (anni ? "（第 " + round + " 个周年）" : "") +
           "；累计已读 " + totalText + "。请写这 2-3 句鼓励。";
-        var txt = String(await API.llm(parts.join("\n"), usr, { temp: 0.85, maxTokens: 260, timeout: 20000 }) || "").trim();
+        var rr = await API.run("brain.cheer", usr, {
+          vars: {
+            persona: persona(),
+            memory: mems.length ? "\n【关于这位读者 · 主脑从行为中学到的】\n" + mems.map(memLine).join("\n") + "\n\n" : "\n",
+            stat: "这位读者" + (anni ? "连续打卡满 " + days + " 天 —— 第 " + round + " 个周年" : "连续打卡满 " + days + " 天") + "，" + totalText + "。"
+          }
+        });
+        var txt = String(rr.text || "").trim();
         if (txt) return txt;
       } catch (e) { /* 网络 / 超时 / 未配置：静默落模板池 —— 里程碑不该因为网络而空着 */ }
     }

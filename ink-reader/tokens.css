@@ -1,0 +1,83 @@
+/* ink-reader/tokens.css —— S6-G1 尺寸刻度（v1.1，2026-10-19）
+   口径：只做「等值替换 + ≤1px 邻近归并」，不是新设计的间距系统。
+   取值由 .work/g1-plan.json 定（生成器 g1-plan2.js，执行器 g1-cut.js）；
+   每条令牌的值恒等于名字里的数字，这条不变量由 verify-v12-token.js 的 T2 钉死。
+   留裸清单（不进刻度的 17 个间距/字号值，另有圆角 2 个）写在台账：定案 §十四。
+   注意：print.html 不加载 styles.css，但要加载本文件。 */
+:root {
+/* 间距 margin / padding / gap（31 条）*/
+  --space-1: 1px;
+  --space-2: 2px;
+  --space-3: 3px;
+  --space-4: 4px;
+  --space-5: 5px;
+  --space-6: 6px;
+  --space-7: 7px;
+  --space-8: 8px;
+  --space-9: 9px;
+  --space-10: 10px;
+  --space-11: 11px;
+  --space-12: 12px;
+  --space-13: 13px;
+  --space-14: 14px;
+  --space-15: 15px;
+  --space-16: 16px;
+  --space-17: 17px;
+  --space-18: 18px;
+  --space-19: 19px;
+  --space-20: 20px;
+  --space-22: 22px;
+  --space-24: 24px;
+  --space-26: 26px;
+  --space-28: 28px;
+  --space-30: 30px;
+  --space-32: 32px;
+  --space-34: 34px;
+  --space-40: 40px;
+  --space-54: 54px;
+  --space-62: 62px;
+  --space-120: 120px;
+  /* —— */
+/* 字号 font-size（29 条）*/
+  --fs-6_5: 6.5px;
+  --fs-8: 8px;
+  --fs-9: 9px;
+  --fs-10: 10px;
+  --fs-10_5: 10.5px;
+  --fs-10_8: 10.8px;
+  --fs-11: 11px;
+  --fs-11_4: 11.4px;
+  --fs-11_5: 11.5px;
+  --fs-11_6: 11.6px;
+  --fs-11_8: 11.8px;
+  --fs-12: 12px;
+  --fs-12_2: 12.2px;
+  --fs-12_3: 12.3px;
+  --fs-12_4: 12.4px;
+  --fs-12_5: 12.5px;
+  --fs-12_6: 12.6px;
+  --fs-13: 13px;
+  --fs-13_5: 13.5px;
+  --fs-14: 14px;
+  --fs-14_5: 14.5px;
+  --fs-15: 15px;
+  --fs-15_5: 15.5px;
+  --fs-16: 16px;
+  --fs-17: 17px;
+  --fs-19: 19px;
+  --fs-20: 20px;
+  --fs-25: 25px;
+  --fs-26: 26px;
+  /* —— */
+/* 圆角 border-radius（10 条）*/
+  --radius-1: 1px;
+  --radius-2: 2px;
+  --radius-3: 3px;
+  --radius-4: 4px;
+  --radius-5: 5px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-9: 9px;
+  --radius-14: 14px;
+  --radius-999: 999px;
+}

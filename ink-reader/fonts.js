@@ -232,9 +232,20 @@
     stackOf: stackOf, pairFor: pairFor, pairNames: pairNames
   };
 
+  /* 主题在 G5 立为 inkread.theme.v1（JSON 编码）。旧裸名键历史上由 theme.js 用 setItem(裸串)
+     写过，也可能被别的版本写成 JSON 串，两种都要认；读到就搬进新键、删旧键。
+     本文件比 api.js 早，拿不到 INK_SCHEMA，所以这里的键名是与表里 fromKey 的第二处副本。 */
+  function bootTheme() {
+    var v = lsGet("inkread.theme.v1", null);
+    if (typeof v === "string" && v) return v;
+    try { v = localStorage.getItem("inkread.theme"); } catch (e) { return "paper"; }
+    if (v == null) return "paper";
+    if (v.charAt(0) === '"') { try { v = JSON.parse(v); } catch (e) {} }
+    if (typeof v !== "string" || !v) return "paper";
+    try { localStorage.setItem("inkread.theme.v1", JSON.stringify(v)); localStorage.removeItem("inkread.theme"); } catch (e) {}
+    return v;
+  }
+
   /* 首屏：把当前主题的两款字体挂上（theme.js 稍后会再按设置校正） */
-  try {
-    var bootTheme = lsGet("inkread.theme", null) || "paper";
-    ensurePair(typeof bootTheme === "string" ? bootTheme : "paper");
-  } catch (e) {}
+  try { ensurePair(bootTheme()); } catch (e) {}
 })();

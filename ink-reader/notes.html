@@ -19,6 +19,7 @@
 })();
 </script>
 <link rel="stylesheet" href="fonts/local.css">
+<link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="styles.css">
 <style id="notes-extra">
 /* ============================================================
@@ -33,7 +34,7 @@
 #mdSplit .md-grip { position: relative; cursor: col-resize; touch-action: none; background: transparent; min-width: 0; }
 #mdSplit .md-grip::before {   /* 视觉线 */
   content: ""; position: absolute; left: 50%; top: 14px; bottom: 14px; width: 2px;
-  transform: translateX(-50%); border-radius: 2px; background: var(--line-2);
+  transform: translateX(-50%); border-radius: var(--radius-2); background: var(--line-2);
   transition: background .15s, top .15s, bottom .15s;
 }
 #mdSplit .md-grip::after {    /* 命中区扩到约 12px（≥10px） */
@@ -61,21 +62,20 @@ body.nw #mdSplit.preview-only .md-preview { display: block; max-width: none; mar
 body.nw #mdSplit.preview-only .md-grip { display: block; }  /* 沉浸双栏时 grip 恢复可拖（压过上面普通态仅预览的隐藏） */
 
 /* ---------- 沉浸浮条：栏宽滑杆（沿用全站设置抽屉的滑杆画法） ---------- */
-.nw-measure { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); }
-.nw-measure .ic { flex: none; }
+.nw-measure { display: inline-flex; align-items: center; gap: var(--space-6); color: var(--ink-3); }
 #nwWidth {
   -webkit-appearance: none; appearance: none; width: 96px; height: 22px;
-  background: transparent; cursor: pointer; margin: 0; outline: none;
+  background: transparent; cursor: pointer; margin: 0;
 }
-#nwWidth::-webkit-slider-runnable-track { height: 2px; background: var(--rule); border-radius: 2px; }
+#nwWidth::-webkit-slider-runnable-track { height: 2px; background: var(--rule); border-radius: var(--radius-2); }
 #nwWidth::-webkit-slider-thumb {
   -webkit-appearance: none; width: 13px; height: 13px; margin-top: -5.5px; border: none;
   border-radius: 50%; background: var(--ink-2);
 }
-#nwWidth::-moz-range-track { height: 2px; background: var(--rule); border-radius: 2px; }
+#nwWidth::-moz-range-track { height: 2px; background: var(--rule); border-radius: var(--radius-2); }
 #nwWidth::-moz-range-thumb { width: 13px; height: 13px; border: none; border-radius: 50%; background: var(--ink-2); }
 #nwWidth:focus-visible::-webkit-slider-thumb { background: var(--accent); }
-.nw-wval { font-size: 11px; min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.nw-wval { font-size: var(--fs-11); min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
 
 /* ---------- 窄屏：单栏、隐藏 grip；浮条里滑杆让位，避免挤爆 ---------- */
 @media (max-width: 860px) {
@@ -99,9 +99,9 @@ body.nw #mdSplit.preview-only .md-grip { display: block; }  /* 沉浸双栏时 g
 
 /* ---------- 幕布大纲：折叠行的「+N」子级数徽标（灰字，点击展开） ---------- */
 .ol-foldn {
-  flex: none; margin: 3px 2px 0 0; padding: 2px 7px;
-  border: 1px dashed var(--rule); border-radius: 999px; background: none;
-  cursor: pointer; color: var(--ink-3); font-size: 10.5px; letter-spacing: .04em;
+  flex: none; margin: var(--space-3) var(--space-2) 0 0; padding: var(--space-2) var(--space-7);
+  border: 1px dashed var(--rule); border-radius: var(--radius-999); background: none;
+  cursor: pointer; color: var(--ink-3); font-size: var(--fs-10_5); letter-spacing: .04em;
   font-variant-numeric: tabular-nums; line-height: 1.4; transition: .18s;
 }
 .ol-foldn:hover { border-style: solid; border-color: var(--accent-ink); color: var(--accent-ink); }
@@ -111,7 +111,7 @@ body.nw #mdSplit.preview-only .md-grip { display: block; }  /* 沉浸双栏时 g
 #olList.dragging .ol-row.dragging { opacity: .45; }
 .ol-row.drop-line::before {
   content: ""; position: absolute; left: 2px; right: 2px; top: -3px; height: 3px;
-  border-radius: 3px; background: var(--accent); pointer-events: none; z-index: 2;
+  border-radius: var(--radius-3); background: var(--accent); pointer-events: none; z-index: 2;
 }
 .ol-row.drop-line.drop-end::before { top: auto; bottom: -3px; }
 
@@ -139,7 +139,7 @@ html[data-reduce="on"] body.md-focus #olList > * { transition: none; }
 /* 光标段落高亮带：绝对定位在编辑纸之上；左缘一道朱砂细线（只标"你在这一段"，不做重装饰） */
 .md-split { position: relative; }
 #mdFocusBand {
-  position: absolute; z-index: 3; pointer-events: none; opacity: 0; border-radius: 3px;
+  position: absolute; z-index: 3; pointer-events: none; opacity: 0; border-radius: var(--radius-3);
   background: color-mix(in oklab, var(--accent) 8%, transparent);
   border-left: 2px solid color-mix(in oklab, var(--accent) 52%, transparent);
   transition: top .12s ease, height .12s ease, opacity .16s ease;
@@ -177,9 +177,9 @@ html.embed .screen, body.embed .screen {
   margin: 0; border-radius: 0; box-shadow: none;
 }
 /* 顶部让出 26px 嵌入条；.app-content 的 overflow-y:auto 保持不动（内容区自己滚） */
-html.embed .app-content, body.embed .app-content { padding: 26px 0 0; }
+html.embed .app-content, body.embed .app-content { padding: var(--space-26) 0 0; }
 /* 页内边距收紧铺满；沉浸态自带 0 边距规则，故用 :not(.nw) 让位 */
-body.embed:not(.nw) .page { max-width: none; margin: 0; padding: 12px 14px 20px; }
+body.embed:not(.nw) .page { max-width: none; margin: 0; padding: var(--space-12) var(--space-14) var(--space-20); }
 /* v2.11 Bug1：嵌窗高度全由 iframe 视口定 —— 上界换成嵌窗口径，且写在 .work-layout 上，
    让左右两卡共用同一个预算（v2.18：只改右卡会让左列表按全页口径越界）。 */
 html.embed .work-layout, body.embed .work-layout { --work-h-max: calc(100dvh - 26px - 32px); }
@@ -188,7 +188,7 @@ html.embed .work-card, body.embed .work-card { min-height: 0; }
 /* ---------- 3. 工作台：左栏收窄 240px（压过 1180px 断点的单栏回退） ---------- */
 html.embed .work-layout, body.embed .work-layout { grid-template-columns: 240px 1fr; }
 /* 页头藏了，给三视图页签条（.view-bar）补一条顶部安全间距 */
-body.embed:not(.nw) .view-bar { padding-top: 6px; }
+body.embed:not(.nw) .view-bar { padding-top: var(--space-6); }
 /* 沉浸态在嵌窗里照旧单栏铺满：nw 规则在前，这里用更高优先级压回 */
 body.embed.nw .work-layout { grid-template-columns: 1fr; gap: 0; height: 100%; }
 
@@ -204,9 +204,9 @@ body.embed.nw .work-layout { grid-template-columns: 1fr; gap: 0; height: 100%; }
    .app-content 的 26px 让位在沉浸态同样成立，不会裁切内容 */
 .embed-bar {
   position: fixed; left: 0; right: 0; top: 0; z-index: 200; height: 26px;
-  display: flex; align-items: center; gap: 10px; padding: 0 6px 0 12px;
+  display: flex; align-items: center; gap: var(--space-10); padding: 0 var(--space-6) 0 var(--space-12);
   background: var(--paper); border-bottom: 1px solid var(--line);
-  font-size: 11.5px; letter-spacing: .06em; color: var(--ink-3);
+  font-size: var(--fs-11_5); letter-spacing: .06em; color: var(--ink-3);
 }
 .embed-bar .eb-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .embed-bar .eb-title b { font-weight: 600; letter-spacing: .04em; color: var(--ink-2); }
@@ -229,7 +229,7 @@ body.embed.nw .work-layout { grid-template-columns: 1fr; gap: 0; height: 100%; }
 /* 1. 嵌入条整条撤：书名浮窗外已经写着，它的 ✕ 与浮窗自己的 ✕ 是同一件事 */
 body.embed .embed-bar { display: none !important; }
 html.embed .app-content, body.embed .app-content { padding: 0; }
-body.embed:not(.nw) .page { padding: 8px 10px 10px; }
+body.embed:not(.nw) .page { padding: var(--space-8) var(--space-10) var(--space-10); }
 html.embed .work-layout, body.embed .work-layout { --work-h-max: calc(100dvh - 18px); }
 html.embed .work-card, body.embed .work-card { min-height: 0; }
 
@@ -243,14 +243,14 @@ body.embed .work-layout { flex: 1 1 auto; min-height: 0; align-items: stretch; }
 body.embed .work-card { height: 100%; }
 
 /* 2. 标题行压到一行：沉浸钮在浮窗里与浮窗自身的「最大化」重复，撤下 */
-body.embed .wb-head { padding: 7px 10px; gap: 8px; flex-wrap: nowrap; }
+body.embed .wb-head { padding: var(--space-7) var(--space-10); gap: var(--space-8); flex-wrap: nowrap; }
 body.embed .wb-head .wb-imm { display: none; }
-body.embed .wb-head .field { font-size: 14px; min-width: 120px; }
+body.embed .wb-head .field { min-width: 120px; }
 
 /* 3. 三视图页签单行不折（去图标、收内距）；「导图视图」按钮与同步标语一并撤下 */
-body.embed .view-bar { padding: 0 10px; gap: 8px; flex-wrap: nowrap; }
+body.embed .view-bar { padding: 0 var(--space-10); gap: var(--space-8); flex-wrap: nowrap; }
 body.embed .view-bar .ntype-tabs { flex: 1 1 auto; min-width: 0; }
-body.embed .ntype-tab { white-space: nowrap; padding: 8px 9px; font-size: 12px; gap: 0; }
+body.embed .ntype-tab { white-space: nowrap; padding: var(--space-8) var(--space-9); font-size: var(--fs-12); gap: 0; }
 body.embed .ntype-tab .ic { display: none; }
 body.embed #btnViewSwap, body.embed .view-sync { display: none; }
 /* 「同一份笔记 · 三视图实时同步」：三视图同源是这套编辑器的实现事实
@@ -263,13 +263,13 @@ body.embed #btnViewSwap, body.embed .view-sync { display: none; }
       实测（probe-w6-embed，360/300/480 三档嵌窗）钮数 9、scrollWidth 恒等于 clientWidth，
       也就是说横滚这条今天已经用不上：改成 wrap 不改变任何现有画面，只把这条
       「以后加钮就复发」的路堵掉。行内提示照旧撤（与下方教学框是同一句话）。 */
-body.embed .md-toolbar { flex-wrap: wrap; padding: 6px 10px; gap: 3px; }
+body.embed .md-toolbar { flex-wrap: wrap; padding: var(--space-6) var(--space-10); gap: var(--space-3); }
 body.embed .md-toolbar .card-note, body.embed .md-toolbar .spacer { display: none; }
 body.embed .md-toolbar .tool-btn { flex: none; }
 
 /* 5. 常驻教学框撤（全页保留）；列表内距收紧 */
 body.embed .ol-hint { display: none; }
-body.embed .ol-wrap { padding: 8px 10px 12px; }
+body.embed .ol-wrap { padding: var(--space-8) var(--space-10) var(--space-12); }
 
 /* 6. 底部动作条贴底、单行、不溢出；「回到原文」在浮窗里就在原文旁边，撤
    —— v2.23 W6.2 续：这条原先被 JS 那句 inline style 顶掉（内联优先于规则），
@@ -277,7 +277,7 @@ body.embed .ol-wrap { padding: 8px 10px 12px; }
       改在 openNote() 里按 EMBED 决定是否渲染，规则留在这儿做兜底。
       钮一律 flex:none：.btn 带 overflow:hidden，flex 项一旦有它就没有 min-width:auto 兜底，
       会被压到比文案还窄 —— 与 .seg-btn 同一个病根。牺牲位只有提示语（它自带省略号）。 */
-body.embed .wb-foot { padding: 8px 10px; gap: 8px; flex-wrap: nowrap; }
+body.embed .wb-foot { padding: var(--space-8) var(--space-10); gap: var(--space-8); flex-wrap: nowrap; }
 body.embed .wb-foot .btn { flex: none; }
 body.embed .wb-foot .ef-hint { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 body.embed #gotoSrc { display: none; }
@@ -298,17 +298,12 @@ body.embed .work-layout > .card:first-child { display: none; }
    分不清谁是谁）—— 第一组保持主控件规格，后两组降为轻量档并各自带一行小标。
    ============================================================ */
 .flt-cap {
-  display: block; margin: 2px 0 5px; font-size: 10.5px; letter-spacing: .14em;
+  display: block; margin: var(--space-2) 0 var(--space-5); font-size: var(--fs-10_5); letter-spacing: .14em;
   color: var(--ink-3);
 }
-.seg.seg-quiet { border: none; background: none; padding: 0; gap: 4px; }
-.seg-quiet .seg-btn {
-  padding: 3px 9px; font-size: 11.5px; border: 1px solid var(--rule);
-  border-radius: var(--r-sm); background: none; color: var(--ink-3);
-}
-.seg-quiet .seg-btn.on { background: var(--accent-wash); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.seg.seg-quiet { border: none; background: none; padding: 0; gap: var(--space-4); }
 #colorDots { align-items: center; }
-.dot-cap { font-size: 10.5px; letter-spacing: .14em; color: var(--ink-3); margin-right: 2px; }
+.dot-cap { font-size: var(--fs-10_5); letter-spacing: .14em; color: var(--ink-3); margin-right: var(--space-2); }
 /* 「导图视图」按钮与「脑图」页签是同一个动作的两个入口 —— 全页同样撤下（id 与监听保留）。
    必须 !important：updateViewSwap() 每次切视图都写内联 style.display="inline-flex"，
    内联优先级高于本条，不加 important 等于没撤。 */
@@ -326,19 +321,18 @@ body.embed .work-layout > .card:first-child { display: none; }
 #notesList .note-row { display: flex; flex-direction: column; }
 #notesList .nr-top { align-items: center; }
 #notesList .nr-top .nr-dot { flex: none; }
-#notesList .nr-top > .ic { flex: none; }
-#notesList .nr-foot { gap: 8px; }
+#notesList .nr-foot { gap: var(--space-8); }
 #notesList .nr-ntype { flex: none; line-height: 1.45; }
 #notesList .nr-doc {
   flex: 0 1 auto; min-width: 0;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  font-size: 11px; letter-spacing: .04em; color: var(--ink-3);
+  font-size: var(--fs-11); letter-spacing: .04em; color: var(--ink-3);
   text-align: right;
 }
 /* 预览区恒占两行高：一行预览的卡片与两行的卡片底缘一致，列表看着成行 */
 #notesList .nr-prev { min-height: 2.2em; }
 /* 标题与预览的节奏固定（不随字体档变化打架） */
-#notesList .nr-title { margin-bottom: 4px; }
+#notesList .nr-title { margin-bottom: var(--space-4); }
 
 /* 标题限 2 行：个别超长标题原本折 3 行把卡片撑高，列表高度参差的主因 */
 #notesList .nr-title {
@@ -419,6 +413,7 @@ body[data-page="notes"] .mm-stage {
 <script src="theme.js"></script>
 </head>
 <body data-page="notes">
+  <a class="skip-link" href="#appContent">跳到主内容</a>
 <div class="boot" id="boot" aria-hidden="true">
   <span class="boot-seal">墨</span>
   <span class="boot-name">墨读 InkRead</span>
@@ -426,7 +421,7 @@ body[data-page="notes"] .mm-stage {
 </div>
 <div class="device">
   <div class="screen" id="screen">
-    <main class="app-content" id="appContent">
+    <main class="app-content" id="appContent" tabindex="-1">
       <div class="page">
         <div class="page-head">
           <div class="ph-main">
@@ -434,7 +429,7 @@ body[data-page="notes"] .mm-stage {
             <span class="ph-sub" id="notesSub"></span>
           </div>
           <div class="ph-actions">
-            <button class="btn btn-ghost" id="btnExport" title="导出当前筛选与搜索结果"><span id="icExport"></span>导出 Markdown</button>
+            <button class="btn btn-ghost" id="btnExport" title="导出当前筛选与搜索结果（Markdown / CSV / 可还原 JSON）"><span id="icExport"></span>导出批注</button>
             <button class="btn btn-mark" id="btnNew"><span id="icNew"></span>新建笔记</button>
           </div>
         </div>
@@ -559,7 +554,7 @@ body[data-page="notes"] .mm-stage {
                 <button class="tool-btn" id="btnPreview" title="切换预览" aria-label="切换预览"><span id="icEye"></span></button>
               </div>
               <div class="md-split" id="mdSplit">
-                <textarea id="mdEditor" spellcheck="false" placeholder="Markdown 是笔记树的实时序列化，改这里会同步回大纲与脑图。&#10;&#10;## 一级要点&#10;- 子条目（缩进 2 空格降一级）&#10;&#10;行内公式 $C_{total}=\alpha\bar{t}+\beta r+\gamma L$&#10;&#10;$$ r = \frac{n_{regress}}{n_{lines}} \times 100\% $$"></textarea>
+                <textarea id="mdEditor" aria-label="笔记正文" spellcheck="false" placeholder="Markdown 是笔记树的实时序列化，改这里会同步回大纲与脑图。&#10;&#10;## 一级要点&#10;- 子条目（缩进 2 空格降一级）&#10;&#10;行内公式 $C_{total}=\alpha\bar{t}+\beta r+\gamma L$&#10;&#10;$$ r = \frac{n_{regress}}{n_{lines}} \times 100\% $$"></textarea>
                 <div class="md-grip" id="mdGrip" title="拖拽调整宽度 · 双击复位" aria-label="调整编辑区与预览宽度" role="separator" aria-orientation="vertical"></div>
                 <div class="md-preview" id="preview"></div>
               </div>
@@ -2194,23 +2189,23 @@ body[data-page="notes"] .mm-stage {
     toast("笔记已删除", "trash-2");
   });
 
+  /* 导出交给 app.js 的 InkExport（与书架、阅读页同一条实现，Markdown / CSV / 可还原 JSON 三选一）。
+     行还是按「当前筛选与搜索」摆：范围跟着屏幕走，导出件才对得上刚看到的那一屏。
+     大纲型笔记没有 body，正文取 serialize(outline) —— 与旧版导出的取字口径一致。 */
   qs("#btnExport").addEventListener("click", function () {
     var list = filtered();
-    var md = "# 墨读笔记导出\n\n> 导出时间：" + new Date().toLocaleString("zh-CN") + " · 共 " + list.length + " 条\n\n";
-    list.forEach(function (n) {
-      md += "# " + (noteTitle(n) || "无标题") + "\n\n";
-      md += "> " + kindLabel(n) + " · " + docTitle(n.docId) + " · P" + (n.page || 1) + "\n\n";
-      var body = (n.outline && n.outline.length) ? serialize(n.outline) : (n.body || "");
-      if (body) md += body + "\n\n";
-      md += "---\n\n";
+    var rows = list.map(function (n) {
+      return InkExport.row(n, {
+        title: noteTitle(n) || "无标题",
+        doc: docTitle(n.docId),
+        loc: n.page ? "第 " + n.page + " 页" : "",
+        body: (n.outline && n.outline.length) ? serialize(n.outline) : (n.body || "")
+      });
     });
-    var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
-    var a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "inkread-notes.md";
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
-    toast("已导出 " + list.length + " 条笔记", "download");
+    InkExport.open({
+      rows: rows, mdTitle: "墨读笔记导出", base: "inkread-notes",
+      scope: list.length === state.notes.length ? "全部笔记" : "当前筛选与搜索"
+    });
   });
 
   /* ============================================================

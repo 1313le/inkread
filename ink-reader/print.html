@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>墨读 InkRead · 打印视图</title>
 <link rel="icon" href="data:,">
+<link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="paper.css">
 <link rel="stylesheet" href="fonts/local.css">
 <!-- 纸面排印样式在 paper.css：与 /api/export 的离线 HTML 同一份，两处不会各自漂移。
@@ -22,26 +23,26 @@
    这里显式声明 light 把它钉住（v2.23 §7.2.1：不声明时控件跟随 OS，与页面意图无关）。 */
 :root { color-scheme: light; }
 .bar {
-  max-width: 170mm; margin: 0 auto; padding: 10px 6mm; display: flex; align-items: center;
-  gap: 10px; flex-wrap: wrap; font-family: "InkRead Sans", system-ui, sans-serif;
-  font-size: 12.5px; color: #4a453d; border-bottom: 1px solid #e2ddd2;
+  max-width: 170mm; margin: 0 auto; padding: var(--space-10) 6mm; display: flex; align-items: center;
+  gap: var(--space-10); flex-wrap: wrap; font-family: "InkRead Sans", system-ui, sans-serif;
+  font-size: var(--fs-12_5); color: #4a453d; border-bottom: 1px solid #e2ddd2;
 }
 .bar .bar-t { font-weight: 600; letter-spacing: .04em; }
 .bar .bar-hint { color: #6b6459; flex: 1; min-width: 0; }
-.bar button, .bar a.btn {
-  font: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-  min-height: 34px; padding: 0 12px; border: 1px solid #cbc4b6; border-radius: 6px;
+.bar button, .bar a.bar-btn {
+  font: inherit; display: inline-flex; align-items: center; gap: var(--space-6); cursor: pointer;
+  min-height: 34px; padding: 0 var(--space-12); border: 1px solid #cbc4b6; border-radius: var(--radius-6);
   background: #faf8f3; color: #2b2721; text-decoration: none;
 }
-.bar button:hover, .bar a.btn:hover { border-color: #b3382c; color: #8f2d24; }
-.bar button svg, .bar a.btn svg { flex: none; }
+.bar button:hover, .bar a.bar-btn:hover { border-color: #b3382c; color: #8f2d24; }
+.bar button svg, .bar a.bar-btn svg { flex: none; }
 /* 出纸规格用原生控件：select 与 checkbox 在各平台都有现开的选择器和键盘语义，
    自绘一份只是把系统的可用性换成一套要自己维护的假样子。 */
-.bar-ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.ctl { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #4a453d; }
+.bar-ctl { display: flex; align-items: center; gap: var(--space-10); flex-wrap: wrap; }
+.ctl { display: inline-flex; align-items: center; gap: var(--space-6); cursor: pointer; color: #4a453d; }
 .ctl select {
   font: inherit; color: #2b2721; background: #faf8f3; border: 1px solid #cbc4b6;
-  border-radius: 6px; min-height: 34px; padding: 0 6px 0 8px; cursor: pointer;
+  border-radius: var(--radius-6); min-height: 34px; padding: 0 var(--space-6) 0 var(--space-8); cursor: pointer;
 }
 .ctl select:hover { border-color: #b3382c; }
 .ctl input[type="checkbox"] { width: 15px; height: 15px; margin: 0; cursor: pointer; accent-color: #b3382c; }
@@ -50,9 +51,9 @@
 }
 /* 触屏热区：纸面视图也可能从手机上「打印」调出 */
 @media (pointer: coarse) {
-  .bar { padding: 12px 4mm; gap: 8px; }
-  .bar button, .bar a.btn { min-height: 44px; min-width: 44px; padding: 0 14px; }
-  .bar-ctl { gap: 8px; }
+  .bar { padding: var(--space-12) 4mm; gap: var(--space-8); }
+  .bar button, .bar a.bar-btn { min-height: 44px; min-width: 44px; padding: 0 var(--space-14); }
+  .bar-ctl { gap: var(--space-8); }
   .ctl select { min-height: 44px; min-width: 44px; }
   /* 勾选的整块文字都要按得动 —— 15px 的方框在手指下是误触源 */
   .ctl { min-height: 44px; }
@@ -61,12 +62,13 @@
 .blank { max-width: 170mm; margin: 14mm auto; padding: 0 6mm; font-family: "InkRead Sans", system-ui, sans-serif; }
 .blank h2 { font-size: 14pt; margin: 0 0 .5em; }
 .blank p { font-size: 11pt; color: #4a453d; margin: 0 0 1.2em; text-align: left; }
-.blank a { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px;
-           border: 1px solid #cbc4b6; border-radius: 6px; text-decoration: none; color: #2b2721; }
+.blank a { display: inline-flex; align-items: center; gap: var(--space-6); min-height: 40px; padding: 0 var(--space-14);
+           border: 1px solid #cbc4b6; border-radius: var(--radius-6); text-decoration: none; color: #2b2721; }
 </style>
 
 </head>
 <body class="paper" data-doc="">
+  <a class="skip-link" href="#sheet">跳到主内容</a>
 
 <div class="bar no-print" role="toolbar" aria-label="纸面视图工具">
   <span class="bar-t">纸面视图</span>
@@ -97,14 +99,14 @@
       <path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><path d="M7 16h10v4H7z"/>
     </svg>打印
   </button>
-  <a class="btn" href="index.html">
+  <a class="bar-btn" href="index.html">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="m15 18-6-6 6-6"/>
     </svg>返回书架
   </a>
 </div>
 
-<main class="sheet" id="sheet">
+<main class="sheet" id="sheet" tabindex="-1">
   <header class="p-head" id="head">
     <h1 class="p-title" id="bkTitle"></h1>
     <div class="byline" id="byline"></div>
@@ -115,7 +117,7 @@
 <section class="blank no-print" id="blank" hidden>
   <h2 id="blankTitle">没有可打印的正文</h2>
   <p id="blankWhy"></p>
-  <a class="btn" href="index.html">回书架重新导入</a>
+  <a class="bar-btn" href="index.html">回书架重新导入</a>
 </section>
 
 <script src="mock.js"></script>

@@ -7,6 +7,11 @@ backups/
 .work/
 *.log
 
+# scripts/build-fonts.py 的本机虚拟环境（34MB，fonttools + brotli），
+# 子集化是可复现构建：只需要脚本与名册进仓库，环境各机自举。
+.venv-fonts/
+__pycache__/
+
 # 安卓工程（Capacitor + 原生 Gradle）：只保留源码与 www 镜像，
 # 依赖与构建产物不进仓库（构建产物 >100MB，且随每次构建变化）
 android/node_modules/

@@ -7,6 +7,7 @@
 <title>墨读 InkRead · 闪卡</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="fonts/local.css">
+<link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="styles.css">
 <style>
 /* ---------- 闪卡页（v2.6 要求四）----------
@@ -15,99 +16,98 @@
    （与阅读页闪卡面板同一套外观，观感同源，也不重复造样式）。 */
 
 /* 页头统计：与 tasks.html 的 chip 统计同一做法 */
-.cards-stats { display: flex; gap: 8px; flex-wrap: wrap; }
-.cards-stats .chip { padding: 7px 13px; }
+.cards-stats { display: flex; gap: var(--space-8); flex-wrap: wrap; }
 .cards-stats b { font-variant-numeric: tabular-nums; }
 
 /* ---------- 一、类别分组 + 卡组 ---------- */
-.cat-block { margin-bottom: 26px; }
-.cat-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
-.cat-head h2 { font-size: 15px; letter-spacing: .12em; font-weight: 700; }
+.cat-block { margin-bottom: var(--space-26); }
+.cat-head { display: flex; align-items: center; gap: var(--space-9); margin-bottom: var(--space-12); }
+.cat-head h2 { font-size: var(--fs-15); letter-spacing: .12em; font-weight: 700; }
 .cat-head .ic { color: var(--accent-ink); }
-.cat-head .cat-n { font-size: 11.5px; color: var(--ink-3); letter-spacing: .06em; }
+.cat-head .cat-n { font-size: var(--fs-11_5); color: var(--ink-3); letter-spacing: .06em; }
 .cat-head .cat-rule { flex: 1; height: 1px; background: var(--line-2); }
 
-.deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(292px, 1fr)); gap: 14px; align-items: start; }
+.deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(292px, 1fr)); gap: var(--space-14); align-items: start; }
 .deck-item { min-width: 0; }
 /* 展开详情时占满整行：卡组列表重新排布，详情不被挤成窄条 */
 .deck-item.open { grid-column: 1 / -1; }
-.deck-card { position: relative; padding: 15px 17px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md); }
-.dc-top { display: flex; align-items: center; gap: 8px; }
-.dc-name { font-size: 16px; font-weight: 700; letter-spacing: .03em; margin: 10px 0 6px; cursor: pointer; }
+.deck-card { position: relative; padding: var(--space-15) var(--space-17) var(--space-14); background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md); }
+.dc-top { display: flex; align-items: center; gap: var(--space-8); }
+.dc-name { font-size: var(--fs-16); font-weight: 700; letter-spacing: .03em; margin: var(--space-10) 0 var(--space-6); cursor: pointer; }
 .dc-name:hover { color: var(--accent-ink); }
-.dc-meta { font-size: 12.5px; color: var(--ink-3); letter-spacing: .03em; }
+.dc-meta { font-size: var(--fs-12_5); color: var(--ink-3); letter-spacing: .03em; }
 .dc-meta b { color: var(--accent-ink); font-variant-numeric: tabular-nums; }
-.dc-bar { margin: 11px 0 13px; }
-.dc-foot { display: flex; align-items: center; gap: 8px; }
+.dc-bar { margin: var(--space-11) 0 var(--space-13); }
+.dc-foot { display: flex; align-items: center; gap: var(--space-8); }
 
 /* ⋯ 菜单：卡组操作（重命名 / 删除） */
 .dc-more { flex: none; }
 .dc-menu {
-  position: absolute; right: 12px; top: 50px; z-index: 6; min-width: 208px; padding: 6px;
+  position: absolute; right: 12px; top: 50px; z-index: 6; min-width: 208px; padding: var(--space-6);
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-sm);
   box-shadow: var(--sh-md); animation: dcMenuIn .16s ease both;
 }
 @keyframes dcMenuIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 .dc-mi {
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px;
+  display: flex; align-items: center; gap: var(--space-8); width: 100%; padding: var(--space-8) var(--space-10);
   background: none; border: none; border-radius: var(--r-xs);
-  color: var(--ink-2); font-size: 13px; letter-spacing: .03em; cursor: pointer; text-align: left;
+  color: var(--ink-2); font-size: var(--fs-13); letter-spacing: .03em; cursor: pointer; text-align: left;
 }
 .dc-mi:hover { background: var(--paper-2); color: var(--ink); }
 .dc-mi.danger { color: var(--amber-ink); }
 /* 第二击确认：按钮改为醒目的警示态 */
 .dc-mi.confirm { background: var(--amber-wash); color: var(--amber-ink); border: 1px solid var(--amber); }
-.dc-warn { margin-top: 4px; padding: 7px 10px 4px; border-top: 1px solid var(--line-2); font-size: 11px; color: var(--ink-3); line-height: 1.7; }
+.dc-warn { margin-top: var(--space-4); padding: var(--space-7) var(--space-10) var(--space-4); border-top: 1px solid var(--line-2); font-size: var(--fs-11); color: var(--ink-3); line-height: 1.7; }
 
 /* 行内重命名 */
-.dc-rename { display: flex; gap: 6px; margin: 10px 0 6px; }
-.dc-rename .field { flex: 1; min-width: 0; padding: 6px 10px; font-size: 14px; }
+.dc-rename { display: flex; gap: var(--space-6); margin: var(--space-10) 0 var(--space-6); }
+.dc-rename .field { flex: 1; min-width: 0; }
 
 /* ---------- 二、卡组详情：组内卡列表 ---------- */
-.deck-detail { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line-2); }
-.detail-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 11px; }
-.detail-head .dh-k { font-size: 11.5px; color: var(--ink-3); letter-spacing: .06em; }
-.detail-list { display: flex; flex-direction: column; gap: 8px; max-height: 54vh; overflow-y: auto; }
+.deck-detail { margin-top: var(--space-14); padding-top: var(--space-13); border-top: 1px solid var(--line-2); }
+.detail-head { display: flex; align-items: center; gap: var(--space-10); flex-wrap: wrap; margin-bottom: var(--space-11); }
+.detail-head .dh-k { font-size: var(--fs-11_5); color: var(--ink-3); letter-spacing: .06em; }
+.detail-list { display: flex; flex-direction: column; gap: var(--space-8); max-height: 54vh; overflow-y: auto; }
 /* 行内卡面：点文本在「正面（挖空）⇄ 背面（原文）」之间翻，不跳页 */
 .dk-main { cursor: pointer; }
 .dk-main:hover .dk-front, .dk-main:hover .dk-back { color: var(--accent-ink); }
-.dk-back { font-size: 13px; color: var(--ink); }
-.dk-flip-tip { font-size: 10.5px; color: var(--ink-3); letter-spacing: .05em; }
+.dk-back { font-size: var(--fs-13); color: var(--ink); }
+.dk-flip-tip { font-size: var(--fs-10_5); color: var(--ink-3); letter-spacing: .05em; }
 
 /* ---------- 三、复习浮层：页内全屏，风格同阅读页闪卡面板 ---------- */
 .fc-stage { position: absolute; inset: 0; z-index: 280; display: flex; flex-direction: column; background: var(--paper); background-image: var(--grain); }
-.fcs-top { display: flex; align-items: center; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--line-2); }
-.fcs-name { font-size: 14px; font-weight: 700; letter-spacing: .04em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fcs-prog { margin-left: auto; font-size: 12.5px; color: var(--ink-3); letter-spacing: .06em; font-variant-numeric: tabular-nums; }
+.fcs-top { display: flex; align-items: center; gap: var(--space-12); padding: var(--space-13) var(--space-18); border-bottom: 1px solid var(--line-2); }
+.fcs-name { font-size: var(--fs-14); font-weight: 700; letter-spacing: .04em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcs-prog { margin-left: auto; font-size: var(--fs-12_5); color: var(--ink-3); letter-spacing: .06em; font-variant-numeric: tabular-nums; }
 .fcs-body {
   flex: 1; overflow-y: auto; width: 100%; max-width: 940px; margin: 0 auto;
-  padding: 22px clamp(16px, 6vw, 90px) 28px;
+  padding: var(--space-22) clamp(var(--space-16), 6vw, 90px) var(--space-28);
   display: flex; flex-direction: column; justify-content: center; gap: 0;
 }
-.fcs-key { margin-top: 14px; text-align: center; font-size: 11.5px; color: var(--ink-3); letter-spacing: .05em; }
-.fcs-key kbd { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; margin: 0 2px; background: var(--paper-2); }
+.fcs-key { margin-top: var(--space-14); text-align: center; font-size: var(--fs-11_5); color: var(--ink-3); letter-spacing: .05em; }
+.fcs-key kbd { font: inherit; border: 1px solid var(--line); border-radius: var(--radius-4); padding: var(--space-1) var(--space-5); margin: 0 var(--space-2); background: var(--paper-2); }
 /* 完成小结 */
-.fcs-sum { text-align: center; padding: 20px 0; }
+.fcs-sum { text-align: center; padding: var(--space-20) 0; }
 /* v2.23 §W3 第六步：页内 <style> 里写死的 .ic 尺寸一并收进五档 token（本卡三处 + index 三处 + reader 一处）。
    这一步不是审美统一 —— CSS 的 width/height 会盖掉 <svg> 上的属性值，所以这里的 13/11/22/34
    是**真正生效**的尺寸，工厂 iconSize() 的档位换算对它们完全无效。对不上档的一律往小收
    （闸 K8 扫源码、K9 量真实渲染值）。 */
-.fcs-sum .ic { width: var(--ic-xl); height: var(--ic-xl); color: var(--accent-ink); margin-bottom: 12px; }
-.fcs-sum .big { font-size: 26px; font-weight: 700; letter-spacing: .03em; }
-.fcs-sum .card-note { margin-top: 10px; }
+.fcs-sum .ic { width: var(--ic-xl); height: var(--ic-xl); color: var(--accent-ink); margin-bottom: var(--space-12); }
+.fcs-sum .big { font-size: var(--fs-26); font-weight: 700; letter-spacing: .03em; }
+.fcs-sum .card-note { margin-top: var(--space-10); }
 
 @media (max-width: 640px) {
   .deck-grid { grid-template-columns: 1fr; }
   .dc-menu { right: 8px; left: 8px; min-width: 0; }
-  .fcs-body { padding: 16px 16px 22px; }
+  .fcs-body { padding: var(--space-16) var(--space-16) var(--space-22); }
 }
 
 /* 已删除的卡组：恢复入口（删除只清调度，高亮还在 —— 一键重新成卡） */
 .gone-strip {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  margin-top: 6px; padding: 12px 15px;
+  display: flex; align-items: center; gap: var(--space-10); flex-wrap: wrap;
+  margin-top: var(--space-6); padding: var(--space-12) var(--space-15);
   border: 1px dashed var(--line); border-radius: var(--r-md); background: var(--paper-2);
-  font-size: 12.5px; color: var(--ink-3); letter-spacing: .02em;
+  font-size: var(--fs-12_5); color: var(--ink-3); letter-spacing: .02em;
 }
 .gone-strip .ic { color: var(--ink-3); }
 .gone-strip .chip-btn { background: var(--paper); }
@@ -118,65 +118,47 @@
    —— 侧栏是「检索语法的可视化快捷输入」，与检索框共用同一个查询：
       点一下即改检索框里的字，命中数随之实时更新（Anki 式双通道）。
    ============================================================ */
-.cards-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; }
+.cards-toolbar { display: flex; align-items: center; gap: var(--space-10); flex-wrap: wrap; margin: 0 0 var(--space-14); }
 .q-wrap { position: relative; display: flex; align-items: center; flex: 1 1 300px; min-width: 200px; }
 .q-wrap .q-ic { position: absolute; left: 10px; color: var(--ink-3); display: flex; pointer-events: none; }
 .q-input {
-  width: 100%; padding: 8px 30px 8px 32px; font-size: 13.5px;
+  width: 100%; padding: var(--space-8) var(--space-30) var(--space-8) var(--space-32); font-size: var(--fs-13_5);
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink);
 }
 .q-input::placeholder { color: var(--ink-3); }
 .q-input:focus { outline: none; border-color: var(--ink-2); box-shadow: 0 0 0 3px var(--accent-wash); }
-.q-clear { position: absolute; right: 5px; display: flex; padding: 4px; background: none; border: none; color: var(--ink-3); cursor: pointer; border-radius: var(--r-xs); }
+.q-clear { position: absolute; right: 5px; display: flex; padding: var(--space-4); background: none; border: none; color: var(--ink-3); cursor: pointer; border-radius: var(--r-xs); }
 .q-clear:hover { color: var(--ink); }
-.q-hit { font-size: 12px; color: var(--ink-3); letter-spacing: .04em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.q-hit { font-size: var(--fs-12); color: var(--ink-3); letter-spacing: .04em; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .q-err {
-  flex: 1 1 100%; display: flex; align-items: center; gap: 8px; margin-top: 2px;
-  padding: 8px 12px; border: 1px solid var(--amber); border-radius: var(--r-sm);
-  background: var(--amber-wash); color: var(--amber-ink); font-size: 12.5px; letter-spacing: .02em;
+  flex: 1 1 100%; display: flex; align-items: center; gap: var(--space-8); margin-top: var(--space-2);
+  padding: var(--space-8) var(--space-12); border: 1px solid var(--amber); border-radius: var(--r-sm);
+  background: var(--amber-wash); color: var(--amber-ink); font-size: var(--fs-12_5); letter-spacing: .02em;
 }
-.view-seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
-.view-seg button {
-  display: flex; align-items: center; gap: 5px; padding: 7px 11px;
-  background: var(--paper); border: none; color: var(--ink-3); font-size: 12.5px; cursor: pointer;
-}
-.view-seg button + button { border-left: 1px solid var(--line); }
-.view-seg button:hover { color: var(--ink); }
-.view-seg button.on { background: var(--accent); color: var(--on-accent); }
 .q-sort {
-  padding: 7px 10px; font-size: 12.5px; color: var(--ink-2);
+  padding: var(--space-7) var(--space-10); font-size: var(--fs-12_5); color: var(--ink-2);
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer;
 }
-.save-box { display: inline-flex; align-items: center; gap: 6px; }
-.save-box .field { padding: 6px 9px; font-size: 12.5px; width: 150px; }
+.save-box { display: inline-flex; align-items: center; gap: var(--space-6); }
 
-.cards-main { display: flex; gap: 20px; align-items: flex-start; }
+.cards-main { display: flex; gap: var(--space-20); align-items: flex-start; }
 .cards-side { flex: 0 0 224px; width: 224px; position: sticky; top: 12px; max-height: calc(100vh - 96px); overflow-y: auto; }
 .cards-main.side-off .cards-side { display: none; }
 .cards-content { flex: 1 1 auto; min-width: 0; }
 
-.side-sec { margin-bottom: 18px; }
+.side-sec { margin-bottom: var(--space-18); }
 .side-head {
-  display: flex; align-items: center; gap: 7px; margin-bottom: 8px;
-  font-size: 11px; color: var(--ink-3); letter-spacing: .14em;
+  display: flex; align-items: center; gap: var(--space-7); margin-bottom: var(--space-8);
+  font-size: var(--fs-11); color: var(--ink-3); letter-spacing: .14em;
 }
 .side-head .ic { width: var(--ic-xs); height: var(--ic-xs); }
-.side-item {
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px; margin-bottom: 2px;
-  background: none; border: 1px solid transparent; border-radius: var(--r-xs); text-align: left;
-  color: var(--ink-2); font-size: 13px; cursor: pointer;
-}
-.side-item:hover { background: var(--paper-2); color: var(--ink); }
-.side-item.on { border-color: var(--accent-ink); background: var(--accent-wash); color: var(--accent-ink); }
-.side-item .ic { width: var(--ic-xs); height: var(--ic-xs); color: var(--ink-3); flex: none; }
-.side-item.on .ic { color: var(--accent-ink); }
 .si-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.si-n { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
-.si-x { flex: none; display: flex; padding: 2px; border-radius: var(--r-xs); color: var(--ink-3); background: none; border: none; cursor: pointer; }
+.si-n { font-size: var(--fs-11_5); color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
+.si-x { flex: none; display: flex; padding: var(--space-2); border-radius: var(--r-xs); color: var(--ink-3); background: none; border: none; cursor: pointer; }
 .si-x:hover { color: var(--amber-ink); background: var(--amber-wash); }
-.side-empty { font-size: 12px; color: var(--ink-3); line-height: 1.7; padding: 2px 4px; }
+.side-empty { font-size: var(--fs-12); color: var(--ink-3); line-height: 1.7; padding: var(--space-2) var(--space-4); }
 .side-filter {
-  width: 100%; margin-bottom: 6px; padding: 6px 9px; font-size: 12.5px;
+  width: 100%; margin-bottom: var(--space-6); padding: var(--space-6) var(--space-9); font-size: var(--fs-12_5);
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-xs); color: var(--ink);
 }
 .side-doc .si-n b { color: var(--accent-ink); font-weight: 600; }
@@ -184,21 +166,21 @@
 /* 紧凑列表视图：一行一卡组，密度约为卡片视图的 3 倍 */
 .deck-list { border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
 .deck-row {
-  position: relative; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 7px 12px; border-bottom: 1px solid var(--line-2); background: var(--paper);
+  position: relative; display: flex; align-items: center; gap: var(--space-12); flex-wrap: wrap;
+  padding: var(--space-7) var(--space-12); border-bottom: 1px solid var(--line-2); background: var(--paper);
 }
 .deck-row:last-child { border-bottom: none; }
 .deck-row:hover { background: var(--paper-2); }
-.dr-namebtn { display: flex; align-items: center; gap: 7px; flex: 1 1 200px; min-width: 0; background: none; border: none; padding: 0; color: var(--ink); font-size: 13.5px; cursor: pointer; text-align: left; }
-.dr-namebtn .ic { color: var(--accent-ink); flex: none; }
+.dr-namebtn { display: flex; align-items: center; gap: var(--space-7); flex: 1 1 200px; min-width: 0; background: none; border: none; padding: 0; color: var(--ink); font-size: var(--fs-13_5); cursor: pointer; text-align: left; }
+.dr-namebtn .ic { color: var(--accent-ink); }
 .dr-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dr-namebtn:hover .dr-name { color: var(--accent-ink); }
-.dr-cat { flex: 0 0 auto; font-size: 11.5px; color: var(--ink-3); letter-spacing: .06em; }
-.dr-num { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.dr-cat { flex: 0 0 auto; font-size: var(--fs-11_5); color: var(--ink-3); letter-spacing: .06em; }
+.dr-num { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-4); font-size: var(--fs-12); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .dr-num b { color: var(--accent-ink); }
-.dr-recent { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
+.dr-recent { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-4); font-size: var(--fs-11_5); color: var(--ink-3); }
 .deck-row .dc-menu { top: calc(100% + 2px); right: 8px; }
-.deck-row .deck-detail { flex: 1 1 100%; width: 100%; margin: 8px 0 2px; padding: 12px 4px 4px; }
+.deck-row .deck-detail { flex: 1 1 100%; width: 100%; margin: var(--space-8) 0 var(--space-2); padding: var(--space-12) var(--space-4) var(--space-4); }
 
 @media (max-width: 640px) {
   .cards-main { flex-direction: column; }
@@ -211,6 +193,7 @@
 <script src="theme.js"></script>
 </head>
 <body data-page="cards">
+  <a class="skip-link" href="#appContent">跳到主内容</a>
 <div class="boot" id="boot" aria-hidden="true">
   <span class="boot-seal">墨</span>
   <span class="boot-name">墨读 InkRead</span>
@@ -218,7 +201,7 @@
 </div>
 <div class="device">
   <div class="screen" id="screen">
-    <main class="app-content" id="appContent">
+    <main class="app-content" id="appContent" tabindex="-1">
       <div class="page">
         <div class="page-head">
           <div class="ph-main">

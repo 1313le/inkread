@@ -258,7 +258,7 @@
      存储：优先走 app.js 的 InkStore；未加载时（本文件置于 head）
      直接读同一套 localStorage 键，保证首屏零闪烁且不丢设置。
      ------------------------------------------------------------ */
-  var K_READ = "inkread.read.v1", K_THEME = "inkread.theme";
+  var K_READ = "inkread.read.v1", K_THEME = "inkread.theme.v1";
 
   function lsGet(k, fb) {
     try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? fb : v; }
@@ -349,8 +349,8 @@
   function write(patch) {
     storeWrite(patch);
     var cur = read();
-    /* 旧入口仍读 inkread.theme，保持同步 */
-    try { localStorage.setItem(K_THEME, cur.theme); } catch (e) {}
+    lsSet(K_THEME, cur.theme);
+    try { localStorage.removeItem("inkread.theme"); } catch (e) {}
     return cur;
   }
 

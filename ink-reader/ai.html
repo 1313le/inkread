@@ -7,6 +7,7 @@
 <title>墨读 InkRead · 主脑</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="fonts/local.css">
+<link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="styles.css">
 <style id="ai-extra">
 /* ============================================================
@@ -54,21 +55,6 @@ body[data-page="ai"] .msg.me {
     0 1px 2px color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
-/* 输入井：与聊天屏同一套凹陷语言（--paper-3 底 + 上缘 inset + 1px 内圈），
-   聚焦时保留全站强调外圈；发送按钮不动 */
-body[data-page="ai"] .chat-input-row .field {
-  background: var(--paper-3);
-  box-shadow:
-    inset 0 2px 5px color-mix(in srgb, var(--ink) 10%, transparent),
-    inset 0 0 0 1px var(--line-2);
-}
-body[data-page="ai"] .chat-input-row .field:focus {
-  border-color: var(--ink-2);
-  box-shadow:
-    inset 0 2px 5px color-mix(in srgb, var(--ink) 10%, transparent),
-    0 0 0 3px var(--accent-wash);
-}
-
 /* ---------- C. 快捷条：窄了折到下一行，不出横滚 ---------- */
 body[data-page="ai"] .chat-quick > * { flex: none; }
 
@@ -105,9 +91,9 @@ body[data-page="ai"] #glList {
 /* ---------- B4. 行节奏统一：四类行的上下内距与行高对齐 ----------
    gl-row / mm-row / sync-log li 统一 8px 上下（原 7px）、行高 1.6；
    mm-row 保留井内左右 11px，dev-row 是盒子行保持 12px，仅拉齐行高与字距。 */
-body[data-page="ai"] .gl-row { padding: 8px 0; line-height: 1.6; }
-body[data-page="ai"] .mm-row { padding: 8px 11px; line-height: 1.6; }
-body[data-page="ai"] .sync-log li { padding: 8px 0; line-height: 1.6; }
+body[data-page="ai"] .gl-row { padding: var(--space-8) 0; line-height: 1.6; }
+body[data-page="ai"] .mm-row { padding: var(--space-8) var(--space-11); line-height: 1.6; }
+body[data-page="ai"] .sync-log li { padding: var(--space-8) 0; line-height: 1.6; }
 body[data-page="ai"] .dev-row { line-height: 1.6; }
 
 /* ---------- B3. ≤899px：单列堆叠，撤两列 stretch 与定高，聊天卡回到固定可视高度 ---------- */
@@ -120,12 +106,62 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   /* 单列时术语卡随页滚动，但列表本体仍限高内部滚动，不无限撑长页面 */
   body[data-page="ai"] #glList { max-height: 46dvh; }
 }
+
+/* ---------- P. 提示词卡：左功能清单（按组）· 右模板与参数 ----------
+   两栏共一张卡，中缝走 1px --line-2 竖线，与上区 two-col 的中缝同一档。
+   清单条目本身是按钮：键盘 Tab 能走、焦点环由全站 :focus-visible 给。 */
+body[data-page="ai"] .pm-wrap { display: grid; grid-template-columns: 236px 1fr; gap: 0 var(--space-18); }
+body[data-page="ai"] .pm-list {
+  max-height: 560px; overflow-y: auto; overscroll-behavior: contain;
+  border-right: 1px solid var(--line-2); padding-right: var(--space-14);
+}
+body[data-page="ai"] .pm-g {
+  font-size: var(--fs-11); letter-spacing: .14em; color: var(--ink-3);
+  margin: var(--space-14) 0 var(--space-6); padding-left: var(--space-2);
+}
+body[data-page="ai"] .pm-g:first-child { margin-top: 0; }
+/* .pm-item 基样式与选中态已上收 styles.css 组件层（G2：.on 一律出页） */
+body[data-page="ai"] .pm-item .pm-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「改过」只靠这一枚小点表意，旁边带 aria-label，不让颜色单独承担信息 */
+body[data-page="ai"] .pm-dot {
+  flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--mark);
+}
+body[data-page="ai"] .pm-edit { min-width: 0; }
+body[data-page="ai"] .pm-head { display: flex; align-items: baseline; gap: var(--space-9); flex-wrap: wrap; margin-bottom: var(--space-8); }
+body[data-page="ai"] .pm-code {
+  font-family: var(--font-mono); font-size: var(--fs-11); color: var(--ink-3);
+  background: var(--paper-3); border: 1px solid var(--line-2); border-radius: var(--radius-5); padding: var(--space-1) var(--space-6);
+}
+body[data-page="ai"] .pm-ta {
+  font-family: var(--font-mono); font-size: var(--fs-12_5); line-height: 1.75;
+  resize: vertical; min-height: 220px; white-space: pre-wrap;
+}
+body[data-page="ai"] .pm-ph { margin: var(--space-10) 0 0; padding: 0; list-style: none; }
+body[data-page="ai"] .pm-ph li { font-size: var(--fs-12); color: var(--ink-3); line-height: 1.7; }
+body[data-page="ai"] .pm-ph code {
+  font-family: var(--font-mono); font-size: var(--fs-11); color: var(--ink-2);
+  background: var(--paper-3); border-radius: var(--radius-4); padding: 0 var(--space-4);
+}
+body[data-page="ai"] .pm-params { display: flex; flex-wrap: wrap; gap: var(--space-10) var(--space-14); margin-top: var(--space-14); }
+body[data-page="ai"] .pm-params label { display: flex; flex-direction: column; gap: var(--space-4); font-size: var(--fs-12); color: var(--ink-3); }
+body[data-page="ai"] .pm-params label.pm-model { flex: 1; min-width: 180px; }
+body[data-page="ai"] .pm-act { display: flex; align-items: center; gap: var(--space-8); margin-top: var(--space-14); }
+body[data-page="ai"] .pm-msg { flex: 1; min-width: 0; }
+body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
+@media (max-width: 899px) {
+  body[data-page="ai"] .pm-wrap { grid-template-columns: 1fr; }
+  body[data-page="ai"] .pm-list {
+    max-height: 220px; border-right: 0; border-bottom: 1px solid var(--line-2);
+    padding-right: 0; padding-bottom: var(--space-10); margin-bottom: var(--space-14);
+  }
+}
 </style>
 <script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
 <script src="theme.js"></script>
 </head>
 <body data-page="ai">
+  <a class="skip-link" href="#appContent">跳到主内容</a>
 <div class="boot" id="boot" aria-hidden="true">
   <span class="boot-seal">墨</span>
   <span class="boot-name">墨读 InkRead</span>
@@ -133,7 +169,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
 </div>
 <div class="device">
   <div class="screen" id="screen">
-    <main class="app-content" id="appContent">
+    <main class="app-content" id="appContent" tabindex="-1">
       <div class="page">
         <div class="page-head">
           <div class="ph-main">
@@ -299,6 +335,37 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
             </div>
           </div>
         </div>
+
+        <div class="card card-pad mt-24">
+          <div class="card-title"><span id="icPrompt"></span>提示词<span class="sub" id="pmSub"></span></div>
+          <p class="card-note mb-12">软件里每一枚会问模型的功能，怎么问都写在这张表上。改过的只存改动的那几枚，没改的跟着版本一起升级。
+            这张表会随同步带到另一台设备 —— 密钥不许写进模板，出现 sk-、api key、token 一类字样会被拦下。</p>
+          <div class="pm-wrap">
+            <div class="pm-list" id="pmList" aria-label="提示词功能清单"></div>
+            <div class="pm-edit" id="pmEdit" hidden>
+              <div class="pm-head">
+                <b id="pmName"></b><code class="pm-code" id="pmKey"></code>
+                <span class="chip" id="pmTag" hidden>已改</span>
+              </div>
+              <label class="field-label" for="pmText">系统提示词模板</label>
+              <textarea class="field pm-ta" id="pmText" rows="14" spellcheck="false"></textarea>
+              <ul class="pm-ph" id="pmPh"></ul>
+              <div class="pm-params">
+                <label>温度<input class="field" id="pmTemp" type="number" step="0.1" min="0" max="2"></label>
+                <label>最长回答（字）<input class="field" id="pmMax" type="number" min="1" step="1"></label>
+                <label>超时（秒）<input class="field" id="pmTmo" type="number" min="1" step="1"></label>
+                <label class="pm-model">模型名（只填名字）<input class="field" id="pmModel" spellcheck="false" autocomplete="off"></label>
+              </div>
+              <p class="field-hint">留空 = 不改这一项，照内置与全局设置走。</p>
+              <div class="pm-act">
+                <button class="btn btn-primary btn-sm" id="pmSave">保存覆盖</button>
+                <button class="btn btn-ghost btn-sm" id="pmReset">恢复内置</button>
+                <span class="spacer"></span>
+                <span class="pm-msg card-note" id="pmMsg" role="status" aria-live="polite"></span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -404,7 +471,7 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     icSync: "refresh-cw", icModel: "cpu", icModelTitle: "cpu", icSend: "send", icMem: "brain",
     icMemChip: "brain", icCtx: "book-open",
     icCpu: "cpu", icDev: "share-2", icDesk: "monitor", icPhone: "smartphone", icMirror: "smartphone",
-    icGloss: "languages", icGlSearch: "search",
+    icGloss: "languages", icGlSearch: "search", icPrompt: "quote",
     icTestBtn: "zap",
     icBot: "bot", ptToday: "list-checks", ptPlan: "calendar-days", ptMe: "user", phWifi: "wifi", phBat: "battery"
   };
@@ -765,7 +832,9 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
      流程（调研 Chatbox / LobeChat / SillyTavern 后取齐）：
      ① 选服务商 → 自动填好接口地址；② 填 API Key；③ 填或拉取模型名；
      ④ 测试连通；⑤ 保存。必填三项之外都收进「高级参数」，默认不展开。 */
-  var MC = null;        /* 已保存的配置 */
+  /* 配置必须开局就是完整对象：fetchModelConfig() 要等一拍才回来，
+     在这一拍里点「模型设置」会当场解引用空配置、弹层永远打不开。 */
+  var MC = API.modelCfg();        /* 已保存的配置 */
   var draft = null;     /* 弹层草稿，取消即丢弃 */
   var mask = qs("#modelMask");
   var POOL = [];        /* 当前模型候选：预设给的常用名，或刚从接口拉回来的真实列表 */
@@ -1236,14 +1305,25 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
   }
   function renderSync() {
     var log = (window.InkSync && InkSync.log()) || [];
+    /* 覆盖/保留逐项账：拉了不等于盖了 —— 用户要看的是「哪几颗被对端盖掉、哪几颗是本机这份赢」。
+       零差异不写「覆盖 0 项」：那行没有信息量，只把日志挤长。 */
+    function ledger(s) {
+      var n = s.over || 0, k = s.keep || 0;
+      if (!n && !k) return "";
+      var head = "", body = "";
+      if (n) { head += " · 覆盖 " + n + " 项"; body += "<div>覆盖：" + esc((s.overNames || []).join("、")) + "</div>"; }
+      if (k) { head += " · 保留 " + k + " 项"; body += "<div>保留：" + esc((s.keepNames || []).join("、")) + "</div>"; }
+      return head + "<details><summary>看明细</summary>" + body + "</details>";
+    }
     qs("#syncLog").innerHTML = log.length
       ? log.slice(0, 6).map(function (s) {
           var what = s.action === "pull" ? "拉取 " + (s.pulled || 0) + " 项"
             : s.action === "sync" ? "双向 · 拉 " + (s.pulled || 0) + " / 推 " + (s.pushed || 0) + " 项"
             : s.action === "oversize" ? (s.keys || 0) + " 类数据过大 · 未参与同步" +
               ((s.names || []).length ? "（" + s.names.join("、") + "）" : "")
+            : s.action === "prompts-redact" ? "提示词拦下 " + (s.dropped || 0) + " 枚 · 模板里有密钥样式的文本，这一枚没有上行"
             : "推送 " + (s.pushed || 0) + " 项";
-          return "<li><b>" + esc(s.atText || "") + "</b>" + esc(s.device || "桌面") + " · " + esc(what) + "</li>";
+          return "<li><b>" + esc(s.atText || "") + "</b>" + esc(s.device || "桌面") + " · " + esc(what) + ledger(s) + "</li>";
         }).join("")
       : '<li><span class="card-note">还没有同步过 —— 点「立即同步」，或从手机访问电脑 IP:8765 接入</span></li>';
     /* 超限键常驻提醒：这些键被留在本机、另一端看不到 —— 只写进日志一次不够看。 */
@@ -1282,11 +1362,13 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     /* 服务端拒收（413 过大 / 500 落盘失败）不等于同步成功：变更留在队列里，下次重试 */
     if (r.failed) { toast("同步服务拒收本次数据（HTTP " + r.status + "）· 变更已保留，稍后自动重试", "alert-triangle"); return; }
     var extra = (r.oversize && r.oversize.length) ? " · " + r.oversize.length + " 类数据过大未参与同步" : "";
+    var led = (r.over && r.over.length ? " · 覆盖 " + r.over.length + " 项" : "") +
+      (r.keep && r.keep.length ? " · 保留 " + r.keep.length + " 项" : "");
     if (r.pulled > 0) {
-      toast("已从另一端同步 " + r.pulled + " 项 · 即将刷新", "refresh-cw");
+      toast("已从另一端同步 " + r.pulled + " 项" + led + " · 即将刷新", "refresh-cw");
       setTimeout(function () { location.reload(); }, 900);
     } else {
-      toast((r.pushed > 0 ? "已推送本机变更 " + r.pushed + " 项" : "两端已一致 · 无需同步") + extra,
+      toast((r.pushed > 0 ? "已推送本机变更 " + r.pushed + " 项" : "两端已一致 · 无需同步") + led + extra,
         r.oversize && r.oversize.length ? "alert-triangle" : "circle-check");
     }
   });
@@ -1506,6 +1588,109 @@ body[data-page="ai"] .dev-row { line-height: 1.6; }
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     toast("已导出术语表 · " + list.length + " 条", "download");
   });
+
+  /* ============ 提示词（v1.1-S5c · M2 注册表） ============
+     表体在 api.js 内置，这一节只做「看 / 改 / 收回内置」三件事。
+     覆盖只存改过的那几枚（api.js 的 Prompt.save 负责剔除与内置相同的部分），
+     所以没动过的功能跟着版本一起升级，不会被这张表冻在旧文案上。 */
+  var PM = { list: [], key: "" };
+  function pmFind(k) {
+    for (var i = 0; i < PM.list.length; i++) if (PM.list[i].k === k) return PM.list[i];
+    return null;
+  }
+  function pmEdited(d) { return !!d.overridden || (d.edited || []).length > 0; }
+  function pmRenderList() {
+    var byG = {}, order = [];
+    PM.list.forEach(function (d) {
+      if (!byG[d.g]) { byG[d.g] = []; order.push(d.g); }
+      byG[d.g].push(d);
+    });
+    qs("#pmList").innerHTML = order.map(function (g) {
+      return '<div class="pm-g">' + esc(g) + "</div>" + byG[g].map(function (d) {
+        return '<button type="button" class="pm-item' + (d.k === PM.key ? " on" : "") + '"' +
+          (d.k === PM.key ? ' aria-current="true"' : "") + ' data-k="' + esc(d.k) + '">' +
+          '<span class="pm-n">' + esc(d.n) + "</span>" +
+          (pmEdited(d) ? '<span class="pm-dot" aria-label="这一枚改过"></span>' : "") + "</button>";
+      }).join("");
+    }).join("");
+    var n = PM.list.filter(pmEdited).length;
+    qs("#pmSub").textContent = PM.list.length + " 枚功能" + (n ? " · 已改 " + n + " 枚" : " · 全部照内置");
+  }
+  function pmRenderEdit() {
+    var d = pmFind(PM.key), box = qs("#pmEdit");
+    if (!d) { box.hidden = true; return; }
+    box.hidden = false;
+    qs("#pmName").textContent = d.n;
+    qs("#pmKey").textContent = d.k;
+    var tag = qs("#pmTag");
+    tag.hidden = !pmEdited(d);
+    tag.textContent = d.overridden ? "已改模板" : "已改参数";
+    qs("#pmText").value = d.t;
+    var ph = Object.keys(d.ph || {});
+    qs("#pmPh").innerHTML = ph.length
+      ? ph.map(function (p) { return "<li><code>{{" + esc(p) + "}}</code> — " + esc(d.ph[p]) + "</li>"; }).join("")
+      : "<li>这一枚没有占位符，模板原样发给模型。</li>";
+    /* 参数框：改过才回填，留空 = 不覆盖。占位文字写清内置值，让人知道不动它会发生什么。 */
+    pmParamFill("pmTemp", d, "temp");
+    pmParamFill("pmMax", d, "maxTokens");
+    pmParamFill("pmTmo", d, "timeout", "秒");
+    var mm = qs("#pmModel");
+    mm.value = d.model || "";
+    mm.placeholder = d.globalModel ? "跟随全局：" + d.globalModel : "跟随全局模型";
+    pmMsg("");
+  }
+  function pmParamFill(id, d, f, unit) {
+    var el = qs("#" + id), on = (d.edited || []).indexOf(f) >= 0;
+    el.value = on ? String(f === "timeout" ? Math.round(d[f] / 1000) : d[f]) : "";
+    var b = d.bp[f];
+    if (b == null) { el.placeholder = "跟随全局"; return; }
+    el.placeholder = (f === "timeout" ? Math.round(b / 1000) : b) + (unit ? " " + unit : "") + "（内置）";
+  }
+  function pmMsg(text, bad) {
+    var el = qs("#pmMsg");
+    el.textContent = text || "";
+    el.classList.toggle("bad", !!bad);
+  }
+  function pmNum(id) {
+    var v = qs("#" + id).value;
+    return String(v).trim() === "" ? null : Number(v);
+  }
+  function pmOpen(k) {
+    PM.key = k;
+    pmRenderList();
+    pmRenderEdit();
+  }
+  qs("#pmList").addEventListener("click", function (e) {
+    var b = e.target.closest(".pm-item");
+    if (b && b.dataset.k) pmOpen(b.dataset.k);
+  });
+  qs("#pmSave").addEventListener("click", function () {
+    var d = pmFind(PM.key);
+    if (!d) return;
+    var tmo = pmNum("pmTmo");
+    var r = API.promptSave(PM.key, {
+      text: qs("#pmText").value,
+      temp: pmNum("pmTemp"), maxTokens: pmNum("pmMax"),
+      timeout: tmo == null ? null : Math.round(tmo * 1000),
+      model: qs("#pmModel").value
+    });
+    if (r.code) { pmMsg(r.msg || "没有保存", true); toast(r.msg || "提示词没有保存", "alert-triangle"); return; }
+    PM.list = API.promptList();
+    pmRenderList(); pmRenderEdit();
+    pmMsg("已保存 · 重载页面与另一台设备都会用这份");
+    toast("已保存「" + d.n + "」的提示词", "check");
+  });
+  qs("#pmReset").addEventListener("click", function () {
+    var d = pmFind(PM.key);
+    if (!d) return;
+    var r = API.promptReset(PM.key);
+    if (r.code) { pmMsg(r.msg || "没有恢复", true); return; }
+    PM.list = API.promptList();
+    pmRenderList(); pmRenderEdit();
+    toast(r.cleared ? "「" + d.n + "」已恢复内置" : "「" + d.n + "」本来就是内置", "rotate-ccw");
+  });
+  PM.list = API.promptList();
+  if (PM.list.length) pmOpen(PM.list[0].k);
 
   /* ============ 启动 ============ */
   var params = new URLSearchParams(location.search);

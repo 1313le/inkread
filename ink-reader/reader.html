@@ -7,6 +7,7 @@
 <title>墨读 InkRead · 阅读</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="fonts/local.css">
+<link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="reader-extra.css">
 <script src="ink-keys.js"></script>
@@ -15,6 +16,7 @@
 <script src="scene.js"></script>
 </head>
 <body data-page="reader">
+  <a class="skip-link" href="#appContent">跳到主内容</a>
 <div class="boot" id="boot" aria-hidden="true">
   <span class="boot-seal">墨</span>
   <span class="boot-name">墨读 InkRead</span>
@@ -22,7 +24,7 @@
 </div>
 <div class="device">
   <div class="screen" id="screen">
-    <main class="app-content" id="appContent">
+    <main class="app-content" id="appContent" tabindex="-1">
       <div class="reader" id="reader" data-notes="closed" data-side="closed">
 
         <!-- 左侧：书签 / 设置。覆盖式面板（v12），默认收起，不占版心宽度 -->
@@ -74,6 +76,7 @@
                  目录 / 正文锁 / 任务清单 自顶栏移入此处，底栏同 id 转发触发 -->
             <div class="more-sheet reader-more" id="morePop" role="menu" hidden>
               <button class="more-item" role="menuitem" id="tDir" title="目录 · 检索 · 跳转（C）" aria-expanded="false" aria-controls="tocPanel"><span id="icDir"></span><span class="mi-k">目录 · 检索 · 跳转</span><em>章节与全文检索</em></button>
+              <button class="more-item" role="menuitem" id="tLay" title="先判文体，再把被切散的标题与段落归位" aria-expanded="false" aria-controls="layPanel"><span id="icLay"></span><span class="mi-k">一键排版</span><em>标题归位 · 先看再改</em></button>
               <button class="more-item" role="menuitem" id="tEdit" title="解锁后可改正文文字（不影响排版格式）" aria-pressed="false"><span id="icEdit"></span><span class="mi-k">正文锁</span><em>解锁后可改字</em></button>
               <button class="more-item" role="menuitem" id="tTasks" title="任务清单（T）" aria-expanded="false" aria-controls="taskDrawer"><span id="icTasks"></span><span class="mi-k">任务清单</span><em>阅读任务 <b class="tbadge" id="taskBadge">0</b></em></button>
               <button class="more-item" role="menuitem" id="tSide" aria-expanded="false" aria-controls="sidePanel"><span id="icSide"></span><span class="mi-k">书签与设置</span><em>覆盖侧栏 · 随时收起</em></button>
@@ -83,6 +86,7 @@
               <button class="more-item" role="menuitem" id="tExport" title="把整本书排成一张纸，导出成文件"><span id="icExport"></span><span class="mi-k">导出 PDF</span><em id="expHint">整本排印 · 另存为</em></button>
               <button class="more-item" role="menuitem" id="tPrint" title="先看纸面预览，再交给系统打印面板"><span id="icPrint"></span><span class="mi-k">打印</span><em id="printHint">纸面预览 · 系统面板</em></button>
               <button class="more-item" role="menuitem" id="tSpeak"><span id="icSpeak"></span><span class="mi-k">朗读</span><em>从当前页开始读</em></button>
+              <button class="more-item" role="menuitem" id="tResume"><span id="icResume"></span><span class="mi-k">回到朗读位置</span><em>跳到上次听到的句子</em></button>
               <button class="more-item" role="menuitem" id="tAuto"><span id="icAuto"></span><span class="mi-k">自动翻页</span><em>按你的速度推进</em></button>
               <button class="more-item" role="menuitem" data-appearance><span id="icAppearance"></span><span class="mi-k">外观与阅读设置</span><em>主题 · 强度 · 时间</em></button>
               <button class="more-item" role="menuitem" data-more="mode"><span id="icMoreMode"></span><span class="mi-k">阅读模式…</span><em>书籍 / 文献 / 学习 / 漫画</em></button>
@@ -221,6 +225,7 @@
             <button class="side-tab active" data-ntab="list">批注</button>
             <button class="side-tab" data-ntab="new">写笔记</button>
             <button class="side-tab" data-ntab="embed">完整笔记</button>
+            <button class="tool-btn" id="notesExport" title="导出本书批注" aria-label="导出本书批注"><span id="icNotesExport"></span></button>
             <button class="tool-btn" id="notesClose" title="收起浮窗 (Esc)" aria-label="收起批注浮窗"><span id="icNotesClose"></span></button>
           </div>
           <div class="side-body" id="notesBody">
@@ -353,10 +358,19 @@
           <div id="findResults"></div>
         </section>
 
-        <!-- ④ 章节列表 -->
+        <!-- ④ 章节列表（定案 §3.3：更正态 = 改名 / 增删 / 拖层级 / 固化） -->
         <section class="tpc-sec" id="tocSec">
-          <h4>本文结构<span class="spacer"></span><span class="card-note" id="tocCount"></span></h4>
+          <h4>本文结构<span class="spacer"></span><span class="card-note" id="tocCount"></span>
+            <button class="tpc-mini" id="tocFix" aria-pressed="false">更正</button>
+          </h4>
           <div id="tocList"></div>
+          <div class="toc-tools" id="tocTools" hidden>
+            <button class="chip chip-btn" id="tocAdd">加一节</button>
+            <button class="chip chip-btn" id="tocFreeze">固化目录</button>
+            <button class="chip chip-btn" id="tocAuto">还原自动</button>
+          </div>
+          <p class="card-note" id="tocFixHint" hidden>拖手柄改层级与顺序，点 ⋯ 改名或增删；改一条就固化一次，重开不会被自动目录盖掉。</p>
+          <div class="toc-lint" id="tocLint" hidden></div>
         </section>
       </div>
 
@@ -444,6 +458,35 @@
     <button class="aa-x" id="castX" aria-label="收起角色表"><span id="icCastX"></span></button>
   </header>
   <div class="aa-body" id="castBody"></div>
+</aside>
+
+<!-- 一键排版（v1.1-S5d · M3）：先判文体，再列出「本机会改哪几处」，确认才落正文。
+     与目录浮层同规矩：非模态、正文在背后看得见；改动一律先看清单再落笔（定案 §六「预览态显示改动计数，确认才落」）。
+     「让模型判层级」只在配了模型时出现；模型回话里有一条对不上本地块号就整单不收（宁可不改）。 -->
+<aside class="lay-panel" id="layPanel" hidden role="dialog" aria-modal="false" aria-label="一键排版" aria-hidden="true">
+  <header class="lay-head">
+    <b><span id="icLayH"></span>一键排版</b>
+    <span class="lay-doc" id="layDoc"></span>
+    <span class="spacer"></span>
+    <button class="lay-x" id="layClose" aria-label="收起排版面板（Esc）"><span id="icLayX"></span></button>
+  </header>
+  <div class="lay-body">
+    <p class="card-note" id="layKind">正在判文体…</p>
+    <div class="lay-rules" role="group" aria-label="启用的规则">
+      <label class="lay-r"><input type="checkbox" id="layRType" checked><span>标题层级归一</span></label>
+      <label class="lay-r"><input type="checkbox" id="layRFuse" checked><span>伪标题合段</span></label>
+      <label class="lay-r"><input type="checkbox" id="layRJoin" checked><span>正文段重拼</span></label>
+    </div>
+    <ul class="lay-list" id="layList" aria-live="polite"></ul>
+    <p class="lay-note" id="layNote" hidden></p>
+  </div>
+  <footer class="lay-foot">
+    <button class="btn btn-ghost btn-sm" id="layUndo" hidden>撤销这次排版</button>
+    <button class="btn btn-ghost btn-sm" id="layAi" hidden>让模型判层级</button>
+    <span class="spacer"></span>
+    <button class="btn btn-ghost btn-sm" id="layDrop">放弃</button>
+    <button class="btn btn-accent btn-sm" id="layOk" disabled>应用</button>
+  </footer>
 </aside>
 
 <!-- 阅读设置（v2.25.1 · 方案 B）：散落的阅读相关设置收成一处 —— 翻页 / 朗读 / 排版转发。
@@ -635,6 +678,9 @@
 <!-- srs.js：闪卡调度纯函数（ymd/isDueSt/isSusp/sm2Update/RATE/makeCloze）的单一事实源，
      闪卡页与阅读页共用（v2.10 起 modes.js 不再自带一份）。必须在 modes.js 之前加载。 -->
 <script src="srs.js"></script>
+<!-- layout.js：智能排版的纯函数（判级 / 出可撤销 diff / 落与撤 / 模型回认），
+     与 srs.js 同一条理由单独成件：改写逻辑要能脱离页面单测，页面只管接线。 -->
+<script src="layout.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
 <script src="brain.js"></script>
