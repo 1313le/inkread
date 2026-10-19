@@ -1,7 +1,9 @@
 node_modules/
 dist/
 dist-*/
-# 本机 360 会锁住 dist/win-unpacked/resources/app.asar（EBUSY），成品轮固定落 dist2
+# dist\win-unpacked\resources\app.asar 会被独占（unlink 必 EBUSY）：Restart Manager 实测持有者是
+# ZCode.exe（本工程活在它的 workspace 目录里，它索引了这颗 42MB asar），先前记成 360 是误判。
+# 成品轮固定落 workspace 索引面之外的目录，再把安装包复制回 dist/ 归档。
 dist2/
 backups/
 .work/

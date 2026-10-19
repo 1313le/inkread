@@ -38,6 +38,58 @@
 #ttsBar #ttsPlay { border-color: var(--mark); color: var(--mark-ink); border-radius: 50%; width: 34px; padding: 0; }
 #ttsBar #ttsPlay.active { background: var(--mark); color: var(--on-mark); }
 
+/* ============ v1.3 S3 · 朗读条浮层化（可拖 + 可收起） ============
+   #ttsBar 离开文档流交给 InkWin 托管：它写内联 left/top/width，高度归内容（autoH）。
+   于是这条不再是「压版心的一行」，而是一块有边框、有投影的浮窗 —— 外观得跟着改：
+   .tts-bar 基线只有 border-top（那是文档流分隔线语义），浮起来四面都得有。 */
+#ttsBar {
+  border: 1px solid var(--rule); border-radius: var(--r-md);
+  box-shadow: var(--sh-md); padding: var(--space-6) var(--space-8) var(--space-6) var(--space-4);
+  max-width: calc(100vw - 16px);
+}
+/* 把手：整条只有这一格能拖，所以要看得出「这里能抓」——六点纹 + grab 光标。
+   touch-action: none 是触屏拖动的硬要求（否则 pointermove 被滚动吃掉），
+   user-select: none 防它在双击时选中一片（把手不该划词）。 */
+.tts-grip {
+  flex: none; align-self: stretch; width: 16px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink-3); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+  border-radius: var(--r-sm);
+}
+.tts-grip:hover { color: var(--ink); background: var(--paper-3); }
+.tts-grip:active { cursor: grabbing; }
+.tts-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 收起态：一条只装「播/停 + 第几句」的胶囊，占一角不挡正文，点中间即还原整条 */
+.tts-pill {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-4);
+  background: var(--paper-2); border: 1px solid var(--rule); border-radius: var(--radius-999);
+  box-shadow: var(--sh-md); font-size: var(--fs-11_5); color: var(--ink-2); cursor: grab;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.tts-pill #ttsPillPlay {
+  flex: none; border-color: var(--mark); color: var(--mark-ink); border-radius: 50%;
+  width: 30px; height: 30px; padding: 0; cursor: pointer;
+}
+.tts-pill #ttsPillPlay.active { background: var(--mark); color: var(--on-mark); }
+.tts-pill .tp-open {
+  flex: none; border: none; background: none; padding: 0 var(--space-8) 0 var(--space-2);
+  font: inherit; font-family: var(--font-mono); font-size: var(--fs-11_5); color: inherit;
+  letter-spacing: .04em; cursor: pointer; border-radius: var(--r-sm); white-space: nowrap;
+}
+.tts-pill .tp-open:hover { color: var(--ink); background: var(--paper-3); }
+.tts-pill .tp-open:focus-visible, .tts-pill #ttsPillPlay:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 窄屏降级（≤600）：这条横窗浮动没有意义 —— 左右摆不下、上下拖着费劲，
+   于是退回它原来的样子：文档流里贴底常驻，可收起不可拖。!important 是必需的，
+   InkWin 在 resize 里会把内联 left/top/width/height 补回来（浮动态那套几何）。
+   胶囊同一条路：在同一个槽位里居中，仍占一行、仍可点。 */
+#ttsBar.tts-stick, #ttsPill.tts-stick {
+  position: static !important; left: auto !important; right: auto !important;
+  top: auto !important; bottom: auto !important; width: auto !important; height: auto !important;
+}
+#ttsBar.tts-stick { border: none; border-top: 1px solid var(--rule); border-radius: 0; box-shadow: none; max-width: none; }
+#ttsBar.tts-stick .tts-grip { display: none; }   /* 不可拖就别留把手骗人 */
+#ttsPill.tts-stick { align-self: center; border-radius: var(--radius-999); margin: var(--space-4) 0; }
+
 /* 语速 / 定时迷你弹层：贴播放条上方，点外部即收 */
 .tts-mini-pop {
   position: fixed; z-index: 286; min-width: 218px; padding: var(--space-12) var(--space-14);
@@ -87,7 +139,9 @@
 }
 /* 沉浸阅读时面板让位（听书继续播，不打断）。
    v2.24.1：朗读条与它的迷你弹层在沉浸态**放行** —— 沉浸底栏新增了「听书」入口，
-   再藏就等于点开一个开不了的条子。条子仍在文档流里、由 ttsSyncBook 重排，不压正文。 */
+   再藏就等于点开一个开不了的条子。
+   v1.3 S3：条子已改成浮层，正文不再为它重排；窄屏那一档仍退回文档流，
+   那一半让位账（.bar-pad）留在 reader-app.js 的 immBarPad 里。 */
 /* v2.14 沉浸态：阅读底栏一并让位（顶栏/侧栏由 styles.css 的 immersive 规则收起；
    呼出全靠悬浮球，进面板仍是浮层滑入） */
 body.immersive .reader-dock { display: none !important; }
@@ -650,6 +704,8 @@ html[data-reduce="on"] .tk-gear { transition: none; }
   color: var(--accent-ink); border: 1px solid var(--accent); border-radius: var(--radius-999);
 }
 .ar-busy { display: inline-flex; align-items: center; gap: var(--space-6); color: var(--ink-3); }
+/* 这一答读了多少书的脚注（v1.3 D4）：紧贴答案末尾，不换气泡 */
+.ar-src { margin: var(--space-6) 0 0; font-size: var(--fs-11_4); color: var(--ink-3); }
 /* 答案里的 [3]：点它跳回原文。做成按钮而不是 <a>，因为它不换页。 */
 .ar-ref {
   display: inline-block; margin: 0 var(--space-1); padding: 0 var(--space-3); font: inherit; font-size: var(--fs-11);
@@ -659,8 +715,10 @@ html[data-reduce="on"] .tk-gear { transition: none; }
 .ar-ref:hover { background: var(--accent); color: var(--on-accent); }
 /* 动作流水：工具层做了什么，一行字说清（读了哪章 / 将建几张卡） */
 .ar-act { align-self: flex-start; font-size: var(--fs-11); color: var(--ink-3); display: flex; align-items: center; gap: var(--space-5); }
+/* 直连型预置（翻书架 / 读本段 / 扫目录）交回的清单：一物一行，窄栏里不套表格 */
+.ar-list { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-6) 0 0; font-size: var(--fs-11_5); color: var(--ink-2); }
 
-/* 预置六问：首屏就给方向，不把读者丢进一个空输入框 */
+/* 预置问题：首屏就给方向，不把读者丢进一个空输入框 */
 .ar-preset { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-6); padding: var(--space-8) var(--space-12); border-top: 1px solid var(--line); }
 .ar-p {
   padding: var(--space-4) var(--space-9); font: inherit; font-size: var(--fs-11_5); color: var(--ink-2);

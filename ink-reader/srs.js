@@ -6,6 +6,8 @@
    了同一套纯函数，注释里写着「改一处需两处同步」—— 这是一笔迟早会
    算错的债。此处抽成一份，两个调用点都只引用 window.InkSRS。
    约束：纯函数、无副作用、无框架、无构建（沿用项目 ES5 + 中文注释风格）。
+   唯一的例外是 engineNow() 读一次本机偏好（引擎开关），它只在点「评分」
+   时被动调用，不写任何东西 —— 为了让闸能在同一页里来回切引擎复核。
    唯一的隐式依赖是全局 esc()（app.js 提供），且只在 makeCloze 被调用时
    才需要它已就绪 —— 不用形参传入是为了让调用点保持与原实现一字不差。
    ============================================================ */
@@ -27,8 +29,11 @@
   function isSusp(st) { return !!(st && st.suspended); }
 
   /* SM-2 简化实现：quality 0–5（<3 判为遗忘，间隔归零重来）。
-     答对后间隔按 1 → 6 → ivl×EF 递增，EF 随评分微调、下限 1.3 ——
-     与 Anki 默认曲线同源，只保留必要参数，原型里不堆整套调度器。 */
+     答对后间隔按 1 → 6 → ivl×EF 递增，EF 随评分微调、下限 1.3。
+     保留为「回退档」（inkread.srs.engine.v1 = "sm2"），不再是默认。
+     返回的仍是旧状态的副本：只覆盖调度字段，cloze / suspended / excluded
+     这些 Side 字段一律跟着走 —— 旧实现返回裸对象，两个调用点又整体赋值，
+     于是每评一次分就把人手选的洞和挂起标记洗掉了（v1.4-S1 根因之一）。 */
   function sm2Update(quality, st) {
     var q = Math.max(0, Math.min(5, Math.round(quality)));
     var s = st || {};
@@ -45,10 +50,157 @@
     }
     var due = new Date();
     due.setDate(due.getDate() + ivl);
-    return { ef: Math.round(ef * 100) / 100, ivl: ivl, reps: reps, due: ymd(due), last: ymd() };
+    return Object.assign({}, s, { ef: Math.round(ef * 100) / 100, ivl: ivl, reps: reps, due: ymd(due), last: ymd() });
   }
 
-  /* 四档评分对应 SM-2 的 0 / 3 / 4 / 5：比让人记「0–5 该打几分」直观 */
+  /* ============================================================
+     v1.4-S1 · FSRS-5 排算内核（#249）
+     ------------------------------------------------------------
+     为什么要换：SM-2 的「间隔 ×EF」是一条拍出来的曲线，它不区分「难」
+       与「不稳」，也不看这次复习到底拖了多少天；FSRS 用可回忆概率
+       （forgetting curve）显式建模，Anki 4.9+ / 欧路 / 墨墨都已换过去。
+     对拍口径（工单 #249 定案）：
+       · 基准 = ts-fsrs 4.7.1 的 FSRS-5.0，默认 19 权重、r=0.9、上限 36500 天；
+       · 只实现日粒度那条路径（参考实现的 enable_short_term:false），
+         墨读复习队列本就按天排，搬短期学习步（5min/10min）是另一个产品决定；
+       · 中间量一律先 toFixed(8) 收敛再夹区间 —— 少收敛一次，长链复算会
+         放大成肉眼可见的排期漂移；
+       · 四档间隔必须整体算完再套单调阶梯（Again≤Hard<Good<Easy，相邻至少差 1 天），
+         只算用户选的那一档拿不到下界；
+       · 金样 2000 张卡 / 12941 步，实测间隔一致率 100%、S 最大相对偏差 1.9e-6、
+         D 最大绝对偏差 5e-7（全是金样 6 位小数的进位平局）。
+     ============================================================ */
+  var FSRS_W = [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046,
+    1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621];
+  var FSRS_DECAY = -0.5, FSRS_FACTOR = 19 / 81;
+  var FSRS_S_MIN = 0.001, FSRS_S_MAX = 36500, FSRS_IVL_MAX = 36500, FSRS_RR = 0.9;
+  /* 回退开关：显式写 "sm2" 才走老算法，其余（含未设置）都走 FSRS-5 */
+  var ENGINE_KEY = "inkread.srs.engine.v1";
+
+  function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+  function r8(v) { return +v.toFixed(8); }
+  function engineNow() {
+    var e = "";
+    try { e = localStorage.getItem(ENGINE_KEY) || ""; } catch (x) {}
+    return e === "sm2" ? "sm2" : "fsrs5";
+  }
+
+  /* 新卡初值：只由评分档决定 */
+  function fsInitS(g, w) { return Math.max(w[g - 1], 0.1); }
+  function fsInitD(g, w) { return fsConstrainD(w[4] - Math.exp((g - 1) * w[5]) + 1); }
+  function fsConstrainD(d) { return Math.min(Math.max(r8(d), 1), 10); }
+  function fsLinDamp(x, D) { return r8(x * (10 - D) / 9); }
+  function fsMeanRev(a, b, w) { return r8(w[7] * a + (1 - w[7]) * b); }
+
+  /* 难度递进三步：按评分推一把 → 线性衰减（越难推力越小）→ 向「评 Easy 的初值」均值回归 */
+  function fsNextD(D, g, w) {
+    return fsConstrainD(fsMeanRev(fsInitD(4, w), D + fsLinDamp(-w[6] * (g - 3), D), w));
+  }
+
+  /* 遗忘曲线：拖了 t 天之后仍可回忆的概率 */
+  function fsRetrievability(t, S) { return r8(Math.pow(1 + FSRS_FACTOR * t / S, FSRS_DECAY)); }
+
+  function fsRecallS(D, S, R, g, w) {
+    return r8(clamp(S * (1 + Math.exp(w[8]) * (11 - D) * Math.pow(S, -w[9]) *
+      (Math.exp((1 - R) * w[10]) - 1) * (g === 2 ? w[15] : 1) * (g === 4 ? w[16] : 1)),
+      FSRS_S_MIN, FSRS_S_MAX));
+  }
+
+  /* 忘了之后重记起来：Again 的新稳定度与旧稳定度取小 —— 忘了不可能越评越稳 */
+  function fsForgetS(D, S, R, w) {
+    return r8(clamp(w[11] * Math.pow(D, -w[12]) * (Math.pow(S + 1, w[13]) - 1) * Math.exp((1 - R) * w[14]),
+      FSRS_S_MIN, FSRS_S_MAX));
+  }
+
+  /* 目标保留率 → 间隔乘子（r=0.9 时恰为 1.0）；四档一起算再套单调阶梯 */
+  function fsModifier(rr) { return r8((Math.pow(rr, 1 / FSRS_DECAY) - 1) / FSRS_FACTOR); }
+  function fsToIvl(S, mod) { return Math.min(Math.max(1, Math.round(S * mod)), FSRS_IVL_MAX); }
+  function fsLadder(a, h, g, e, mod) {
+    var n = fsToIvl(a, mod), d = fsToIvl(h, mod), u = fsToIvl(g, mod), o = fsToIvl(e, mod);
+    n = Math.min(n, d);
+    d = Math.max(d, n + 1);
+    u = Math.max(u, d + 1);
+    o = Math.max(o, u + 1);
+    return [n, d, u, o];
+  }
+
+  /* 已排过期的判据：只看 s 与 d（SM-2 的 reps 会被 Again 归零，不能作准）。
+     只有 cloze / suspended 这类 Side 字段、没有调度字段的条目算「没排过」。 */
+  function fsScheduled(st) { return !!(st && +st.s > 0 && +st.d > 0); }
+
+  /* 老账折算（惰性迁移的唯一落点）：升级前用 SM-2 排过的卡第一次按 FSRS
+     结算时，把 ivl / ef 折成 s / d，别让它退回「新卡」从零重排。
+       · s ← ivl：目标保留率 0.9 时间隔乘子恰为 1.0，SM-2 的间隔可直接当稳定度；
+       · d ← 5 + (2.5 − ef) × 6 夹进 [1,10]：EF 2.5 是 SM-2 的「中等难度」，
+         对应 FSRS 难度 5；EF 越低（记得越吃力）难度越高；
+       · lapses ← 0：SM-2 不单独记遗忘次数，从零重新观察，比瞎猜诚实。
+     只在真被排过期（reps>0 且有数字 ivl）时折算；只写 side 字段的条目原样返回。
+     due 一律不碰 —— 换内核不该把今天该复习的卡挪走或提前。 */
+  function fsSeed(st) {
+    if (fsScheduled(st) || !(+st.reps > 0) || !(+st.ivl > 0)) return st;
+    return Object.assign({}, st, {
+      s: Math.max(0.1, +st.ivl),
+      d: fsConstrainD(5 + (2.5 - (+st.ef || 2.5)) * 6),
+      lapses: +st.lapses || 0
+    });
+  }
+
+  /* 一次 FSRS 结算：grade 1–4（Again/Hard/Good/Easy），返回旧状态的副本 */
+  function fsrsUpdate(quality, st, today) {
+    var g = fsGrade(quality);
+    var day = today || ymd();
+    var w = FSRS_W, mod = fsModifier(FSRS_RR);
+    var prev = fsSeed(st || {}), out, ivl, elapsed = 0, lapses = +prev.lapses || 0;
+    var reps = (+prev.reps || 0) + 1;
+    if (!fsScheduled(prev)) {
+      out = [
+        { d: fsInitD(1, w), s: fsInitS(1, w) }, { d: fsInitD(2, w), s: fsInitS(2, w) },
+        { d: fsInitD(3, w), s: fsInitS(3, w) }, { d: fsInitD(4, w), s: fsInitS(4, w) }
+      ];
+      ivl = fsLadder(out[0].s, out[1].s, out[2].s, out[3].s, mod);
+    } else {
+      var D = +prev.d, S = +prev.s;
+      elapsed = prev.last ? Math.max(0, fsDiffDays(prev.last, day)) : 0;
+      var R = fsRetrievability(elapsed, S);
+      out = [
+        { d: fsNextD(D, 1, w), s: r8(clamp(S, FSRS_S_MIN, fsForgetS(D, S, R, w))) },
+        { d: fsNextD(D, 2, w), s: fsRecallS(D, S, R, 2, w) },
+        { d: fsNextD(D, 3, w), s: fsRecallS(D, S, R, 3, w) },
+        { d: fsNextD(D, 4, w), s: fsRecallS(D, S, R, 4, w) }
+      ];
+      ivl = fsLadder(out[0].s, out[1].s, out[2].s, out[3].s, mod);
+      if (g === 1) lapses += 1;
+    }
+    var pick = out[g - 1], n = ivl[g - 1];
+    /* ef 继续写：回退到 sm2 时老账还在，别的读者也不会忽然看见字段消失 */
+    return Object.assign({}, prev, {
+      s: pick.s, d: pick.d, reps: reps, lapses: lapses, ivl: n,
+      ef: +prev.ef || 2.5, due: fsAddDays(day, n), last: day
+    });
+  }
+
+  /* 界面四档 0/3/4/5 → FSRS 1..4：忘记=Again，模糊=Hard，记得=Good，熟练=Easy */
+  function fsGrade(quality) {
+    var q = Math.max(0, Math.min(5, Math.round(+quality || 0)));
+    return q < 3 ? 1 : q === 3 ? 2 : q === 4 ? 3 : 4;
+  }
+
+  /* 日期一律按 yyyy-mm-dd 字符串做纯日历运算（造 Date 时钉 T00:00:00Z、
+     取值时用 UTC 读数器）：本机时区不参与，否则 UTC-x 会把「今天+1」算成今天 */
+  function fsDiffDays(a, b) {
+    return Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 864e5);
+  }
+  function fsAddDays(a, n) {
+    var x = new Date(Date.parse(a + "T00:00:00Z") + (+n || 0) * 864e5);
+    return x.getUTCFullYear() + "-" + String(x.getUTCMonth() + 1).padStart(2, "0") + "-" + String(x.getUTCDate()).padStart(2, "0");
+  }
+
+  /* 单一结算入口：两个调用点只认这一个名字，引擎切换不外溢 */
+  function rateUpdate(quality, st, today) {
+    return engineNow() === "sm2" ? sm2Update(quality, st) : fsrsUpdate(quality, st, today);
+  }
+
+  /* 四档评分对应 FSRS 的 Again / Hard / Good / Easy（旧名 SM-2 的 0/3/4/5 沿用）*/
   var RATE = [
     ["0", "忘记", "重来"],
     ["3", "模糊", "明天"],
@@ -282,6 +434,13 @@
     isDueSt: isDueSt,
     isSusp: isSusp,
     sm2Update: sm2Update,
+    fsrsUpdate: fsrsUpdate,
+    rateUpdate: rateUpdate,
+    engineNow: engineNow,
+    fsGrade: fsGrade,
+    fsScheduled: fsScheduled,
+    fsSeed: fsSeed,
+    FSRS_W: FSRS_W,
     RATE: RATE,
     makeCloze: makeCloze,
     pickCloze: pickCloze,

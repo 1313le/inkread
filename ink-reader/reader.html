@@ -164,7 +164,12 @@
             <button class="tool-btn" id="autoStop" title="关闭自动翻页" aria-label="关闭自动翻页"><span id="icAutoStop"></span></button>
           </div>
 
-          <div class="tts-bar" id="ttsBar" style="display:none">
+          <!-- v1.3 S3：朗读条离开文档流，交给 InkWin 托管 —— 可拖走、可收起，
+               于是不必再为它重排分页（旧版一开条就把版心压掉 64~117px）。
+               「收起 ≠ 停止」：条子缩成右下角 #ttsPill 小胶囊，朗读继续；× 才是停止并收起。 -->
+          <div class="tts-bar" id="ttsBar" role="group" aria-label="朗读控制" hidden>
+            <span class="tts-grip" id="ttsGrip" role="group" aria-roledescription="可拖动把手" aria-label="朗读条 拖动把手"
+                  title="按住拖动这条 · 拖到哪儿都不挤压正文（窄屏时贴底常驻，不可拖）"><span id="icTtsGrip"></span></span>
             <button class="tool-btn" id="ttsPrev" title="上一段" aria-label="上一段"><span id="icTtsPrev"></span></button>
             <button class="tool-btn" id="ttsPlay" title="播放 / 暂停" aria-label="播放或暂停"><span id="icTtsPlay"></span></button>
             <button class="tool-btn" id="ttsNext" title="下一段" aria-label="下一段"><span id="icTtsNext"></span></button>
@@ -180,7 +185,13 @@
             </label>
             <button class="tool-btn tts-ctl" id="ttsSpeed" title="朗读设置（语速 / 兜底）">1.0×</button>
             <button class="tool-btn tts-ctl" id="ttsTimer" title="定时停止" aria-label="定时停止"><span id="icTtsTimer"></span></button>
+            <button class="tool-btn" id="ttsMin" title="收起成小胶囊 · 朗读继续（Esc 同效）" aria-label="收起朗读条"><span id="icTtsMin"></span></button>
             <button class="tool-btn" id="ttsStop" title="停止" aria-label="停止"><span id="icStop"></span></button>
+          </div>
+          <!-- 收起态：一颗胶囊装着「播/停 + 第几句」，占一角不挡正文；点中间即还原整条 -->
+          <div class="tts-pill" id="ttsPill" role="group" aria-label="朗读中 · 已收起" hidden>
+            <button class="tool-btn" id="ttsPillPlay" title="播放 / 暂停" aria-label="播放或暂停"><span id="icTtsPillPlay"></span></button>
+            <button class="tp-open" id="ttsPillOpen" title="展开朗读条" aria-label="展开朗读条"><span id="ttsPillFrac">0 / 0</span></button>
           </div>
           <div class="tts-mini-pop" id="ttsSpeedPop" hidden>
             <div class="tmp-row"><b>语速</b><output id="ttsSpeedVal">1.0×</output></div>
@@ -675,7 +686,7 @@
 <script src="voices.js"></script>
 <script src="cast.js"></script>
 <script src="dock.js"></script>
-<!-- srs.js：闪卡调度纯函数（ymd/isDueSt/isSusp/sm2Update/RATE/makeCloze）的单一事实源，
+<!-- srs.js：闪卡调度纯函数（ymd/isDueSt/isSusp/rateUpdate/fsrsUpdate/RATE/makeCloze）的单一事实源，
      闪卡页与阅读页共用（v2.10 起 modes.js 不再自带一份）。必须在 modes.js 之前加载。 -->
 <script src="srs.js"></script>
 <!-- layout.js：智能排版的纯函数（判级 / 出可撤销 diff / 落与撤 / 模型回认），

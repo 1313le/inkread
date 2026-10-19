@@ -1150,8 +1150,8 @@
       a: "离线时主脑只用离线库：① 已导入文档的原文 ② 任务清单 ③ 术语表 ④ 主脑学到的记忆 ⑤ 内置的阅读与用法卡片。可以查文档内容、做摘要提炼、看任务与术语。离线库里没有的内容，主脑会直接说没有 —— 接入模型后才能回答任意问题。" },
     { t: "术语表", k: "术语 译名 术语表 导入 导出 csv 统一 翻译一致",
       a: "主脑页有术语表：内置只读 + 自建可增删。支持粘贴或导入 CSV / TSV（自动认分隔符、跳过表头、预览后再落库），也能导出成 CSV。翻译时全量下发给模型作为固定译名，保证全篇一致；同名以你自建的为准。" },
-    { t: "闪卡与间隔重复", k: "闪卡 间隔 重复 记忆曲线 sm-2 复习 挖空",
-      a: "学习类文档的模式条里有「闪卡」：把高亮挖空成问答卡，按简化的 SM-2 调度回来找你 —— 评分低于 3 判为遗忘、间隔归零；答对则按 1 → 6 → 间隔×EF 递增，EF 随评分微调、下限 1.3。到期队列会驱动徽标与计数，结算落 inkread.cards.v1。" },
+    { t: "闪卡与间隔重复", k: "闪卡 间隔 重复 记忆曲线 fsrs sm-2 复习 挖空",
+      a: "学习类文档的模式条里有「闪卡」：把高亮挖空成问答卡，按 FSRS-5 的遗忘曲线排期回来找你 —— 每次评分都同时更新「这张卡有多稳」（稳定度）和「它对你有多难」（难度），下次到期点定在可回忆概率落到 90% 的那一刻；忘了则新稳定度与旧值取小，重新爬坡。到期队列会驱动徽标与计数，结算落 inkread.cards.v1。老的简化 SM-2 仍可作为回退档启用（本机偏好 inkread.srs.engine.v1 置为 sm2）。" },
     { t: "溯源 = 出处考证", k: "溯源 出处 考证 典故 来源 来历 引文 最早 原话",
       a: "划选一段文字 → 「溯源」，主脑会考据它的来处：先辨类别（典故 / 历史事件 / 人物 / 节日 / 地名 / 名物 / 术语 / 诗句 / 文献引文…），再给最早出处、原始表述、含义与本末、后世沿用与存疑。宁可写「未详」也不编造。卡片下方还会附上它在本书正文里的落点。" },
     { t: "翻译", k: "翻译 译成 互译 多语言 对照 悬停 划词 语向",
@@ -1346,15 +1346,21 @@
     });
   }
 
+  /* 递给模型的相关原文只在这一处拼（v1.3 D4）：脚注要报的字数必须就是发出去的那一份，
+     两处各拼各的，屏上的「随问附上 N 字」就成了凭空捏造的数。 */
+  function passageLines(passages, docId) {
+    return passages.map(function (p) {
+      return "· 《" + (p.docTitle || docTitle(docId) || "本书") + "》" + (p.chapter || "") + " · 第 " + (p.page || "?") + " 页：" + String(p.text || "").slice(0, 200);
+    });
+  }
+
   function buildMessages(q, mems, passages, docId) {
     var parts = [persona()];
     var pre = preamble("chat");
     if (pre) parts.push("", pre);
     if (passages.length) {
       parts.push("", "【相关原文 · 已从书里检索出来，可直接引用】");
-      parts.push(passages.map(function (p) {
-        return "· 《" + (p.docTitle || docTitle(docId) || "本书") + "》" + (p.chapter || "") + " · 第 " + (p.page || "?") + " 页：" + String(p.text || "").slice(0, 200);
-      }).join("\n"));
+      parts.push(passageLines(passages, docId).join("\n"));
     }
     var msgs = [{ role: "system", content: parts.join("\n") }];
     history.slice(-MAX_TURNS).forEach(function (h) { msgs.push(h); });
@@ -1376,11 +1382,14 @@
       /* 在线才需要先捞正文候选喂给模型；离线时 offline() 自己会捞，不必捞两遍 */
       var passages = await retrieve(q, docId, 6);
       var msgs = buildMessages(q, mems, passages, docId);
+      /* 随问附上的原文量就是 passageLines 拼出去的那一份 —— 脚注报的数必须与发出去的一致（v1.3 D4） */
+      var ctxChars = passages.length ? passageLines(passages, docId).join("\n").length : 0;
       var pr = API.promptParams("brain.chat");
+      var st = { net: 0 };
       var out = "";
       try {
         await API.llmMsgs(msgs, Object.assign({
-          cfg: pr.cfg, signal: o.signal || null,
+          cfg: pr.cfg, signal: o.signal || null, stats: st,
           onDelta: function (piece, all) {
             out = all != null ? all : out + piece;
             if (o.onDelta) o.onDelta(piece, out);
@@ -1393,7 +1402,8 @@
         return {
           reply: out, refs: mems.map(function (m) { return m.id; }),
           mode: "online", model: (API.modelCfg() || {}).model,
-          passages: passages.length, hits: passages
+          passages: passages.length, hits: passages,
+          ctxChars: ctxChars, ctxItems: passages.length, net: st.net
         };
       } catch (e) {
         /* 读者按了停止：半句照原样交回去，不去兜离线库。
@@ -1403,7 +1413,9 @@
           return { reply: out, refs: [], mode: "stopped", aborted: true, passages: passages.length, hits: passages };
         }
         var off = await offline(q, { docId: docId });
-        off.note = "模型请求失败：" + API.netErrPhrase(e) + "，已改用离线库作答。";
+        /* 重问过几次要说得出（v1.3 D3）：只报「失败」会把「等了两次才没戏」说成「一次都没通」 */
+        off.note = "模型请求失败：" + API.netErrPhrase(e) +
+          API.retryTail(e && e.netRetried) + "，已改用离线库作答。";
         off.refs = off.refs || mems.map(function (m) { return m.id; });
         return off;
       }

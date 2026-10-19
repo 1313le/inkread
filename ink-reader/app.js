@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "1.2.0";
+window.InkVersion = "1.3.0";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -1918,6 +1918,9 @@ window.InkSync = (function () {
   /* 本机异常账（G4）：只记这台机器上发生过的事，msg 里可能带书名；
      另一台机器不需要看，pull 也不许让对端盖掉（与上面三本同一处理）。 */
   SKIP["inkread.errors.v1"] = 1;
+  /* 排算引擎回退档（#249）：换引擎是「这台机器的练习环境」，跟着上云会把另一台
+     机器的评分口径悄悄改掉；pull 也不许让对端盖掉（与上面四本同一处理）。 */
+  SKIP["inkread.srs.engine.v1"] = 1;
   /* 单键体积闸门：服务端快照接收上限是 4MB（serve.js SYNC_MAX）。旧版不设闸门，
      一颗 4.10MB 的键会把整批请求顶穿 —— 服务端直接掐断连接（ECONNRESET），
      客户端 catch 里又不清 dirty，于是每 20 秒原地重试同一批，整库同步被一颗

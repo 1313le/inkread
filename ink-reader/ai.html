@@ -570,6 +570,14 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
     }
     var online = r.mode === "online";
     var txt = online ? ("主脑 · " + (r.model || "模型")) : "离线库作答" + (r.used && r.used.length ? " · " + r.used.join("/") : "");
+    /* 随问附上多少原文要看得见（v1.3 D4）：数字就是真发出去的那一份；
+       一段都没带时写「未附原文」，不能整条省略 —— 省略了读者只能猜，猜错就以为带了。 */
+    if (online) {
+      txt += r.ctxChars
+        ? " · 随问附上 " + r.ctxChars.toLocaleString("zh-CN") + " 字原文" + (r.ctxItems > 1 ? "（" + r.ctxItems + " 段）" : "")
+        : " · 本次未附原文";
+      if (r.net) txt += " · " + API.retryNote(r.net);
+    }
     return '<div class="msg-mode ' + (online ? "on" : "off") + '">' + icon(online ? "sparkles" : "wifi-off", 11) + esc(txt) + "</div>";
   }
 

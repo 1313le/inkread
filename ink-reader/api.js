@@ -44,7 +44,8 @@
 
 /* INK_SCHEMA —— 键级版本轨（v1.1-S6 G5）。只覆盖 localStorage 键；
    会话键见 INK_SESSION_KEYS，两颗靠「不带 inkread. 前缀」躲枚举的哨兵键见 INK_SENTINEL_KEYS。
-   sync:false 的七颗＝红线三键 + 同步自身三本内部账 + 本机异常账，**不得因进了表就接进同步账**。*/
+   sync:false 的八颗＝红线三键 + 同步自身三本内部账 + 本机异常账 + 排算引擎回退档，
+   **不得因进了表就接进同步账**：表与 app.js 的 InkSync SKIP 是两份名册，加键要同加两处（#249）。*/
 window.INK_SCHEMA = {
   "inkread.ai.cap.v1": { ver: 1, kind: "pref", store: "local", sync: true, label: "模型能力位" },
   "inkread.ai.model.v1": { ver: 1, kind: "private", store: "local", sync: false },
@@ -54,7 +55,7 @@ window.INK_SCHEMA = {
   "inkread.cards.gone.v1": { ver: 1, kind: "ledger", store: "local", sync: true },
   "inkread.cards.search.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.cards.ui.v1": { ver: 1, kind: "ui", store: "local", sync: true },
-  "inkread.cards.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "闪卡" },
+  "inkread.cards.v1": { ver: 2, kind: "ledger", store: "local", sync: true, label: "闪卡" },
   "inkread.cast.v1": { ver: 1, kind: "pref", store: "local", sync: true },
   "inkread.checkins.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "打卡" },
   "inkread.contents.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "导入正文" },
@@ -84,6 +85,7 @@ window.INK_SCHEMA = {
   "inkread.shelf.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "书架" },
   "inkread.signals.v1": { ver: 1, kind: "ledger", store: "local", sync: true },
   "inkread.speedmap.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  "inkread.srs.engine.v1": { ver: 1, kind: "pref", store: "local", sync: false },
   "inkread.stats.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "阅读统计" },
   "inkread.syncinit.v1": { ver: 1, kind: "derived", store: "local", sync: false },
   "inkread.synclog.v1": { ver: 1, kind: "derived", store: "local", sync: true, label: "同步日志" },
@@ -142,8 +144,28 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
   };
 
   /* ver 升高时的升键迁移挂载点：INK_MIGRATIONS[键][备份里的旧 ver] = function(旧值){return 新值}。
-     本版没有任何一条：G5 唯一的结构变化是主题键改名，同值改名走 INK_SCHEMA[k].fromKey，不走这里。 */
+     主题键改名那类同值搬家走 INK_SCHEMA[k].fromKey，不走这里。 */
   window.INK_MIGRATIONS = {};
+
+  /* ------------------------------------------------------------
+     v1.4-S1 · 闪卡排算引擎 SM-2 → FSRS-5（#249）的 ver 1 → 2
+     ------------------------------------------------------------
+     这条迁移是「原样收下」，不是偷懒：新形状只是往每个条目里多写
+     s / d / lapses 三个字段，旧字段一个没删、一个没改语义 ——
+     ver 2 的读者完全能读 ver 1 的数据，所以备份恢复不必就地改写。
+     为什么不在此处补算 s/d：公式属于 srs.js（调度单一事实源），而
+     srs.js 只挂在 cards.html 与 reader.html；若在恢复路径里复述一遍
+     公式，就成了注释里那种「改一处需两处同步」的债。补算改由读取侧
+     惰性做（srs.js 的 fsSeed：评第一次分的那一刻把老账折算进来），
+     到期日始终一分不挪 —— 换内核不该把今天该复习的卡挪走或提前。
+     真正需要就地改写的形状变化（删字段、改类型）出现时再回来写实体。
+     ------------------------------------------------------------ */
+  window.INK_MIGRATIONS["inkread.cards.v1"] = {
+    1: function (old) {
+      if (!old || typeof old !== "object" || Array.isArray(old)) return;
+      return old;
+    }
+  };
   /* ------------------------------------------------------------
      朗读（TTS）辅助：等声线就绪 / 长文分段 / 逐段朗读 + 无声看门狗 / 无头回退
      —— 声线挑选交给 voices.js 的 InkVoice.candidates（语言池 + 关键词 + 性别
@@ -1431,6 +1453,12 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       return m;
     },
 
+    /* 「上游忙」这笔账怎么说，只在这一处（v1.3 D3）：api 内部与阅读页、助手都说同一句，
+       免得「重问 / 重试 / 退避」三种说法在不同文件里各长一半。
+       retryTail 接在长句中段（带分隔点），retryNote 给行内短账用（裸句）。 */
+    retryTail: retryTail,
+    retryNote: retryNote,
+
     /* 书仓书（EPUB）：开书前把正文取进内存，之后 localContent 同步可读。
        失败如实抛出，由阅读页给出「回书架重新导入」的出口，不假装是一本空书。 */
     async diskContent(doc) {
@@ -1696,19 +1724,27 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
           return { code: 0, data: d };
         } catch (e) {
           var st = explainStub(src, ctx);
+          /* 结构化那一栏是本地词表给的 —— 模型的原文只作附件，来源账不能记成 ai */
+          st.by = "rule";
           if (e && e.name === "UnstructuredError") {
             /* 模型说了话、只是没成结构：话如实交出去，别把它按进「解析失败」里 */
             st.unstructured = true;
             st.raw = String(e.raw || "").slice(0, 4000);
             st.note = "模型的回复没有成为可分栏的结构，下面附上它的原话；本地词表解析垫底。";
           } else {
-            st.note = "主脑解析失败：" + window.API.netErrPhrase(e) + "，已改用本地词表解析。";
+            st.note = "主脑解析失败：" + window.API.netErrPhrase(e) +
+              retryTail(e && e.netRetried) + "，已改用本地词表解析。";
           }
           return { code: 0, data: st };
         }
       }
-      await delay(560 + Math.random() * 360);
-      return { code: 0, data: explainStub(src, ctx) };
+      /* 无模型这一路：本机词表 + 句式规则垫底。v1.3 D2 删掉了这里那颗 560ms 假延迟，
+         并把「是谁算的」写进 note —— 界面（reader-app 的 aux-note）如实显示。 */
+      var st0 = explainStub(src, ctx);
+      st0.by = "rule";
+      st0.note = "未配置模型，以下由本机词表与句式规则给出，未调用主脑。" +
+        (st0.note ? "（" + st0.note + "）" : "");
+      return { code: 0, data: st0 };
     },
 
     /* POST /api/ai/trace —— 辅助阅读 · 溯源（出处考证）
@@ -1728,12 +1764,13 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         kind: "", title: "", lead: "", facts: [], origin: null,
         meaning: "", related: [], refs: [], doubt: "", engine: ""
       };
-      if (!src) return { code: 0, data: Object.assign({}, blank, local) };
+      if (!src) return { code: 0, data: Object.assign({}, blank, local, { by: "rule" }) };
 
       var cfg = getModelCfg();
       if (!cfg.baseUrl || !cfg.key || !cfg.model) {
-        await delay(200);
+        /* v1.3 D2：删掉这里那颗 200ms 假延迟 —— 本地落点本机即时就有，不必装成在等云端 */
         return { code: 0, data: Object.assign({}, blank, local, {
+          by: "rule",
           note: "未配置模型，暂时只能给出「在本文中的落点」。到「主脑 · 模型配置」填好接口地址与密钥，即可考据它的出处与本原。"
         }) };
       }
@@ -1750,13 +1787,14 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
           note: local.hits.length ? "" : "正文里没有它的落点，以下为出处考据。"
         }) };
       } catch (e) {
-        await delay(120);
         var un = e && e.name === "UnstructuredError";
         return { code: 0, data: Object.assign({}, blank, local, {
+          by: "rule",
           unstructured: un, raw: un ? String(e.raw || "").slice(0, 4000) : "",
           note: un
             ? "模型的回复没有成为可分栏的结构，下面如实附上它的原话。"
-            : "考据请求失败：" + window.API.netErrPhrase(e) + "，已退回「在本文中的落点」。"
+            : "考据请求失败：" + window.API.netErrPhrase(e) +
+              retryTail(e && e.netRetried) + "，已退回「在本文中的落点」。"
         }) };
       }
     },
@@ -1782,13 +1820,26 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
           var loc = localSearch(q, list);
           var un = e && e.name === "UnstructuredError";
           if (un) { loc.unstructured = true; loc.raw = String(e.raw || "").slice(0, 2000); }
+          loc.by = "rule";
+          loc.why = "failed";
+          /* fail 是给界面那一行短账用的（「主脑没成 · 超时」），note 才是完整说明 */
+          loc.fail = String(un ? "回复没成结构" : window.API.netErrPhrase(e)).slice(0, 40);
           loc.note = (un ? "主脑的回复没有成为可分栏的结构" : "主脑检索失败：" + window.API.netErrPhrase(e))
             + "，已改用本地字符检索。";
           return { code: 0, data: loc };
         }
       }
-      await delay(560 + Math.random() * 380);
-      return { code: 0, data: localSearch(q, list) };
+      /* 走到这里 = 主脑没参与（没配模型 / 没描述 / 正文没有块）。v1.3 D2 删掉了这颗 560ms 假延迟，
+         并把来源写成 by:"rule" 交给界面说真话 —— 旧界面拿 hasModel() 反推来源，
+         模型配了但这一次没打成时会被错标成「未接模型」。 */
+      var loc0 = localSearch(q, list);
+      loc0.by = "rule";
+      if (q && list.length && !(cfg.baseUrl && cfg.key && cfg.model)) {
+        loc0.why = "no-model";
+        loc0.note = "未配置模型，以下由本机字符片匹配给出，未调用主脑。" +
+          (loc0.note ? " " + loc0.note : "");
+      }
+      return { code: 0, data: loc0 };
     },
 
     /* POST /api/sync —— 演示同步：原型没有云端，所有数据本机即时落盘（localStorage），
@@ -1973,13 +2024,13 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
     classifyHeuristic(fileName, text, fmt) { return kindByHeuristic(fileName, text, fmt); },
     /* POST /api/ai/mode —— 内容类别识别：返回推荐阅读模式 + 依据
        入参：doc（书架元数据）、blocks（正文块）
-       出参：{mode, conf, why:[…], scores:{book,paper,study,comic}, alt, note}
-       ① kindmap 命中（书名含用户历史归类过的关键词）→ 以映射类别对应的阅读模式为推荐，
-          置信度提高，why 里注明「依据你的历史归类」；
-       ② 其余走本地启发式分类（guessMode：书架归类 + 正文排版特征打分），未调用任何模型 ——
-          note 里如实说明，不宣称 AI；将来接模型时替换实现、响应形状不变。 */
+       出参：{mode, conf, why:[…], scores:{book,paper,study,comic}, alt, by:"ai"|"rule", note}
+       双轨（v1.3 D1）：
+       ① kindmap 命中（书名含用户历史归类过的关键词）→ 本机账就够定，不打网络，by:"rule"；
+       ② 其余先算本机打分表（guessMode），配了模型就把这张表交给主脑判（mode.suggest 槽）：
+          模式键落在白名单内才认，标 by:"ai"；未配 / 失败 / 越界一律退回本机打分表并如实标 by:"rule"。
+       以前这里只有 ② 的本地那一半，外面还包着一颗 400ms 假延迟装「正在识别」—— 那颗已删。 */
     async suggestMode(doc, blocks) {
-      await delay(420 + Math.random() * 320);
       var d = doc || {};
       var hit = kindmapLookup(d.title || "");
       if (hit) {
@@ -1987,15 +2038,46 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         var sc = { book: 0, paper: 0, study: 0, comic: 0 };
         sc[mode] = 72;
         return { code: 0, data: {
-          mode: mode, conf: 82, learned: true,
+          mode: mode, conf: 82, learned: true, by: "rule",
           why: ["依据你的历史归类：含「" + hit.key + "」的文档你归为「" + kindCN(hit.kind) + "」"],
           scores: sc, alt: null, ambiguous: false,
           note: "依据你的历史归类推荐（kindmap 本机学习所得，未调用模型）。"
         } };
       }
       var r = guessMode(doc, blocks);
-      r.note = "本地启发式分类：依据书架归类与正文排版特征打分，未调用模型。";
-      return { code: 0, data: r };
+      r.by = "rule";
+      r.note = "本机打分：依据书架归类与正文排版特征逐项加权，未调用模型。";
+      var cfg = getModelCfg();
+      if (!(cfg.baseUrl && cfg.key && cfg.model)) return { code: 0, data: r };
+
+      /* 模型只看本机算好的证据下结论：正文不必重发给它，本机也不假装没参与 */
+      try {
+        var p = await Prompt.run("mode.suggest", modeEvidence(d, r),
+          { cfg: cfg, vars: { modeKeys: MODE_DESC } });
+        var mk = String((p.j || {}).mode || "").trim();
+        if (MODE_KEYS.indexOf(mk) < 0) {
+          r.note = "主脑回了一个不在名册里的模式键「" + (mk || "空") + "」，已改用本机打分。";
+          return { code: 0, data: r };
+        }
+        var localTop = r.mode;
+        var mc = Math.round(Number((p.j || {}).conf));
+        r.by = "ai";
+        r.mode = mk;
+        r.conf = (isFinite(mc) && mc >= 0 && mc <= 100) ? mc : null;
+        r.ambiguous = r.conf === null ? (mk !== localTop) : r.conf < 55;
+        r.alt = mk === localTop ? r.alt : localTop;
+        r.why = ["主脑判读：" + String((p.j || {}).reason || "未给出理由").slice(0, 60)]
+          .concat(r.why).slice(0, 4);
+        r.note = "由你接入的模型判读（" + p.model + "），本机打分表列在下面各条依据里" +
+          (p.retried ? " · 格式纠正重试过 1 次" : "") + retryTail(p.net) + "。";
+        return { code: 0, data: r };
+      } catch (e) {
+        r.note = (e && e.name === "UnstructuredError")
+          ? "主脑的回复没有成为可解析的 JSON，以下为本机打分结果。"
+          : "主脑判读失败：" + window.API.netErrPhrase(e) + retryTail(e && e.netRetried) +
+            "，以下为本机打分结果。";
+        return { code: 0, data: r };
+      }
     },
 
     /* POST /api/translate —— 翻译（多语言互译）
@@ -2337,12 +2419,27 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         "再结合文体（对话密集偏紧凑、散文诗歌偏疏朗）。" +
         "严格输出一行 JSON，不要任何多余文字：{\"den\":\"档位键\",\"reason\":\"一句话中文理由（不超过 40 字）\"}" },
 
+    { k: "mode.suggest", n: "模式 · 内容类别识别", g: "阅读", json: 1, temp: 0.2, maxTokens: 320, timeout: 20000,
+      fields: ["mode", "reason"],
+      ph: { modeKeys: "四种阅读模式键与各自含义（产品内固定名册，改这里不改白名单）" },
+      t: "你是中文读物的内容类别识别器。读者翻开一本书时，你会拿到这本书在本机的打分表：" +
+        "书架归类加上正文排版特征，每一分都写了加分理由。打分表只是线索，不是结论 —— " +
+        "你的活是读这些证据，判断这本书最适合用哪种阅读模式打开。" +
+        "模式键只能从这些里选一个：{{modeKeys}}。" +
+        "取舍原则：整幅图版为主而文字极少 → comic；有摘要 / 参考文献 / 独立公式 → paper；" +
+        "含可打卡任务，或明显是教材讲义、计划清单 → study；连续长段落叙事说理 → book。" +
+        "证据互相打架时按更硬的正文特征判，不要只顺从书架上那个可能填错了的分类。" +
+        "证据不足也要选你更倾向的一档，并在 reason 里说清缺了什么。" +
+        "严格输出一行 JSON，不要任何多余文字：" +
+        "{\"mode\":\"模式键\",\"conf\":0到100的整数,\"reason\":\"一句话中文依据（不超过 40 字）\"}" },
+
     { k: "brain.chat", n: "主脑 · 人设", g: "主脑", json: 0, temp: 0.6, maxTokens: null, timeout: 60000,
       ph: { honor: "读者称呼（「读者希望被称为「×」。」，默认名时留空）" },
       t: "你是「墨读」的主脑 —— 这套水墨屏阅读器的中枢智能。{{honor}}\n" +
         "\n" +
-        "【你的职责】\n" +
-        "你不只是对话框里的助手。本程序里所有用到 AI 的地方 —— 翻译、溯源（出处考证）、解析、检索、内容模式识别 —— 都由你完成。这里是你的对话入口，主要用于讨论读者已导入文档的内容、做总结与提炼，但你具备你所接入模型应有的全部能力：写作、编程、数学、翻译、常识、推理、创意，任何通用问题都直接、完整、认真地回答。不要因为「这是阅读器」就拒绝或敷衍与文档无关的问题。\n" +
+        "【你的职责 · 边界照实说】\n" +
+        "这里是对话入口：你读读者给的书与段落，负责答问、总结与提炼。你具备所接入模型应有的全部能力 —— 写作、编程、数学、翻译、常识、推理、创意，任何通用问题都直接、完整、认真地回答，不要因为「这是阅读器」就拒绝或敷衍与文档无关的问题。\n" +
+        "其余用到模型的地方不在你这条对话里发生：翻译、溯源、解析、检索、内容模式识别、目录扫描、排版归一、朗读角色归属，各自在阅读页对应的面板里独立调用同一个模型，由那个面板负责把结果交给读者 —— 凡要改动读者东西的（改目录、重排正文、落地任务与闪卡），都必须读者点头才动手。别向读者宣称你能在这里替他们做完那些事。\n" +
         "\n" +
         "【作答要求】\n" +
         "1. 先直接给答案，再补理由；不要用「作为 AI」之类的空话开场。\n" +
@@ -2378,6 +2475,20 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         "{\"nodes\":[{\"x\":\"章节名，照抄清单里的写法\",\"lv\":1,\"h\":标题号}],\"note\":\"可空，一句话\"}\n" +
         "lv 只有 1 / 2 / 3 三档，按目录的缩进与编号层级判。h 给这一条对应的标题号；认不出对应项就省略 h 字段。\n" +
         "标题号只能取自清单里给出的编号，不许自己编；章节名照抄目录清单里的写法，不要改写、不要补全。" },
+
+    { k: "toc.extract", n: "目录 · AI 扫描全书结构", g: "目录", json: 1, temp: 0.1, maxTokens: 1800, timeout: 45000,
+      fields: ["note"],
+      ph: { cands: "本机按形状预筛出的候选标题行（行首是块号）", sample: "正文抽样" },
+      t: "你是书籍结构编辑。这本书本机没能从正文里认出目录。下面第一段是**按形状预筛出的候选标题行**" +
+        "（每行行首是块号），第二段是正文抽样，用来看这些行到底是标题还是普通句子。\n" +
+        "候选行：\n{{cands}}\n\n正文抽样：\n{{sample}}\n" +
+        "只输出 JSON，不要 markdown 围栏：\n" +
+        "{\"toc\":[{\"bi\":块号,\"lv\":1,\"x\":\"照抄候选行里的标题文字\"}],\"note\":\"可空，一句话\"}\n" +
+        "lv 只有 1 / 2 / 3 三档：章 / 篇给 1，节给 2，小节给 3。\n" +
+        "bi 只能取自候选行里出现过的块号，同一块只许出现一次；x 照抄候选行的文字（去掉行尾的页码与点线），" +
+        "不要改写、不要补全，更不要凭你对这本书的记忆添加候选里没有的章节。\n" +
+        "候选行里不像标题的一律跳过（正文句子、图表题注、页眉页脚、参考文献条目）—— " +
+        "漏一章只是目录少一行，多塞一行会把读者带到错的地方去。" },
 
     { k: "layout.detect", n: "排版 · 文体判定", g: "排版", json: 1, temp: 0.1, maxTokens: 300, timeout: 15000,
       fields: ["kind", "conf"],
@@ -2527,11 +2638,12 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       if (d.json || o.json) {
         var r = await askJson(pr.cfg, sys, usr,
           Object.assign({ fields: o.fields || d.fields }, pr.send));
-        return { text: r.raw, j: r.j, via: r.via, raw: r.raw, retried: r.retried, key: key, model: pr.model };
+        return { text: r.raw, j: r.j, via: r.via, raw: r.raw, retried: r.retried, net: r.net, key: key, model: pr.model };
       }
+      var st = { net: 0 };
       var txt = await callChat(pr.cfg, sys, usr,
-        Object.assign({ onDelta: o.onDelta, signal: o.signal }, pr.send));
-      return { text: txt, j: null, via: "chat", raw: txt, retried: false, key: key, model: pr.model };
+        Object.assign({ onDelta: o.onDelta, signal: o.signal, stats: st }, pr.send));
+      return { text: txt, j: null, via: "chat", raw: txt, retried: false, net: st.net, key: key, model: pr.model };
     },
     /* 只要文本、不要调用（流式多轮的两处自己拼 messages：主脑对话、书页旁助手） */
     sys(key, vars) { return promptText(key, vars); },
@@ -2762,69 +2874,45 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
     try { return await p; } finally { INFLIGHT.delete(ikey); }
   }
 
-  async function chatRun(cfg, sys, user, o, stream) {
+  /* 一次出网：请求体已由上层拼好，这里只管超时、发、把文字取回来。
+     每次尝试自带一个超时控制器 —— 退避重问时旧计时器必须跟着作废，
+     否则第一次的 15 秒会掐死第二次刚起的请求。 */
+  async function llmAttempt(cfg, body, o, stream) {
     var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, o.timeout || 15000);
+    /* 外部叫停（助手上的「停止」）：把调用方的 signal 接到内部控制器上。
+       abort 出来的错误加一个 aborted 标记 —— 上层要分清「读者按了停止」与「模型答不上」，
+       前者不该去兜离线库，也不该被当成上游忙而自动重问。 */
+    if (o.signal && typeof o.signal.addEventListener === "function") {
+      if (o.signal.aborted) {
+        if (ctl) ctl.abort();
+        else { clearTimeout(timer); throw mkAborted(); }
+      } else o.signal.addEventListener("abort", function () { if (ctl) ctl.abort(); });
+    }
     try {
-      var body = {
-        model: cfg.model,
-        temperature: o.temp == null ? (Number(cfg.temp) || 0.4) : o.temp,
-        max_tokens: o.maxTokens || Math.min(Number(cfg.maxTokens) || 1024, 2048),
-        stream: !!stream,
-        messages: [{ role: "system", content: sys }, { role: "user", content: user }]
-      };
-      /* response_format 是各家 OpenAI 兼容层里最不一致的一个字段：认的能显著提升结构命中，
-         不认的直接 400（而不是忽略）。带不带由能力位决定，撞过一次就不再带（askJson 记）。 */
-      if (o.jsonFormat) body.response_format = { type: "json_object" };
       var res = await llmFetch({
         baseUrl: cfg.baseUrl, key: cfg.key, path: "/chat/completions", method: "POST",
         signal: ctl ? ctl.signal : undefined, body: body
       });
       if (!res.ok) {
-        /* 状态码 + 一小段响应体留在错误上：上层要分清「这一家不认 response_format」
-           和「密钥错了 / 限流」—— 前者该换请求形状，后者重试一百次也是白。 */
+        /* 状态码 + 一小段响应体 + Retry-After 留在错误上：上层要分清「这一家不认 response_format」
+           和「密钥错了 / 限流」—— 前者该换请求形状，后者该退避重问，密钥错了重问一百次也是白。 */
         var snip = "";
         try { snip = String(await res.text()).slice(0, 200).replace(/\s+/g, " "); } catch (e) {}
         var er = new Error("HTTP " + res.status + (snip ? " · " + snip : ""));
         er.status = res.status; er.body = snip;
+        er.retryAfter = retryAfterOf(res);
         throw er;
       }
-      if (stream && res.body && res.body.getReader) return await readStream(res, o.onDelta);
-      var j = await res.json();
-      var txt = String(((((j.choices || [])[0] || {}).message) || {}).content || "").trim();
-      if (!txt) throw new Error("响应为空");
-      return txt;
-    } finally { clearTimeout(timer); }
-  }
-
-  /* 多轮通路：与 chatRun 同一套超时 / 流式 / 错误处理，只是把 messages 交给调用方拼。
-     主脑对话需要「人设 + 记忆 + 多轮上下文」，单轮拼不出这个形状。 */
-  async function chatMsgs(cfg, messages, o, stream) {
-    var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
-    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, o.timeout || 30000);
-    /* 外部叫停（v2.23 W1e 助手上的「停止」）：把调用方的 signal 接到内部控制器上。
-       abort 出来的错误加一个 aborted 标记 —— 上层要分清「读者按了停止」与「模型答不上」，
-       前者不该去兜离线库，否则一次停止看起来像一次故障。 */
-    if (o.signal && typeof o.signal.addEventListener === "function") {
-      if (o.signal.aborted && ctl) ctl.abort();
-      else if (o.signal.aborted) { clearTimeout(timer); throw mkAborted(); }
-      else o.signal.addEventListener("abort", function () { if (ctl) ctl.abort(); });
-    }
-    function mkAborted() { var e = new Error("已停止"); e.aborted = true; return e; }
-    try {
-      var res = await llmFetch({
-        baseUrl: cfg.baseUrl, key: cfg.key, path: "/chat/completions", method: "POST",
-        signal: ctl ? ctl.signal : undefined,
-        body: {
-          model: cfg.model,
-          temperature: o.temp == null ? (Number(cfg.temp) || 0.6) : o.temp,
-          max_tokens: o.maxTokens || Math.min(Number(cfg.maxTokens) || 1024, 2048),
-          stream: !!stream,
-          messages: messages
-        }
-      });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      if (stream && res.body && res.body.getReader) return await readStream(res, o.onDelta);
+      if (stream && res.body && res.body.getReader) {
+        var sent = 0;
+        try {
+          return await readStream(res, function (t) {
+            sent += String(t || "").length;
+            if (o.onDelta) o.onDelta(t);
+          });
+        } catch (se) { if (sent) se.partial = sent; throw se; }
+      }
       var j = await res.json();
       var txt = String(((((j.choices || [])[0] || {}).message) || {}).content || "").trim();
       if (!txt) throw new Error("响应为空");
@@ -2833,6 +2921,91 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       if (o.signal && o.signal.aborted) e.aborted = true;
       throw e;
     } finally { clearTimeout(timer); }
+  }
+
+  /* 上游抖动自愈（v1.3 D3）：只对「等一会儿再问，可能就成了」的错重问 ——
+     429 / 5xx / 超时 / 连接层失败；400（请求形状不认）与 401·403（密钥问题）不重问，
+     「响应为空」也不重问（上游好意回了个空，重问是烧读者的额度）。
+     预算两次：400ms → 1200ms；服务端给了 Retry-After 就听它的（上限 8 秒，别让人干等）。
+     已经吐过字的流式请求不重问 —— 半句再重问，读者看到的是两遍话。 */
+  var LLM_RETRY = 2;
+  function retryableErr(e) {
+    if (!e || e.aborted || e.partial) return false;
+    var s = Number(e.status) || 0;
+    if (s) return s === 429 || s >= 500;
+    return /abort|timed out|timeout|failed to fetch|networkerror|net::|load failed|上游不可达/i
+      .test(String((e && e.message) || ""));
+  }
+  function retryWaitMs(e, n) {
+    var ra = e && e.retryAfter;
+    if (typeof ra === "number" && isFinite(ra) && ra > 0) return Math.min(Math.round(ra * 1000), 8000);
+    return n === 0 ? 400 : 1200;
+  }
+  function retryAfterOf(res) {
+    try {
+      var h = res && res.headers && res.headers.get ? String(res.headers.get("retry-after") || "") : "";
+      var n = Number(h);
+      return h && isFinite(n) && n > 0 ? n : null;   /* HTTP-date 形态不认：各家实现太乱 */
+    } catch (e) { return null; }
+  }
+  function mkAborted() { var e = new Error("已停止"); e.aborted = true; return e; }
+
+  /* 退避循环：单轮 / 多轮 / 流式都从这里出网，「重问几次、什么错才重问」只在这一处定。
+     调用方可给一个 stats 空对象，回来时 stats.net 就是这一趟自动重问的次数 ——
+     界面据此如实说「上游忙，自动重问过 1 次」，而不是把等待悄悄吞掉。 */
+  async function llmChat(cfg, body, o, stream) {
+    var st = o.stats || null;
+    for (var at = 0; ; at++) {
+      try {
+        var txt = await llmAttempt(cfg, body, o, stream);
+        if (st) st.net = (st.net || 0) + at;
+        return txt;
+      } catch (e) {
+        if (at >= LLM_RETRY || !retryableErr(e)) {
+          if (st) st.net = (st.net || 0) + at;
+          e.netRetried = at;
+          throw e;
+        }
+        await delay(retryWaitMs(e, at));
+        if (o.signal && o.signal.aborted) {
+          if (st) st.net = (st.net || 0) + at;
+          throw mkAborted();
+        }
+      }
+    }
+  }
+
+  /* 自动退避重问要留声（v1.3 D3）：那 400ms 与 1.2 秒是真等过的，
+     把等待悄悄吞掉，界面就把一次云端抖动画成「模型秒回」。
+     clause 给界面行内用，tail 给长句中段接用 —— 两处同词，不会长成「重问 / 重试 / 退避」三种方言。 */
+  function retryNote(n) { return n > 0 ? "上游忙，已自动重问 " + n + " 次" : ""; }
+  function retryTail(n) { var c = retryNote(n); return c ? " · " + c : ""; }
+
+  async function chatRun(cfg, sys, user, o, stream) {
+    var body = {
+      model: cfg.model,
+      temperature: o.temp == null ? (Number(cfg.temp) || 0.4) : o.temp,
+      max_tokens: o.maxTokens || Math.min(Number(cfg.maxTokens) || 1024, 2048),
+      stream: !!stream,
+      messages: [{ role: "system", content: sys }, { role: "user", content: user }]
+    };
+    /* response_format 是各家 OpenAI 兼容层里最不一致的一个字段：认的能显著提升结构命中，
+       不认的直接 400（而不是忽略）。带不带由能力位决定，撞过一次就不再带（askJson 记）。 */
+    if (o.jsonFormat) body.response_format = { type: "json_object" };
+    return llmChat(cfg, body, o, stream);
+  }
+
+  /* 多轮通路：与 chatRun 同一套超时 / 退避 / 流式 / 错误处理，只是把 messages 交给调用方拼。
+     主脑对话需要「人设 + 记忆 + 多轮上下文」，单轮拼不出这个形状，默认超时给到 30 秒。 */
+  async function chatMsgs(cfg, messages, o, stream) {
+    var body = {
+      model: cfg.model,
+      temperature: o.temp == null ? (Number(cfg.temp) || 0.6) : o.temp,
+      max_tokens: o.maxTokens || Math.min(Number(cfg.maxTokens) || 1024, 2048),
+      stream: !!stream,
+      messages: messages
+    };
+    return llmChat(cfg, body, Object.assign({}, o, { timeout: o.timeout || 30000 }), stream);
   }
 
   /* 上下文提供者：由 brain.js 注册。所有 AI 功能的系统前言都要先过它 ——
@@ -3036,17 +3209,21 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
     return null;
   }
 
-  /* 要一份 JSON 的唯一入口。成功返回 {j, via, raw, retried}；
+  /* 要一份 JSON 的唯一入口。成功返回 {j, via, raw, retried, net}；
      拿不到结构抛 UnstructuredError（带 raw，由调用方按「未结构化」如实展示）；
-     网络 / 鉴权 / 超时照常上抛 —— 那些不是格式问题，不该用纠错重试去掩盖。 */
+     网络 / 鉴权 / 超时照常上抛 —— 那些不是格式问题，不该用纠错重试去掩盖。
+     retried = 为「让它成结构」多问的那一次；net = 为「上游忙 / 断了」自动退避重问的次数。
+     两笔账分开记：前者说明模型的话不好读，后者说明服务在抖，读者该看到的不是同一句话。 */
   async function askJson(cfg, sys, usr, o) {
     var opts = o || {};
     var useFmt = capJsonOk(cfg);
+    var stats = { net: 0 };
     var raw = "";
     for (var guard = 0; guard < 3; guard++) {
       try {
         raw = await callChat(cfg, sys, usr, {
-          temp: opts.temp, maxTokens: opts.maxTokens, timeout: opts.timeout, jsonFormat: useFmt
+          temp: opts.temp, maxTokens: opts.maxTokens, timeout: opts.timeout,
+          jsonFormat: useFmt, stats: stats
         });
         break;
       } catch (e) {
@@ -3059,7 +3236,7 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       }
     }
     var p = parseStructured(raw, opts.fields);
-    if (p) return { j: p.j, via: p.via, raw: raw, retried: false };
+    if (p) return { j: p.j, via: p.via, raw: raw, retried: false, net: stats.net };
 
     var again = "";
     try {
@@ -3068,17 +3245,18 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       again = await callChat(cfg, sys, usr + "\n\n——\n上次你返回的内容不是合法 JSON：\n" +
         String(raw).slice(0, 600) +
         "\n请按上面规定的格式重发一次。", {
-        temp: 0, maxTokens: opts.maxTokens, timeout: opts.timeout, jsonFormat: useFmt
+        temp: 0, maxTokens: opts.maxTokens, timeout: opts.timeout, jsonFormat: useFmt, stats: stats
       });
     } catch (e) {
       /* 纠正重试自己也没打成：不算新错误，模型第一次的话是真说过了 */
     }
     var p2 = parseStructured(again, opts.fields);
-    if (p2) return { j: p2.j, via: p2.via, raw: again, retried: true };
+    if (p2) return { j: p2.j, via: p2.via, raw: again, retried: true, net: stats.net };
 
     var err = new Error("模型未返回可解析的结构");
     err.name = "UnstructuredError";
     err.raw = String(again || raw || "");
+    err.net = stats.net;
     throw err;
   }
 
@@ -3373,7 +3551,9 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         : [],
       doubt: String(j.doubt || ""),
       engine: r.model,
-      via: r.via, ctxChars: c.chars, retried: !!r.retried
+      /* 走到这里 = 结构化的那一栏真出自模型；本地落点只是附层（v1.3 D2 来源账） */
+      by: "ai",
+      via: r.via, ctxChars: c.chars, retried: !!r.retried, net: r.net || 0
     };
   }
 
@@ -3382,6 +3562,27 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
      依据来源：书架元数据（type/theme/tags）+ 正文块构成
      ------------------------------------------------------------ */
   var COMIC_TAG = /漫画|条漫|图册|绘本|manga|comic|webtoon|连环画/;
+
+  /* 四种阅读模式：键是产品内的固定名册（modes.js 的 META 同一套），
+     MODE_DESC 只负责把这几个键翻译给模型听 —— 白名单认的是键，不是这句话。 */
+  var MODE_KEYS = ["book", "paper", "study", "comic"];
+  var MODE_DESC = "book＝书籍（连续长段落叙事说理）/ paper＝文献（摘要、参考文献、公式）/ " +
+    "study＝学习（教材讲义、可打卡任务、计划笔记）/ comic＝漫画（整幅图版为主，文字极少）";
+
+  /* 递给主脑的证据 = 本机打分表本身：书名与归类、各模式得分、每一条加分理由、本机结论。
+     正文不再重发一遍 —— 排版特征已经在这里量化过了。 */
+  function modeEvidence(doc, r) {
+    var d = doc || {}, s = r.scores || {};
+    var order = Object.keys(s).sort(function (a, b) { return s[b] - s[a]; });
+    return "书名《" + (d.title || "未命名") + "》· 书架归类 " + (d.type || "未分类") +
+      (d.theme ? " · 主题 " + d.theme : "") + " · 标签 " + ((d.tags || []).join("、") || "无") +
+      "\n本机打分（分值从高到低）：" + order.map(function (k) { return k + " " + s[k]; }).join(" / ") +
+      "\n加分依据：" + (r.why.length
+        ? "\n" + r.why.map(function (w) { return "- " + w; }).join("\n")
+        : "无（书架元数据与正文特征都没给出硬证据）") +
+      "\n本机结论：" + r.mode + "（置信 " + r.conf + "%，" +
+      (r.ambiguous ? "与第二名咬得很近" : "领先第二名") + "）";
+  }
 
   function guessMode(doc, blocks) {
     var d = doc || {}, list = Array.isArray(blocks) ? blocks : [];
@@ -3574,7 +3775,7 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       top = list.slice(0, 2).map(function (e) { return { e: e, s: 0, at: 0, term: "", n: 0 }; });
     }
     return {
-      mode: "ai", count: top.length, query: q, note: note, local: true,
+      mode: "ai", by: "rule", count: top.length, query: q, note: note, local: true,
       hits: top.map(function (x) {
         return {
           bi: x.e.bi, anchor: x.e.anchor, chapter: x.e.chapter,
@@ -3612,8 +3813,8 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       });
     });
     return {
-      mode: "ai", count: hits.length, query: query, engine: r.model,
-      via: r.via, retried: !!r.retried,
+      mode: "ai", by: "ai", count: hits.length, query: query, engine: r.model,
+      via: r.via, retried: !!r.retried, net: r.net || 0,
       note: hits.length ? String(j.note || "").slice(0, 120) : (String(j.note || "").slice(0, 120) || "主脑认为正文里没有与描述相符的段落。"),
       hits: hits.slice(0, 5)
     };
@@ -3641,7 +3842,9 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
           .map(function (t) { return { w: String(t.w).slice(0, 24), pos: String(t.pos || "").slice(0, 10), mean: String(t.mean || "").slice(0, 120) }; })
         : [],
       engine: r.model, note: "",
-      via: r.via, ctxChars: c.chars, retried: !!r.retried
+      /* 这一栏的分段与术语真出自模型；退回本地词表的那两条路径各标自己的账（v1.3 D2） */
+      by: "ai",
+      via: r.via, ctxChars: c.chars, retried: !!r.retried, net: r.net || 0
     };
   }
 

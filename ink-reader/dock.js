@@ -38,6 +38,7 @@
        min: { w: 300, h: 320 },          // 浮动态最小尺寸
        dock: { min: 260, max: 520, width: 320 },   // 停靠态宽度区间与默认宽
        snap: 24,                         // 边缘吸附带（px）
+       dockable: false,                  // 横条那种浮层：贴边停靠 / 铺满没有意义（v1.3 S3 朗读条）
        maxTop: function () { return 0; },// 最大化时的上界（避开顶栏）
        narrow: function () { return false; },      // true → 强制最大化
        onLayout: function (l) {},        // 停靠态：宿主据此重排主内容
@@ -238,6 +239,10 @@
     var dkMin = (opts.dock && opts.dock.min) || 260;
     var dkMax = (opts.dock && opts.dock.max) || 520;
     var SNAP = opts.snap == null ? 24 : opts.snap;
+    /* 横条那一类浮层（v1.3 S3 朗读条）：贴左右边 = 变成 320 宽的侧栏，铺满 = 吃掉整屏，
+       两种形态对它都不是「更大一点的工作区」而是「挡住一切」。dockable:false 只留浮动，
+       拖到边缘不吸附、双击与 Enter 都不切形态 —— 组件本身仍然是它的位置与尺寸记账方。 */
+    var dockable = opts.dockable !== false;
     var GAP = 8;                                   /* 浮动态离边最小距离 */
     var narrow = opts.narrow || function () { return false; };
     var maxTop = opts.maxTop || function () { return 0; };
@@ -286,6 +291,9 @@
         st.state = old.max ? "max" : "float";
       }
     }
+    /* dockable:false 的窗只认浮动：账上若还留着别处的形态（改配置前存的），当场收回浮动，
+       否则 geom() 会照着旧账铺满 / 让位，钮又点不回去。 */
+    if (!dockable) st.state = "float";
 
     function save() {
       var m = load();
@@ -610,7 +618,7 @@
          上边缘=铺满（v2.23 W2）—— VS / Windows 的「拖到顶部最大化」是肌肉记忆，
          原来只有「双击标题栏」一条路，找不到的人就只能一直浮着。 */
       var side = null;
-      if (!e.ctrlKey && !e.metaKey) {
+      if (dockable && !e.ctrlKey && !e.metaKey) {
         var px = e.clientX - hr.left, py = e.clientY - hr.top, g = geom();
         /* v2.23 W2 边角仲裁：左右缘优先于上缘。
            原先上缘排第一，实测「把浮着的抽屉往右一甩」会落进铺满——抽屉浮起后标题条
@@ -1006,19 +1014,20 @@
     function apply(anim) { paint(!!anim); syncEdge(); }
     function setState(s, o) {
       if (s !== "float" && s !== "docked" && s !== "max") return;
+      if (!dockable && s !== "float") return;
       if (s === "docked" && o && (o.side === "left" || o.side === "right")) { st.side = o.side; st.maxSide = o.side; }
       st.state = s;
       save(); paint(true); syncEdge();
     }
     function toggleMax() {
-      if (narrow()) return false;
+      if (!dockable || narrow()) return false;
       st.state = st.state === "max" ? (st.maxSide ? "docked" : "float") : "max";
       if (st.state === "docked") st.side = st.maxSide;
       save(); paint(true); syncEdge();
       return st.state === "max";
     }
     function toggleDock() {
-      if (narrow()) return false;
+      if (!dockable || narrow()) return false;
       if (st.state === "docked") { st.state = "float"; }
       else { st.state = "docked"; st.side = st.maxSide || "right"; }
       save(); paint(true); syncEdge();

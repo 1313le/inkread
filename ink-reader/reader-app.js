@@ -948,7 +948,7 @@
      跳错的目录比没有目录更坏，读者会以为自己点的是第三章。
      ============================================================ */
   var TOC = { src: "", nodes: [], links: [] };
-  var BI_BY_ID = null, HEAD_KEYS = null, TL_BY_BI = null;
+  var BI_BY_ID = null, HEAD_KEYS = null, TL_BY_BI = null, HEAD_BIS = null;
 
   /* 块上挂着的 id（标题 / 注块 / nav 补出来的条目）→ 块号。
      nav 的 anchor 与路径 A 的 #frag 都靠它换回块号；一次线性扫描建好，正文一改就作废。
@@ -1015,24 +1015,91 @@
     return true;
   }
 
-  /* 没随书落盘的书（PDF / 纯文本 / markdown）：标题即节点 */
-  function deriveNodes() {
-    var out = [];
-    blocks.forEach(function (b, i) {
-      if (b.type !== "h1" && b.type !== "h2" && b.type !== "h3") return;
-      out.push({ lv: +b.type.charAt(1), x: String(b.x || ""), bi: i, cs: 0, len: 0, bs: 0,
-        anchor: typeof b.id === "string" ? b.id : (b.type === "h1" ? "doc-top" : ""), kids: [], open: true });
-    });
+  /* 「这一本里哪些行算标题」的唯一说法。
+     第一档是 h1/h2/h3；**只在这档认出 0 节、或只剩解析器首段兜底那 1 节**时，
+     才用 layout.js 那把中文章节号正则（第X章 / 1. / 一、）补扫正文行 ——
+     纯文本与 markdown 不写 #、PDF 里字号不变的那几本，第一档一条也认不出，
+     而这把尺子本来就长在排版引擎里（layout.js 的 tierOf），以前只有「智能排版」用得上，
+     目录一直没接。补扫只改**目录账**：p 块不会被提成 hN，那仍归排版面板管。
+     派生节点、目录条目匹配、喂给模型的标题清单都读这一份 —— 两边各量各的会出现
+     「节点里有这一行、匹配表里没这一行」，路径 B 的第③条判据就永远过不去。 */
+  function headTier(i) {
+    var b = blocks[i];
+    if (!b) return 0;
+    if (b.type === "h1" || b.type === "h2" || b.type === "h3") return +b.type.charAt(1);
+    if (!window.InkLayout || !InkLayout.tierOf || isTocEntry(b.x)) return 0;
+    return InkLayout.tierOf(String(b.x || ""));
+  }
+
+  /* 目录页自己的行绝不能当章节标题：补扫是按「第X章」的形状认标题的，而一页目录全是这种形状。
+     两种写法两把尺子（都只管 tierOf 补扫这一档，解析器判过的 hN 一个不动 —— 不比改前差）：
+       · 行尾挂着页码或点线（「第一章 绪论 ……… 1」）：正文标题不会以页码收尾，逐行剔掉；
+       · 不写页码的目录页：连续 ≥3 行标题挤在**相邻块**里、且 ≥半数在后文逐字重演，整段剔掉。
+         正文的章标题之间隔着整章 prose，不会连排三行又在后面原样再来一遍 —— 这个形状只有目录页有。 */
+  var TOC_DOTS = /[.\u2026\u00b7\u22ef_\-—–]{4,}\s*$/;
+  function isTocEntry(x) {
+    var s = String(x == null ? "" : x).trim();
+    if (!s) return false;
+    return tocPage(s).page != null || TOC_DOTS.test(s);
+  }
+
+  function headRawBis() {
+    var out = [], i, t;
+    for (i = 0; i < blocks.length; i++) {
+      t = blocks[i].type;
+      if (t === "h1" || t === "h2" || t === "h3") out.push(i);
+    }
+    if (out.length <= 1 && window.InkLayout && InkLayout.tierOf) {
+      /* hN 与 p 两段各管自己的块型，交集为空，不必去重 */
+      for (i = 0; i < blocks.length; i++) if (blocks[i].type === "p" && headTier(i)) out.push(i);
+    }
+    out.sort(function (a, b) { return a - b; });
     return out;
   }
 
-  function headKeys() {
-    if (!HEAD_KEYS) {
-      HEAD_KEYS = [];
-      blocks.forEach(function (b, i) {
-        if (b.type === "h1" || b.type === "h2" || b.type === "h3") HEAD_KEYS.push({ bi: i, key: tocKey(b.x) });
-      });
+  /* 「这一行标题后面还有一条同名的」—— 从后往前一趟建好，供上面那条整段重演的判据用。
+     补扫是逐块跑的，这里必须便宜，不能对每行重扫一遍标题表。 */
+  function tocLineMarks(raw) {
+    var m = Object.create(null), seen = Object.create(null), later = Object.create(null);
+    var i, k, key;
+    for (i = raw.length - 1; i >= 0; i--) {
+      key = tocKey(blocks[raw[i]].x);
+      later[raw[i]] = key.length > 1 && !!seen[key];
+      seen[key] = 1;
     }
+    i = 0;
+    while (i < raw.length) {
+      var j = i;
+      while (j + 1 < raw.length && raw[j + 1] === raw[j] + 1) j++;
+      var n = j - i + 1, dup = 0;
+      if (n >= 3) {
+        for (k = i; k <= j; k++) if (later[raw[k]]) dup++;
+        if (dup * 2 >= n) for (k = i; k <= j; k++) m[raw[k]] = 1;
+      }
+      i = j + 1;
+    }
+    return m;
+  }
+
+  function headBis() {
+    if (HEAD_BIS) return HEAD_BIS;
+    var raw = headRawBis(), mk = tocLineMarks(raw), out = [];
+    for (var i = 0; i < raw.length; i++) if (!mk[raw[i]]) out.push(raw[i]);
+    HEAD_BIS = out;
+    return out;
+  }
+
+  /* 没随书落盘的书（PDF / 纯文本 / markdown）：标题即节点 */
+  function deriveNodes() {
+    return headBis().map(function (i) {
+      var b = blocks[i];
+      return { lv: headTier(i), x: String(b.x || ""), bi: i, cs: 0, len: 0, bs: 0,
+        anchor: typeof b.id === "string" ? b.id : (b.type === "h1" ? "doc-top" : ""), kids: [], open: true };
+    });
+  }
+
+  function headKeys() {
+    if (!HEAD_KEYS) HEAD_KEYS = headBis().map(function (i) { return { bi: i, key: tocKey(blocks[i].x) }; });
     return HEAD_KEYS;
   }
   /* 只往**这一项之后**找同名标题（定案 §3.2）：往前找会先撞上目录自己 ——
@@ -1052,6 +1119,7 @@
   }
 
   var TOC_HEAD_KEY = { 目录: 1, 目次: 1, contents: 1, tableofcontents: 1, toc: 1 };
+  var TOC_PG_RUN = 120;    /* 无标题目录页一次最多数这么多行：再长的连续页码散段是索引表，不是目录 */
 
   /* 判据三条同时成立才算「这一段是目录」（定案 §3.2 的不猜原则）：
        ① ≥3 项；② ≥半数项带页码或点线；③ ≥半数项能在其后找到同名标题。
@@ -1088,9 +1156,14 @@
         }
         i++; continue;
       }
-      /* 标题写着「目录」的那一段：其后连续 p 块，每块一项（纯文本 / markdown 常这么排） */
-      if ((b.type === "h1" || b.type === "h2" || b.type === "h3") && TOC_HEAD_KEY[tocKey(b.x)]) {
+      /* 标题写着「目录」的那一段：其后连续 p 块，每块一项（纯文本 / markdown 常这么排）。
+         放宽到「文本是目录名、且是 hN 或 ≤12 字的独立行」：以前只认 hN，等于要求解析器先把
+         这一行提成标题 —— 而纯文本与没判出字号的 PDF 恰恰提不出来，路径 A 就在这儿死循环：
+         认出目录页要有标题，认出标题又要先知道这是目录页。 */
+      if (TOC_HEAD_KEY[tocKey(b.x)] && (/^h[123]$/.test(String(b.type)) ||
+          (b.type === "p" && String(b.x || "").trim().length <= 12))) {
         var run = [];
+        j = i + 1;
         while (j < blocks.length && blocks[j].type === "p" && String(blocks[j].x || "").trim()) {
           run.push(j); j++;
         }
@@ -1102,7 +1175,25 @@
         }
         i = j; continue;
       }
-      i = j;
+      /* 连「目录」二字都没有的目录页：从一行带页码或点线的散段起手，往后数连续 p 块。
+         判据照旧三条（≥5 项 / ≥半数带页码或点线 / ≥半数对得上其后同名标题），
+         且只在这一行本身就带页码时才起手 —— 正文散文不会连着几十行收尾于数字，
+         代价因此跟着目录页的长度走，不跟着全书走。超过 TOC_PG_RUN 的连续页码散段是索引表不是目录。 */
+      if (b.type === "p" && isTocEntry(b.x)) {
+        var pr = [];
+        j = i;
+        while (j < blocks.length && blocks[j].type === "p" && String(blocks[j].x || "").trim() && pr.length < TOC_PG_RUN) {
+          pr.push(j); j++;
+        }
+        if (pr.length >= 5 && isTocRun(pr.map(function (bi) { return String(blocks[bi].x); }), i)) {
+          pr.forEach(function (bi) {
+            var xx2 = tocPage(String(blocks[bi].x)).x;
+            add({ m: "blk", bi: bi, cs: 0, len: 0, x: xx2, anchor: "", tbi: tocMatch(tocKey(xx2), bi) });
+          });
+          i = j; continue;
+        }
+      }
+      i++;
     }
     return out;
   }
@@ -1114,7 +1205,11 @@
     var rec = null;
     try { rec = API.tocOf(docId); } catch (e) { rec = null; }
     TOC.src = (rec && rec.src) || "headings";
-    TOC.nodes = (rec && rec.nodes && rec.nodes.length) ? rec.nodes : deriveNodes();
+    var blank = !(rec && rec.nodes && rec.nodes.length);
+    /* 空账被当成「已固化」就会永久挡住自动扫描：manual 且一节都没有，视同没固化，
+       连同 scanned 一起作废重派。手动加过一节的账哪怕只有一节也绝不降 —— 那是读者的手。 */
+    if (TOC.src === "manual" && blank) { TOC.src = "headings"; rec = null; }
+    TOC.nodes = blank ? deriveNodes() : rec.nodes;
     TOC.nodes.forEach(bindNode);
     if (rec && (rec.scanned || TOC.src === "manual")) { TOC.links = rec.links || []; return TOC; }
     TOC.links = (rec && rec.links) ? rec.links.slice() : [];
@@ -1126,7 +1221,17 @@
 
   /* 正文一改（改字 / 恢复原文）：块上挂的 id 与标题文字都可能变，这两张表作废重算。
      链子的落点不必在这里清 —— bindRange 每次都逐字复核，改过自然挪位。 */
-  function tocInvalidate() { BI_BY_ID = null; HEAD_KEYS = null; TL_BY_BI = null; }
+  function tocInvalidate() { BI_BY_ID = null; HEAD_KEYS = null; TL_BY_BI = null; HEAD_BIS = null; }
+
+  /* 目录页识别的入口闸：链子是**派生出来**的，没有节点就没有标题可对（headKeys 走的是同一份
+     headBis），此时 TOC.links 只剩作者给的 nav 链。拿旧账去补扫只会补出一堆无根条目，
+     所以没节点时根本不扫 —— 但**不能反过来拦 AI**：模型的价值正在于本机一个都认不出时
+     从零给出一份（§一 R2：以前这两颗 busy 闸都写成 !TOC.nodes.length，把最需要它的那本书挡在门外）。 */
+  function tocLinksOf() {
+    if (TOC.links.length) return TOC.links;
+    if (TOC.nodes.length) TOC.links = deriveTocLinks([]);
+    return TOC.links;
+  }
 
   /* ---------- 人工更正（定案 §3.3）：账是唯一的写入口 ----------
      改名 / 增删 / 拖层级 / 固化都从 tocWrite 出去：改完即重绑、即校验、即落账，并把 src 转 manual。
@@ -1225,13 +1330,11 @@
   /* 正文标题清单：复核与认目录共用这一份说法。两处给同一个块号、同一个层级叫法，
      模型才可能在两趟里对回同一个标题；各写各的会变成两套坐标。 */
   function tocHeadLines() {
-    var hs = [], tot = 0;
-    blocks.forEach(function (b, i) {
-      if (b.type !== "h1" && b.type !== "h2" && b.type !== "h3") return;
-      tot++;
-      if (hs.length >= TOC_AI_MAX) return;
-      hs.push("# " + i + " 第" + b.type.charAt(1) + "级「" + tocAiPlain(b.x) + "」");
-    });
+    var hs = [], list = headBis(), tot = list.length;
+    for (var k = 0; k < tot && hs.length < TOC_AI_MAX; k++) {
+      var i = list[k];
+      hs.push("# " + i + " 第" + headTier(i) + "级「" + tocAiPlain(blocks[i].x) + "」");
+    }
     return { txt: hs.join("\n"), cut: tot > hs.length ? "正文标题共 " + tot + " 条，只列前 " + hs.length + " 条" : "" };
   }
 
@@ -1253,7 +1356,7 @@
   }
 
   function tocAiScan() {
-    if (tocAi.busy || !TOC.nodes.length) return;
+    if (tocAi.busy || !TOC.nodes.length) return;   /* 空表时这里不派生链子：复核要先有目录条目可对 */
     if (!API.hasModel()) { toast("还没有配模型：AI 页填好地址与密钥再来复核", "alert-triangle"); return; }
     var built = tocAiVars();
     tocAi.busy = true; tocAi.err = ""; tocAi.note = ""; tocAi.cut = built.cut;
@@ -1273,7 +1376,7 @@
         if (Array.isArray(j.bind)) j.bind.forEach(function (b) {
           var i = b && b.i, h = b && b.h, n = TOC.nodes[i];
           if (!n || n.bi >= 0) return;                    /* 只给「还空着」的条目找位置 */
-          if (typeof h !== "number" || !blocks[h] || !/^h[123]$/.test(String(blocks[h].type))) return;
+          if (typeof h !== "number" || !blocks[h] || !headTier(h)) return;
           tocAiItems.push({ node: n, why: "模型认它该挂「" + tocAiPlain(blocks[h].x, 24) + "」", to: h });
           said++;
         });
@@ -1345,7 +1448,7 @@
   }
 
   function tocPgScan() {
-    if (tocPg.busy || !TOC.links.length) return;
+    if (tocPg.busy || !tocLinksOf().length) return;
     if (!API.hasModel()) { toast("还没有配模型：AI 页填好地址与密钥再来认目录", "alert-triangle"); return; }
     var built = tocPgVars();
     tocPg.busy = true; tocPg.err = ""; tocPg.note = ""; tocPg.cut = built.cut;
@@ -1359,7 +1462,7 @@
         var j = (got && got.j) || {}, said = 0;
         (Array.isArray(j.nodes) ? j.nodes : []).forEach(function (nd) {
           var key = tocKey(nd && nd.x), h = nd && nd.h;
-          if (!key || typeof h !== "number" || !blocks[h] || !/^h[123]$/.test(String(blocks[h].type))) return;
+          if (!key || typeof h !== "number" || !blocks[h] || !headTier(h)) return;
           for (var k = 0; k < TOC.links.length; k++) {
             var l = TOC.links[k];
             if (tocTarget(l) >= 0 || tocKey(l.x) !== key) continue;
@@ -1382,6 +1485,138 @@
         tocIssues = tocRefresh();
         renderToc(); paintTocLint();
       });
+  }
+
+  /* ---------- AI 从零扫目录（定案 §三 T2 · toc.extract）----------
+     本机认不出标题的那几本（不写 # 的纯文本、字号不变的 PDF、老解析器导进来的旧书），
+     以前只能让读者一条条「加一节」手敲。这一路把**按形状预筛的候选行 + 正文抽样**交给模型，
+     请它说回「哪几行是第几级标题」。三条边界，这一路比复核更要紧，因为它动的是整张表：
+       ① 结果只进建议位，读者点「采用」才走 tocWrite 落账，落账前把旧表存进 tocEx.prev，
+          面板上留一颗「收回」—— 一键进去的一键要能回来；
+       ② 固化过且非空的目录不摆这颗钮（模型不得覆盖 manual，S5b 铁律的同一条）；
+       ③ 失败 / 超时 / 离线 → 表一个字节都不改，只在面板写一行话（无网络不得改表）。
+     候选由本机先筛，全书不筛只筛形状：既不让模型读整本书（成本），
+     也不给它凭记忆补出书里根本没有的章（幻觉）留口子。 */
+  var TOC_EX_MAX = 200;      /* 候选行上限：与喂给模型的其它清单同一把尺 */
+  var TOC_EX_SHOW = 8;       /* 建议位最多摊开这几节，其余只报数（几百行铺进面板会拖死重绘） */
+  var TOC_EX_SAMPLE = 12;    /* 正文抽样块数：够模型看出「这是叙述还是清单」就停 */
+  var TOC_EX_TERM = /[。！？；!?;…]$/;   /* 以句末标点收尾的是句子，不是标题（与 layout.js 同一条） */
+  var tocEx = { busy: false, ran: false, note: "", err: "", cut: "", items: [], prev: null };
+
+  function tocExReset() {
+    tocEx.items = []; tocEx.prev = null; tocEx.ran = false;
+    tocEx.note = ""; tocEx.err = ""; tocEx.cut = "";
+  }
+
+  /* 形状预筛：短行、独立成块、不以句末标点收尾、不是目录页的行、不是「目录」标题自己。
+     tierOf 已命中的排在前面 —— 上限触顶时被截掉的是最没把握的那一批，不是随机一段。 */
+  function tocExCands() {
+    var hit = [], rest = [];
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i], t = String(b.type), x = String(b.x || "").trim();
+      if (!x || (t !== "p" && !/^h[123]$/.test(t))) continue;
+      if (x.length > 40 || TOC_EX_TERM.test(x) || isTocEntry(x) || TOC_HEAD_KEY[tocKey(x)]) continue;
+      (headTier(i) ? hit : rest).push(i);
+    }
+    return hit.concat(rest);
+  }
+
+  function tocExVars() {
+    var c = tocExCands(), shown = c.slice(0, TOC_EX_MAX), lines = [], sample = [], i;
+    for (i = 0; i < shown.length; i++) lines.push(shown[i] + ". 「" + tocAiPlain(blocks[shown[i]].x, 40) + "」");
+    for (i = 0; i < blocks.length && sample.length < TOC_EX_SAMPLE; i++) {
+      var b = blocks[i], t = String(b.type), x = tocAiPlain(b.x, 90);
+      if (!x || /^h[123]$/.test(t) || t === "list" || t === "table" || t === "refs") continue;
+      sample.push(x);
+    }
+    return {
+      vars: { cands: lines.join("\n") || "（正文里一行像标题的都没有）", sample: sample.join("\n") || "（正文是空的）" },
+      cut: c.length > shown.length ? "候选行共 " + c.length + " 行，只列前 " + shown.length + " 行" : "",
+      n: c.length
+    };
+  }
+
+  /* 交回一个 promise：面板上那颗钮点了不看返回值，助手那一路（T6 toc.scan）要拿这份账
+     说清「扫出几节 / 为什么是 0 节」，所以每条早退也要有话说得出。 */
+  function tocExScan() {
+    if (tocEx.busy) return Promise.resolve({ ok: false, why: "busy", count: 0 });
+    if (TOC.src === "manual" && TOC.nodes.length) {
+      toast("这是你固化过的目录，先点「还原自动」才能让模型接管", "lock");
+      return Promise.resolve({ ok: false, why: "manual", count: 0 });
+    }
+    if (!API.hasModel()) {
+      toast("还没有配模型：AI 页填好地址与密钥再来扫目录", "alert-triangle");
+      return Promise.resolve({ ok: false, why: "no-model", count: 0 });
+    }
+    var built = tocExVars();
+    if (!built.n) {
+      tocEx.ran = true; tocEx.err = "正文里没有一行像标题（短、不以句末标点收尾）—— 交给模型也扫不出东西";
+      paintTocLint();
+      return Promise.resolve({ ok: false, why: "no-cands", count: 0 });
+    }
+    tocEx.busy = true; tocEx.err = ""; tocEx.note = ""; tocEx.cut = built.cut; tocEx.items = [];
+    paintTocLint();
+    return API.run("toc.extract",
+      "块号只能用上面出现过的号，一块只许出现一次；x 照抄候选行的文字，不要重打正文。",
+      { vars: built.vars })
+      .then(function (got) {
+        var j = (got && got.j) || {}, items = [], seen = Object.create(null), said = 0, dropped = 0;
+        (Array.isArray(j.toc) ? j.toc : []).forEach(function (r) {
+          var bi = r && r.bi, lv = +(r && r.lv), x = tocAiPlain(r && r.x, 40);
+          if (typeof bi !== "number" || bi < 0 || !blocks[bi] || seen[bi]) return;
+          /* 逐字回原文查证：模型报的 x 与那一块的字面（剥掉行尾页码后）对不上就整条丢。
+             它可能凭对这本书的印象报一个「更好的章名」—— 那正是把读者带到错地方的入口。 */
+          var here = tocAiPlain(tocPage(String(blocks[bi].x || "")).x, 60);
+          if (!x) x = here;
+          else if (tocKey(x) !== tocKey(here)) { dropped++; return; }
+          if (!x || seen[bi]) return;
+          seen[bi] = 1; said++;
+          items.push({ bi: bi, lv: lv >= 1 && lv <= 3 ? lv : 1, x: x });
+        });
+        items.sort(function (a, b) { return a.bi - b.bi; });
+        tocEx.items = items; tocEx.ran = true; tocEx.note = tocAiPlain(j.note, 80);
+        if (dropped) tocEx.err = "模型有 " + dropped + " 条报的字在正文里对不上，已整条丢弃（不猜它想说什么）";
+        else if (!said) tocEx.err = got && got.via === "fields"
+          ? "模型没有按格式回话，这一趟扫描没成" : "模型这回没认出任何一节（认不出比硬给好）";
+      })
+      .catch(function (e) {
+        tocEx.err = e && e.name === "UnstructuredError"
+          ? "模型没有按格式回话，这一趟扫描没成（不硬拆它的话，拆出来的多半是假的）"
+          : "扫描失败：" + API.netErrPhrase(e);
+      })
+      .then(function () {
+        tocEx.busy = false;
+        paintTocLint();
+        return { ok: tocEx.items.length > 0, count: tocEx.items.length, items: tocEx.items,
+                 note: tocEx.note, err: tocEx.err, cut: tocEx.cut };
+      });
+  }
+
+  /* 采用 = 整张表换成模型给的那份（这是读者点头之后的动作，不是自动覆写）。
+     旧表先留在 tocEx.prev 里，面板上「收回」一次；再点采用就没有底可回了，所以采用完把建议清掉。 */
+  function tocExAdopt() {
+    if (!tocEx.items.length) return 0;
+    /* 建议是「还没固化」那一刻生成的：中间读者自己固化过目录，就轮不到模型来换整张表。
+       闸守在落账这一颗上，而不是只守在按钮出没出现的条件里 —— 面板与助手两路都走这里。 */
+    if (TOC.src === "manual" && TOC.nodes.length) {
+      tocEx.items = []; paintTocLint();
+      toast("目录已被你固化过，这份模型建议已作废（要让模型接管先得点「还原自动」）", "lock");
+      return 0;
+    }
+    var nodes = tocEx.items.map(function (r) { return tocNewNode(r.bi, r.lv, r.x); });
+    tocEx.prev = TOC.nodes.slice();
+    tocEx.items = [];
+    tocWrite(function () { TOC.nodes = nodes; });
+    toast("已采用 " + nodes.length + " 节 · 不满意可以收回", "layers");
+    return nodes.length;
+  }
+  function tocExUndo() {
+    if (!tocEx.prev) return false;
+    var snap = tocEx.prev;
+    tocEx.prev = null;
+    tocWrite(function () { TOC.nodes = snap; });
+    toast("已收回：目录回到采用前", "rotate-ccw");
+    return true;
   }
 
   /* 重新定位：拿这一节的字面在它上一节之后找同名标题（与路径 B 同一把认法的反向用途）。
@@ -2262,8 +2497,14 @@
     var hardN = 0, aiN = 0;
     tocIssues.forEach(function (x) { if (x.ai) aiN++; else hardN++; });
     var body = "";
-    if (!tocIssues.length) {
-      body = '<p class="card-note">' + icon("circle-check", 12) + " 硬规则没有发现可疑项" +
+    if (!TOC.nodes.length) {
+      /* 空表不配绿灯：硬规则对零个节点跑一趟，「没有发现可疑项」这句是真话也是假话 ——
+         它让人以为查过了，其实什么都没查。这里改口说清「本机没认出任何一节」，并给三颗去处。 */
+      body = '<p class="card-note">' + icon("alert-triangle", 12) +
+        " 本机没从这本书里认出任何一节 —— 目录是空的，硬规则这趟没有可查的东西。</p>" +
+        '<p class="card-note">三颗去处：让模型扫一遍目录（下面的钮）· 手动加一节 · 先开「智能排版」把标题归位。</p>';
+    } else if (!tocIssues.length) {
+      body = '<p class="card-note">' + icon("circle-check", 12) + " 硬规则查过 " + TOC.nodes.length + " 节，没有可疑项" +
         (TOC.src === "manual" ? " · 这份目录已固化" : " · 尚未固化") + "</p>";
     } else {
       body = '<p class="card-note">' + icon("alert-triangle", 12) + " 可疑 " + tocIssues.length + " 项" +
@@ -2287,16 +2528,28 @@
      跑过之后把模型的自述（note）与截断说明（cut）留在原地 —— 读者要能看出这一眼看了多少书。 */
   function tocAiBar() {
     var can = API.hasModel && API.hasModel();
-    var btn = can
-      ? '<button class="toc-fixbtn" data-ai-run' + (tocAi.busy ? " disabled" : "") + '>' +
-        icon(tocAi.busy ? "loader-circle" : "scan-text", 11) +
-        (tocAi.busy ? "复核中…" : tocAi.ran ? "再复核一次" : "让模型复核文本近似") + "</button>"
-      : '<span class="ln-ai">未配模型 · 只有硬规则</span>';
-    /* 认目录这一颗只在「真有条目点不动」时出现：全部挂上了还摆一颗钮，是让人白点一次。 */
-    var pend = can ? tocPgPending() : 0;
-    if (pend) btn += '<button class="toc-fixbtn" data-pg-run' + (tocPg.busy ? " disabled" : "") + '>' +
-      icon(tocPg.busy ? "loader-circle" : "link-2", 11) +
-      (tocPg.busy ? "认目录中…" : "让模型认没挂上的 " + pend + " 条") + "</button>";
+    var btn = "";
+    if (!can) btn = '<span class="ln-ai">未配模型 · 只有硬规则</span>';
+    else {
+      /* 扫目录（T2）：本机那把尺子认不出来的书靠这一颗。固化过且非空时根本不摆 ——
+         模型不许覆写读者的手改（S5b 铁律），要它接管得先点「还原自动」。 */
+      if (!(TOC.src === "manual" && TOC.nodes.length)) {
+        btn += '<button class="toc-fixbtn" data-ex-run' + (tocEx.busy ? " disabled" : "") + '>' +
+          icon(tocEx.busy ? "loader-circle" : "toc", 11) +
+          (tocEx.busy ? "扫描中…" : tocEx.ran ? "再扫一次目录" : "让模型扫一遍目录") + "</button>";
+      }
+      /* 复核是对着目录条目找毛病：表是空的时候点了什么也不会发生，不摆一颗死钮 */
+      if (TOC.nodes.length) {
+        btn += '<button class="toc-fixbtn" data-ai-run' + (tocAi.busy ? " disabled" : "") + '>' +
+          icon(tocAi.busy ? "loader-circle" : "scan-text", 11) +
+          (tocAi.busy ? "复核中…" : tocAi.ran ? "再复核一次" : "让模型复核文本近似") + "</button>";
+      }
+      /* 认目录这一颗只在「真有条目点不动」时出现：全部挂上了还摆一颗钮，是让人白点一次。 */
+      var pend = tocPgPending();
+      if (pend) btn += '<button class="toc-fixbtn" data-pg-run' + (tocPg.busy ? " disabled" : "") + '>' +
+        icon(tocPg.busy ? "loader-circle" : "link-2", 11) +
+        (tocPg.busy ? "认目录中…" : "让模型认没挂上的 " + pend + " 条") + "</button>";
+    }
     var extra = "";
     if (tocAi.err) extra += '<em class="ln-bad">' + esc(tocAi.err) + "</em>";
     if (tocAi.note) extra += "<em>" + esc(tocAi.note) + "</em>";
@@ -2307,7 +2560,29 @@
     if (tocPg.cut) extra += '<em class="ln-cut">' + esc("本次只看了一部分：" + tocPg.cut) + "</em>";
     var live = tocPgLive().length;
     if (live) extra += '<em>' + esc("模型认出了 " + live + " 条，逐条挂在下面「未绑定」那几行右边") + "</em>";
-    return '<div class="ln-act">' + btn + extra + "</div>";
+    if (tocEx.err) extra += '<em class="ln-bad">' + esc(tocEx.err) + "</em>";
+    if (tocEx.note) extra += "<em>" + esc(tocEx.note) + "</em>";
+    if (tocEx.cut) extra += '<em class="ln-cut">' + esc("本次只看了一部分：" + tocEx.cut) + "</em>";
+    /* 建议位：模型扫出来的整张表先摊在这里给读者看，点「采用」才进账（T2 的第①条边界）。
+       逐条给一颗「跳过去看一眼」，是因为「认出 12 节」这句话本身没法核 —— 读者要能当场验。 */
+    var sug = "";
+    if (tocEx.items.length) {
+      sug = '<div class="ln-act"><p class="card-note">' + icon("layers", 12) + " AI 认出 " + tocEx.items.length + " 节" +
+        '<button class="toc-fixbtn" data-ex-adopt>采用</button>' +
+        '<button class="toc-fixbtn" data-ex-drop>丢弃</button></p>' +
+        tocEx.items.slice(0, TOC_EX_SHOW).map(function (r) {
+          return '<div class="ln-row"><button class="ln-go" data-ex-go="' + r.bi + '">' +
+            esc(r.x.slice(0, 16)) + "</button><em>第" + r.lv + "级 · 第 " + (r.bi + 1) + " 块</em></div>";
+        }).join("") +
+        (tocEx.items.length > TOC_EX_SHOW
+          ? '<em class="ln-cut">只列前 ' + TOC_EX_SHOW + " 节，共 " + tocEx.items.length + " 节</em>" : "") +
+        "</div>";
+    } else if (tocEx.prev) {
+      sug = '<div class="ln-act"><p class="card-note">' + icon("layers", 12) +
+        " 刚采用的那份目录是模型扫的" +
+        '<button class="toc-fixbtn" data-ex-undo>收回</button></p></div>';
+    }
+    return '<div class="ln-act">' + btn + extra + "</div>" + sug;
   }
 
   /* ---------- 更正态的操作（每一条都从 tocWrite 落账） ---------- */
@@ -2687,8 +2962,13 @@
       var d = (res && res.data) || {};
       findBase = d.hits || [];
       findHits = findBase.slice();
-      var byModel = !d.local && API.hasModel && API.hasModel();
-      var src = byModel ? ("主脑语义重排 · " + ((API.modelCfg() || {}).model || "")) : "本地字符匹配（未接模型）";
+      /* 来源问 api 那一侧要账（d.by / d.why），不许由「配没配模型」反推 ——
+         配了模型而这一次没打成时，反推出来的「未接模型」是句谎话（v1.3 D2）。 */
+      var src = d.by === "ai"
+        ? "主脑语义重排 · " + (d.engine || (API.modelCfg() || {}).model || "")
+        : d.why === "failed" ? "本地字符匹配（主脑没成 · " + (d.fail || "未知原因") + "）"
+        : d.why === "no-model" ? "本地字符匹配（未接模型）"
+        : "本地字符匹配（未调用主脑）";
       renderResults("ai", q, findHits, "找到 " + (d.count || findHits.length) + " 处相关 · " + src, d.note);
     });
   }
@@ -2852,6 +3132,15 @@
     }
     if (e.target.closest("[data-ai-run]")) { tocAiScan(); return; }
     if (e.target.closest("[data-pg-run]")) { tocPgScan(); return; }
+    if (e.target.closest("[data-ex-run]")) { tocExScan(); return; }
+    if (e.target.closest("[data-ex-adopt]")) { tocExAdopt(); return; }
+    if (e.target.closest("[data-ex-undo]")) { tocExUndo(); return; }
+    if (e.target.closest("[data-ex-drop]")) {
+      tocEx.items = []; paintTocLint();
+      toast("已丢弃这份建议，目录一个字没改", "layers"); return;
+    }
+    var exg = e.target.closest("[data-ex-go]");
+    if (exg) { var exBi = +exg.dataset.exGo; if (blocks[exBi]) gotoBlock(exBi); return; }
     var ad = e.target.closest("[data-adopt]");
     if (ad) {
       var node = TOC.nodes[+ad.dataset.adopt], to = +ad.dataset.to;
@@ -2935,8 +3224,14 @@
     toast(bi < 0 ? "已加在末尾，这一节还没有正文位置" : "已加一节，指向当前看到的位置", "plus");
   });
 
-  /* 固化 = 把 src 转成 manual（tocWrite 已经做了），这一枚是「我知道它存下来了」的确认口 */
+  /* 固化 = 把 src 转成 manual（tocWrite 已经做了），这一枚是「我知道它存下来了」的确认口。
+     空表不给固化：一旦转成 manual，重开与重扫都不再覆写（loadToc 只认非空才降级），
+     读者等于亲手把这本书的目录永久锁死在零节 —— 挡住自动扫描的不是扫描，是这次点击。 */
   qs("#tocFreeze").addEventListener("click", function () {
+    if (!TOC.nodes.length) {
+      toast("这份目录还是空的，固化了只会挡住自动扫描 —— 先加一节或让 AI 扫一遍", "alert-triangle");
+      return;
+    }
     var was = TOC.src === "manual";
     tocWrite(function () {});
     toast(was ? "已再次固化，改动都在这份账上" : "已固化：重开与重扫都不会盖掉这份目录", "lock");
@@ -2962,6 +3257,7 @@
     TOC.src = "headings";
     tocAiReset();                 /* 整本换了一茬节点，模型那份判断没有一条还关于这本书 */
     tocPgReset();                 /* 链子也全部重派生了，认目录那一份建议同样作废 */
+    tocExReset();                 /* 采用前那份旧表属于上一本，留着它「收回」会把读者绕到别处去 */
     tocIssues = tocLint();
     API.tocSave(docId, { rev: 1, src: "headings", nodes: TOC.nodes, links: TOC.links });
     tocInvalidate();
@@ -3481,6 +3777,15 @@
     return "";
   }
 
+  /* 「模型这次读了多少书」是答案可信度的一部分（v1.3 D4）：字数由 api 侧实测带回，
+     这里只如实转述。没附原文时也要当场说「未附原文」—— 靠省略让读者以为它读了整章，
+     比不写更糟。本机给出的那两路（by:"rule"）没有上下文包可报，不掺进这句话。 */
+  function auxCtxNote(d) {
+    if (d.by !== "ai") return "";
+    var n = +d.ctxChars || 0;
+    return n ? "本次随问附上 " + n.toLocaleString("zh-CN") + " 字原文" : "未附原文，只按这段问题作答";
+  }
+
   function renderExplain(d) {
     var terms = (d.terms || []).length
       ? '<div class="aux-terms">' + d.terms.map(function (t) {
@@ -3490,11 +3795,12 @@
     var items = (d.items || []).map(function (it) {
       return '<div class="aux-item"><span class="ai-k">' + esc(it.k) + '</span><span class="ai-v">' + esc(it.v) + "</span></div>";
     }).join("");
+    var exNote = [auxCtxNote(d), d.note].filter(Boolean).join(" · ");
     showAux(auxHead("解析", d.unstructured ? "模型未按格式回复" : d.title) +
       '<p class="aux-lead">' + esc(d.lead) + "</p>" +
       items + terms +
       (d.unstructured ? auxRaw(d) + auxExits(false) : "") +
-      (d.note ? '<p class="aux-note">' + icon("info", 12) + esc(d.note) + "</p>" : ""));
+      (exNote ? '<p class="aux-note">' + icon("info", 12) + esc(exNote) + "</p>" : ""));
     bindAuxActs();
   }
 
@@ -3613,7 +3919,7 @@
       (d.engine ? (d.cached ? " · " : "") + "考据：" + d.engine : "") +
       (d.via === "fields" ? " · 部分字段未能分栏" : "") +
       (d.via === "repaired" ? " · 回复超长被截断，已在可续处补全" : "");
-    var note = [meta, d.note].filter(Boolean).join(" · ");
+    var note = [meta, auxCtxNote(d), d.note].filter(Boolean).join(" · ");
 
     showAux(auxHead("溯源 · " + (d.kind || "出处"), d.title || d.query || "出处考证") +
       (d.lead ? '<p class="aux-lead">' + esc(d.lead) + "</p>" : "") +
@@ -4652,6 +4958,10 @@
     if (!bar) return;
     bar.hidden = !AUTO.on;
     immBarPad();
+    /* 自动翻页条一开一关，脚下这条常驻带子就高了一截（1440×900 实测底栏上缘 843 → 794）。
+       朗读浮层正是站在带子上方接管的，带子一动落点就得跟着重算 —— ttsPlaceHome 只在
+       「这个位置是系统挑的」时动手，读者自己拖过的一概不碰。 */
+    if (ttsBar && ttsLive()) ttsPlaceHome(ttsBar.hidden ? "pill" : "bar");
     /* 沉浸底栏那枚「自动翻页」开合两态都要跟着走：关着时它是入口，开着时它是状态。
        不能放在下面那句 `if (!AUTO.on) return;` 之后 —— 那样关掉之后按钮永远停在「开」的样子。 */
     var ia = qs("#immAuto");
@@ -4777,7 +5087,7 @@
     if (AUTO.on) return;
     /* 连续位移正是前庭敏感者要避开的东西：减弱动效（应用内或系统级）下匀速档不开 */
     if (autoReduced() && state.scroll) { toast("已按「减弱动效」关闭匀速滚动，定时翻页请改用分页模式", "info"); return; }
-    if (qs("#ttsBar").style.display === "flex") { toast("朗读时页面跟着声音走，不需要自动翻页", "info"); return; }
+    if (ttsLive()) { toast("朗读时页面跟着声音走，不需要自动翻页", "info"); return; }
     AUTO.on = true; AUTO.manual = false; AUTO.blocked = null;
     /* 先记下当前方式：条子一现身就压小版心 → repaginate 的守卫会把「自己引起的重排」
        误判成用户切了阅读方式，刚开的自动翻页会被它自己关掉。 */
@@ -4958,6 +5268,8 @@
   qs("#icTtsNext").innerHTML = icon("skip-forward", 15);
   qs("#icTtsTimer").innerHTML = icon("timer", 15);
   qs("#icStop").innerHTML = icon("x", 15);
+  qs("#icTtsGrip").innerHTML = icon("grip-vertical", 15);
+  qs("#icTtsMin").innerHTML = icon("chevron-down", 15);
   paintVoiceSel();
   qs("#ttsVoice").addEventListener("change", function () {
     InkVoice.setCurrent(this.value);
@@ -4968,6 +5280,134 @@
 
   var TTS = { eng: null, bound: false, liveEl: null, popBi: null, timerLabel: "不定时", speed: 1 };
   try { TTS.speed = Math.max(0.5, Math.min(3, parseFloat(localStorage.getItem("inkread.tts.speed.v1")) || 1)); } catch (e) {}
+
+  /* ============ v1.3 S3 · 朗读条浮层化（可拖 + 可收起） ============
+     旧版这条躺在文档流末尾：一现身就把版心压掉 64~117px，于是背了三笔账 ——
+     ① ttsSyncBook 要为它重排分页；② 沉浸态要 .bar-pad 给它让出底栏那条带子；
+     ③ 谁想知道它在不在，只能读那条内联 style.display。浮层化在宽屏把三笔账全部销掉：
+     位置和尺寸归 InkWin（inkread.win.v1 按 id 分格），浮层不压版心所以正文不再为它重排，
+     「在不在」改问 hidden。dockable:false 是因为这条横窗贴左右边=320 宽的侧栏、
+     铺满=吃掉整屏，两种形态对它都不是「更大的工作区」而是「挡住一切」。
+     收起 ≠ 停止：条子缩成右下角 #ttsPill（同一枚 ▶ + 第几句），朗读继续；× 才是停止。 */
+  var ttsBar = qs("#ttsBar"), ttsPillEl = qs("#ttsPill");
+  function ttsNarrow() { return window.innerWidth <= 600; }   /* 窄屏不浮动：贴底常驻，可收起不可拖 */
+  var ttsWin = window.InkWin && InkWin.create(ttsBar, {
+    id: "tts", host: "viewport", bar: false, dockable: false, autoH: true,
+    handle: "#ttsGrip", title: "朗读条", f: { w: 640, h: 56 }, min: { w: 320, h: 44 },
+    narrow: ttsNarrow, shown: function () { return !ttsBar.hidden; }, onClose: ttsCollapse
+  });
+  var pillWin = window.InkWin && InkWin.create(ttsPillEl, {
+    id: "ttsPill", host: "viewport", bar: false, dockable: false, autoH: true,
+    title: "朗读小胶囊", f: { w: 176, h: 40 }, min: { w: 120, h: 36 },
+    narrow: ttsNarrow, shown: function () { return !ttsPillEl.hidden; }
+  });
+  function ttsLive() { return !ttsBar.hidden || !ttsPillEl.hidden; }
+  /* 首启落点：底栏（或自动翻页条）上缘留一条缝 —— 读者第一次点「听书」时这条正好
+     接管它刚才看着的位置，不该莫名其妙飘在屏幕中间。账上已有格子就按账摆（拖后重开位置复现）。
+     v1.3.0 补：这条带子上还站着右下角的翻页器 —— .page-nav 实测 130×32、紧贴底栏上方，
+     旧版只让开底栏，于是胶囊整块压在「‹ 1/3 ›」上（1440×900 与 900×700 实测交集 4160px²，
+     正好等于翻页器整块面积；三处 elementFromPoint 命中全落到胶囊）—— 听着书就翻不了页，
+     而听书恰恰是最想跟着翻页的一刻。落点改成按候选位逐个试，第一个既不越界也不压常驻控件的用；
+     全都排不出干净落点就退回原方案，不做无解的猜测。读者自己拖过位置（账上有格）一概不再干预。 */
+  function ttsKept() {                     /* 常驻控件占位：落点不能压住任何一条 */
+    var rs = [], sl = ["#readerDock", "#autoBar", ".page-nav"];
+    for (var i = 0; i < sl.length; i++) {
+      var el = qs(sl[i]);
+      if (!el || el.hidden || el.offsetParent === null) continue;
+      var b = el.getBoundingClientRect();
+      if (b.width > 0 && b.height > 0) rs.push(b);
+    }
+    return rs;
+  }
+  /* 常驻横条里最高的那条上缘。v1.3.0 的第二个根因就在这儿：旧版写的是
+     「autoBar 在就用 autoBar」，而 1440×900 实测 autoBar 站在底栏**下面**
+     （开自动翻页后：底栏 794..851、autoBar 851..900），lim 反而被放大了 49px，
+     条子直接压上底栏 18560px²。谁在上取谁。 */
+  function ttsBand() {
+    var t = window.innerHeight - 10, sl = ["#readerDock", "#autoBar"];
+    for (var i = 0; i < sl.length; i++) {
+      var el = qs(sl[i]);
+      if (!el || el.hidden || el.offsetParent === null) continue;
+      var b = el.getBoundingClientRect();
+      if (b.width > 0 && b.height > 0) t = Math.min(t, b.top - 10);
+    }
+    return t;
+  }
+  function ttsSpotOk(x, y, w, h, kept) {
+    if (x < 8 || y < 8 || x + w > window.innerWidth - 8 || y + h > window.innerHeight - 8) return false;
+    for (var i = 0; i < kept.length; i++) {
+      var r = kept[i];
+      if (x < r.right && r.left < x + w && y < r.bottom && r.top < y + h) return false;
+    }
+    return true;
+  }
+  function ttsPick(cands, w, h, kept) {
+    for (var i = 0; i < cands.length; i++)
+      if (ttsSpotOk(cands[i].x, cands[i].y, w, h, kept)) return cands[i];
+    return cands[0];
+  }
+  /* 系统上一次替它挑的落点。账上的坐标还是这两个 ⇒ 读者没动过，带子一变就跟着重挑；
+     否则（读者拖过，或跨 reload 带回来的位置）一概不再干预 —— 拖后重开必须原位复现。
+     v1.3.0 的第一个根因：旧版只在 init 那一次挑（那时条子与胶囊都还藏着，高度量不到，
+     只能按 56/40 猜），挑完就把格子写进 inkread.win.v1；此后带子怎么变都不再重挑，
+     「起读/收起时再算一次」那两处调用被 !m.tts 全程挡成空转（消融实测删掉它们闸照样全绿）。 */
+  var ttsHome = {};
+  function ttsPlaceHome(which) {
+    var pill = which === "pill", win = pill ? pillWin : ttsWin, el = pill ? ttsPillEl : ttsBar;
+    if (!win || ttsNarrow() || el.hidden) return;      /* 只给现身的浮层挑：藏着量不到真实高度 */
+    var k = pill ? "ttsPill" : "tts", f = win.state().f, mine = ttsHome[k];
+    if (InkWin.read()[k] && (!mine || mine.x !== f.x || mine.y !== f.y)) return;
+    var kept = ttsKept(), band = ttsBand(), vw = window.innerWidth, vh = window.innerHeight;
+    var navT = vh, navL = vw, nav = qs(".page-nav");
+    if (nav && nav.offsetParent !== null) {
+      var nb = nav.getBoundingClientRect();
+      if (nb.width > 0 && nb.height > 0) { navT = nb.top; navL = nb.left; }
+    }
+    var w = f.w, h = el.offsetHeight;
+    if (!h) return;
+    var s = pill
+      ? ttsPick([
+          { x: Math.round(vw - w - 14), y: Math.round(band - h) },
+          { x: Math.round(vw - w - 14), y: Math.round(navT - 10 - h) },   /* 右下角有翻页器就叠到它上方 */
+          { x: 14, y: Math.round(band - h) },                             /* 实在挤不下就换左下角 */
+          { x: Math.round(vw - w - 14), y: Math.round(navT - 10 - h - 44) }
+        ], w, h, kept)
+      : ttsPick([
+          { x: Math.round((vw - w) / 2), y: Math.round(band - h) },        /* 居中接管常驻带上方 */
+          { x: Math.round(navL - 10 - w), y: Math.round(band - h) },       /* 同带子，整个让到翻页器左边 */
+          { x: Math.round((vw - w) / 2), y: Math.round(navT - 10 - h) }    /* 让到翻页器上方 */
+        ], w, h, kept);
+    win.place(s.x, s.y);
+    ttsHome[k] = { x: s.x, y: s.y };
+  }
+  /* 窄屏降级：整条贴底常驻（CSS 的 .tts-stick 用 !important 收回几何），把手不再骗人。
+     这条监听必须排在 InkWin.create 之后 —— 组件自己那条 resize 会把内联 left/top 补回来。 */
+  function ttsApplyMode() {
+    var stick = ttsNarrow();
+    ttsBar.classList.toggle("tts-stick", stick);
+    ttsPillEl.classList.toggle("tts-stick", stick);
+    if (stick) [ttsBar, ttsPillEl].forEach(function (el) { el.style.left = el.style.top = el.style.width = el.style.height = ""; });
+    else { if (ttsWin) ttsWin.apply(false); if (pillWin) pillWin.apply(false); }
+  }
+  /* 沉浸态：底栏（#immBot，54px）醒来时若被这条浮层压住，暂停/调速就点不到了。
+     旧版让正文腾地方（.bar-pad），浮层没有版心可让 —— 改把条子本身抬出那条带子，
+     退出沉浸再落回去；读者在这期间自己拖过位置，那笔还原账就作废（不跟他抢地方）。 */
+  var IMM_BAND = 62, immLift = { tts: null, pill: null };
+  function liftClear(k, win, el) {
+    if (!win || ttsNarrow() || el.hidden) return;
+    var f = win.state().f, h = el.offsetHeight || 56, lim = window.innerHeight - IMM_BAND;
+    var want = document.body.classList.contains("immersive");
+    if (want) {
+      if (immLift[k] && f.y !== immLift[k].to) immLift[k] = null;
+      if (!immLift[k] && f.y + h > lim) { var y = Math.round(Math.max(8, lim - h)); immLift[k] = { from: f.y, to: y }; win.place(f.x, y); }
+    } else if (immLift[k]) {
+      var back = immLift[k].from; immLift[k] = null;
+      win.place(f.x, Math.round(Math.max(8, Math.min(back, window.innerHeight - h - 8))));
+    }
+  }
+  function immClearTts() { liftClear("tts", ttsWin, ttsBar); liftClear("pill", pillWin, ttsPillEl); }
+  ttsApplyMode();
+  window.addEventListener("resize", function () { ttsApplyMode(); immClearTts(); });
 
   function unitEl(bi) { return biEl(bi); }
   function unitIdxOf(bi) {
@@ -4990,7 +5430,11 @@
     TTS.liveEl = el;
     if (state.scroll) {
       var sheet = qs("#sheet"), r = el.getBoundingClientRect(), sr = sheet.getBoundingClientRect();
-      if (r.top < sr.top + 8 || r.bottom > sr.bottom - 8) {
+      /* 浮层化之后正文不再为朗读条让地方（旧靠 repaginate 压版心），正在念的那句改成
+         自己躲：滚动目标的下界取「纸面下缘」与「条子上缘」里更靠上的那个。 */
+      var lim = sr.bottom - 8;
+      if (!ttsBar.hidden) lim = Math.min(lim, ttsBar.getBoundingClientRect().top - 8);
+      if (r.top < sr.top + 8 || r.bottom > lim) {
         el.scrollIntoView({ block: "start", behavior: read.reduce ? "auto" : "smooth" });
       }
     }
@@ -5087,33 +5531,76 @@
   function paintPlayBtn(playing) {
     qs("#icTtsPlay").innerHTML = icon(playing ? "pause" : "play", 16);
     qs("#ttsPlay").classList.toggle("active", !!playing);
+    /* 收起态那颗 ▶ 与条子上的是同一枚开关：图标与 active 必须同源，
+       否则胶囊显示着 ▶（其实是暂停）而条子已经悄悄变成 ‖。 */
+    var pp = qs("#icTtsPillPlay");
+    if (pp) {
+      pp.innerHTML = icon(playing ? "pause" : "play", 15);
+      qs("#ttsPillPlay").classList.toggle("active", !!playing);
+    }
   }
-  /* 播放条在文档流的同列底部：一现身就把版心压掉 64~117px。分页是按开条前的高度切的，
-     不重排就会让末行被条子拦腰切掉、页内又长出滚动条（autoSyncBook 治的是自动翻页条，
-     同一个坑：两条互斥，见 autoStart 的自拒，所以各治各的）。通栏不分页，跳过。 */
-  function ttsSyncBook() { if (!state.scroll) repaginate(false); }
-  /* 沉浸态：朗读条 / 自动翻页条都是**文档流**里的元素，会被固定的沉浸底栏（54px）整条盖住 ——
+  /* 沉浸态：自动翻页条仍在文档流里，会被固定的沉浸底栏（54px）整条盖住 ——
      实测点开出自动翻页条后，条子中心命中的是 #immHint（底栏的提示语），暂停与调速全点不到
-     （WCAG 2.2 SC 2.2.2 要的「暂停手段一直可达」当场破功）。谁现身就让 .reader-main 让出那条带子。 */
+     （WCAG 2.2 SC 2.2.2 要的「暂停手段一直可达」当场破功）。谁现身就让 .reader-main 让出那条带子。
+     朗读条 v1.3 S3 起是浮层，不再需要这条让位（immClearTts 自己躲底栏）；
+     只剩窄屏那一档例外 —— ≤600 它按 .tts-stick 退回文档流贴底常驻，那半笔账还得记。 */
   function immBarPad() {
     var rm = document.querySelector(".reader-main");
     if (!rm) return;
-    var tb = qs("#ttsBar"), ab = qs("#autoBar");
+    var ab = qs("#autoBar"), tb = qs("#ttsBar");
     var on = document.body.classList.contains("immersive") &&
-      ((tb && tb.style.display === "flex") || (ab && ab.style.display !== "none" && !ab.hidden));
+      ((ab && ab.style.display !== "none" && !ab.hidden) ||
+       (tb && !tb.hidden && tb.classList.contains("tts-stick")));
     rm.classList.toggle("bar-pad", !!on);
   }
   /* 空进度底槽不显形（v2.24.1）：播放前那条 76×6 的槽谁也点不动、也不显示任何状态，
      读者只会问「这条白条是干什么的」。有进度再让它出现 —— 用 visibility 不用 display，
-     条子高度不变，ttsSyncBook 的重排账不必跟着改。 */
+     条子是浮层，高度本来就由内容说了算。 */
   function ttsProg(on) { var b = qs("#ttsBar"); if (b) b.classList.toggle("no-prog", !on); }
-  function openTTSBar() { qs("#ttsBar").style.display = "flex"; ttsProg(false); immBarPad(); ttsSyncBook(); }
-  function closeTTSBar() {
-    qs("#ttsBar").style.display = "none";
-    hideSpeedPop(); hideTimerPop();
-    immBarPad();
+  /* 窄屏（≤600）条子与胶囊都站回文档流，一现身照样把版心压掉几十到一百多 px：
+     分页若按没条时的高度切，末行被条子拦腰裁掉（390 实测 sheet 内容 461 / 可视 386，页数还写着 1/4）。
+     这条与 autoSyncBook 对自动翻页条许的是同一个承诺，宽屏是浮层、不压版心就不重排。 */
+  function ttsSyncBook() { if (ttsNarrow() && !state.scroll) repaginate(false); }
+  /* 落点只能在「已现身」之后算：藏着的时候 offsetHeight=0，高度量不到，旧版在 init
+     就挑完、只能按 spec 写的 56/40 猜（v1.3.0 的第一个根因）。place() 把内联 left/top
+     同步写死，和上面那句 hidden=false 在同一个任务里，中间没有一帧被浏览器画出来。 */
+  function openTTSBar() {                       /* 起读：整条现身，胶囊收掉 */
+    ttsPillEl.hidden = true;
+    if (ttsWin) { ttsBar.hidden = false; ttsPlaceHome("bar"); ttsWin.open(); } else ttsBar.hidden = false;
+    ttsProg(false);
+    immClearTts();
     ttsSyncBook();
   }
+  function ttsShowBar() {                       /* 胶囊 → 整条：朗读不停，也不抹进度 */
+    if (!ttsBar.hidden) return;
+    ttsPillEl.hidden = true;
+    if (ttsWin) { ttsBar.hidden = false; ttsPlaceHome("bar"); ttsWin.open(); } else ttsBar.hidden = false;
+    immClearTts();
+    ttsSyncBook();
+  }
+  function ttsCollapse() {                      /* 整条 → 胶囊：「收起 ≠ 停止」那一半 */
+    if (ttsBar.hidden) return;
+    ttsBar.hidden = true; ttsPillEl.hidden = false;
+    hideSpeedPop(); hideTimerPop();
+    ttsPlaceHome("pill");                       /* 胶囊现身的这一行高度量得到，落点才量得准 */
+    if (pillWin) { pillWin.raise(); pillWin.apply(false); }
+    paintPill(); immClearTts();
+    ttsSyncBook();   /* 窄屏：条子换成胶囊，占的那一行矮了一截，版心又变 */
+    toast("已收起朗读条 · 听书继续", "chevron-down");
+  }
+  function closeTTSBar() {                      /* 停止 / 读完：条与胶囊一起退场 */
+    ttsBar.hidden = true; ttsPillEl.hidden = true;
+    hideSpeedPop(); hideTimerPop();
+    immClearTts();
+    ttsSyncBook();
+  }
+  /* 收起态那枚胶囊只装两件事：同一枚 ▶／‖ 和第几句。文案与钮态都从条子上的同一份账取。 */
+  function paintPill() {
+    var f = qs("#ttsPillFrac");
+    if (f) f.textContent = qs("#ttsFrac").textContent || "";
+    paintPlayBtn(!!(TTS.eng && TTS.eng.playing()));
+  }
+
   function ttsCleanup() {
     closeTTSBar();
     var b = qs("#ttsEng");
@@ -5130,6 +5617,8 @@
       var u = SPEAK_UNITS[i] || { text: "" };
       qs("#ttsNow").textContent = String(u.text).slice(0, 48) + (u.text.length > 48 ? "…" : "");
       qs("#ttsFrac").textContent = (i + 1) + " / " + SPEAK_UNITS.length;
+      var pf = qs("#ttsPillFrac");
+      if (pf) pf.textContent = qs("#ttsFrac").textContent;   /* 收起态也要报「念到第几句」 */
       ttsFollow(bi);
       paintTtsSent(i);
       ttsPosSoon();
@@ -5177,7 +5666,8 @@
     TTS.eng.setSpeed(TTS.speed);
     TTS.eng.setVoice(qs("#ttsVoice").value || InkVoice.current());
     TTS.eng.start(SPEAK_UNITS, fromIdx != null ? fromIdx : unitIdxOf(fromBi));
-    openTTSBar();
+    /* 收起态里从胶囊按 ▶ 重起：条子不弹回读者刚收起来的角落，只把胶囊的钮拨成 ‖ */
+    if (ttsPillEl.hidden) openTTSBar(); else paintPill();
     paintPlayBtn(true);
     hideTtsPop();
   }
@@ -5187,15 +5677,22 @@
     startTTS(blockAt(curOffset()));
   });
   qs("#ttsStop").addEventListener("click", function () { if (TTS.eng) TTS.eng.stop(); });
+  /* 收起 ≠ 停止：这只钮只把界面缩成胶囊，引擎一下都不碰。
+     Esc 收这一层走的是 InkWin 的 onClose，也是同一个 ttsCollapse。 */
+  qs("#ttsMin").addEventListener("click", ttsCollapse);
+  qs("#ttsPillOpen").addEventListener("click", ttsShowBar);
   /* ▶ 两义：正在播 → 暂停/继续；停过之后（含「念不出这段」的停机）→ 从当前段重起。
-     没有这一义，「换一款音色再点朗读」就只剩再跑一趟「更多 → 朗读」那条远路。 */
-  qs("#ttsPlay").addEventListener("click", function () {
+     没有这一义，「换一款音色再点朗读」就只剩再跑一趟「更多 → 朗读」那条远路。
+     条子上与胶囊上那枚是同一个开关，共用这一份实现。 */
+  function ttsPlayToggle() {
     if (!TTS.eng) return;
     if (TTS.eng.playing()) { TTS.eng.toggle(); return; }
     var i = TTS.eng.idx();
     if (SPEAK_UNITS[i]) startTTS(SPEAK_UNITS[i].bi, i);
     else startTTS(blockAt(curOffset()));
-  });
+  }
+  qs("#ttsPlay").addEventListener("click", ttsPlayToggle);
+  qs("#ttsPillPlay").addEventListener("click", ttsPlayToggle);
   qs("#ttsPrev").addEventListener("click", function () { if (TTS.eng) TTS.eng.seekIdx(TTS.eng.idx() - 1); });
   qs("#ttsNext").addEventListener("click", function () { if (TTS.eng) TTS.eng.seekIdx(TTS.eng.idx() + 1); });
 
@@ -5914,6 +6411,7 @@
     var el = document.documentElement;
     if (el.requestFullscreen) { try { el.requestFullscreen().catch(function () {}); } catch (e) {} }
     immBarPad();
+    immClearTts();
     repaginate(false);
     immWake();
     toast("已进入全屏沉浸阅读 · 点击纸面中央呼出控件", "maximize");
@@ -5927,6 +6425,7 @@
     scPulse("immerse");
     if (document.fullscreenElement && document.exitFullscreen) { try { document.exitFullscreen().catch(function () {}); } catch (e) {} }
     immBarPad();
+    immClearTts();
     repaginate(false);
     toast("已退出全屏", "minimize");
   }
@@ -7047,9 +7546,14 @@
     }
     var pre = "";
     try { if (window.Brain && Brain.preamble) pre = Brain.preamble("chat") || ""; } catch (e) {}
+    /* material 就是这一次真发给模型的全部正文：它的长度即「模型读了多少字」，
+       答完之后原样报给读者（v1.3 D4）。落点按发问时站着的那一章记，别在收尾时现读 ——
+       流式期间读者可能已经翻了页，那时候再量就答错了来路。 */
+    var material = arMaterial(pack, sel);
+    var ctxFrom = arBi() >= 0 ? chapterOf(arBi()) : "";
     var sysTxt = API.promptSys("assistant", {
       cite: arRefs.length ? "引到某段时在该句末尾标它的编号，例如「[2]」；只给结论也要标出处。" : "",
-      material: arMaterial(pack, sel), preamble: pre
+      material: material, preamble: pre
     });
     var prm = API.promptParams("assistant");
     arCtl = window.AbortController ? new AbortController() : null;
@@ -7059,7 +7563,7 @@
         cfg: prm.cfg, signal: arCtl && arCtl.signal,
         onDelta: function (p, all) { out = all != null ? all : out + p; onPiece(out); }
       }, prm.send));
-      return { reply: out, mode: "online" };
+      return { reply: out, mode: "online", ctxChars: material.length, ctxFrom: ctxFrom };
     } catch (e) {
       /* 停止 ≠ 失败：半截话照原样交回去，不去兜离线库（同 brain.js ask 的判据） */
       if (e && (e.aborted || (arCtl && arCtl.signal && arCtl.signal.aborted))) return { reply: out, mode: "stopped" };
@@ -7092,6 +7596,14 @@
     var body = r.reply || (r.mode === "error" ? "助手暂时答不上来：" + (r.why || "")
       : r.mode === "stopped" ? "（按下了停止，这句没答完）" : "（没有给出内容）");
     holder.innerHTML = tag + arRich(body, r.mode === "offline" ? [] : arRefs);
+    if (r.mode === "online") {
+      var src = document.createElement("p");
+      src.className = "ar-src";
+      src.textContent = (r.ctxChars ? "本次随问附上 " + r.ctxChars.toLocaleString("zh-CN") + " 字原文"
+        : "本次未附原文，只按这句问话作答") +
+        " · 取自《" + String(doc.title || "本文") + "》" + (r.ctxFrom ? " · " + r.ctxFrom : "");
+      holder.appendChild(src);
+    }
     if (r.mode === "stopped" || r.mode === "error") {
       var retry = document.createElement("button");
       retry.className = "ar-p"; retry.type = "button"; retry.textContent = "重试这一问";
@@ -7107,7 +7619,9 @@
     holder.scrollIntoView({ block: "nearest" });
   }
 
-  /* 预置六问：前两问是「读懂」，中间两问是「查清」，后两问直接落地成卡与任务。 */
+  /* 预置九问：读懂两问、查清两问、落地两问，再加三枚「直接动手」的 ——
+     书架、读本段、扫目录。后三枚不由模型生成参数（点它自己就该有结果），
+     走 arRunDirect；扫目录那枚要模型，办不了时明说办不了，不硬编一份目录。 */
   var AR_PRE = [
     { t: "讲什么", hint: "三句话说清这一章，再点出一处最值得停下来的地方",
       q: "这一章在讲什么？用三句话说清，再点出最值得停下来看的一处，并标出它在哪一段。" },
@@ -7120,7 +7634,10 @@
     { t: "出 5 张闪卡", tool: "cards.create", key: "quotes", feat: "assistant.cards", hint: "模型从原文逐字挑 5 句 → 逐条回原文查证 → 确认卡上点头才落",
       usr: "挑 5 句原文。格式：{\"quotes\":[\"原文句子1\",\"原文句子2\"]}" },
     { t: "生成本章任务", tool: "tasks.create", key: "titles", feat: "assistant.tasks", hint: "模型按本章拟 4-6 条可执行任务 → 确认卡上点头才落",
-      usr: "生成本章任务。格式：{\"titles\":[\"任务1\",\"任务2\"]}" }
+      usr: "生成本章任务。格式：{\"titles\":[\"任务1\",\"任务2\"]}" },
+    { t: "我书架上有哪些书", direct: "shelf.list", hint: "工具层自己翻本机书架，不联网也能用" },
+    { t: "先读本处原文", direct: "doc.read", hint: "从读者正站着的位置往下读几块，回答里好引用" },
+    { t: "扫出这本书的目录", direct: "toc.scan", model: 1, hint: "模型认正文里的标题 → 结果只进目录面板的建议位，点「采用」才改目录" }
   ];
   if (arPreset) {
     AR_PRE.forEach(function (p) {
@@ -7128,10 +7645,72 @@
       b.className = "ar-p"; b.type = "button"; b.textContent = p.t;
       if (p.sel) b.dataset.sel = "1";
       if (p.tool) { b.dataset.tool = p.tool; b.dataset.sel = "1"; }
+      if (p.direct) b.dataset.direct = p.direct;
       b.title = p.hint || p.t;
-      b.addEventListener("click", function () { if (p.tool) arRunTool(p); else arSend(p.q); });
+      b.addEventListener("click", function () {
+        if (p.direct) arRunDirect(p); else if (p.tool) arRunTool(p); else arSend(p.q);
+      });
       arPreset.appendChild(b);
     });
+  }
+
+  /* 直连型预置：工具自己动，没有「模型交回参数再核对」这一段。
+     读操作（翻书架 / 读本段 / 扫目录的建议位）不用点头；
+     扫完要落账时，这里递出的是 toc.apply 的确认卡 —— 一次扫描换整张目录表，必须点头。 */
+  async function arRunDirect(p) {
+    if (arBusy) return;
+    if (!window.InkAgent) { arRow("err", "工具层没有加载，这一枚暂时点不动。"); return; }
+    if (p.model && !(window.API && API.hasModel && API.hasModel())) {
+      var row0 = arRow("err", esc("「" + p.t + "」要由模型读正文认标题，没接模型时助手不猜。"));
+      var go0 = document.createElement("button");
+      go0.className = "ar-p"; go0.type = "button"; go0.textContent = "去主脑页配置模型";
+      go0.addEventListener("click", function () { arConfirm("ui.navigate", { to: "ai" }); });
+      row0.appendChild(document.createElement("br")); row0.appendChild(go0);
+      return;
+    }
+    arBusy = true;
+    if (arStopBtn) arStopBtn.hidden = false;
+    if (arSendBtn) arSendBtn.disabled = true;
+    var holder = arRow("bot", '<span class="ar-busy">' + icon("loader-circle", 13) + esc(p.t + "…") + "</span>");
+    var r = null;
+    try { r = await InkAgent.invoke(p.direct, {}); }
+    catch (e) { r = { ok: false, why: "error", err: String((e && e.message) || e) }; }
+    arBusy = false;
+    if (arStopBtn) arStopBtn.hidden = true;
+    if (arSendBtn) arSendBtn.disabled = false;
+    if (!r || r.ok !== true) {
+      var why = r && (r.why || r.err) || "failed";
+      holder.innerHTML = '<span class="ar-tag">没成</span>' + esc(arWhy(why) +
+        (r && r.err && why !== r.err ? "：" + r.err : ""));
+      arPaintCtx(); return;
+    }
+    if (p.direct === "shelf.list") {
+      var bs = (r.books || []).map(function (d) {
+        return "《" + (d.title || "无名") + "》" + (d.progress ? " · 读到 " + Math.round(d.progress * 100) + "%" : "");
+      });
+      arLast = { q: p.t, a: bs.join("\n") };
+      holder.innerHTML = '<span class="ar-tag">本机</span>' + esc("书架上 " + r.count + " 本" +
+        (r.count > bs.length ? "，列前 " + bs.length + " 本" : "") + "：") +
+        "<div class=\"ar-list\">" + bs.map(function (s) { return "<div>" + esc(s) + "</div>"; }).join("") + "</div>";
+      arAct("翻了书架，共 " + r.count + " 本");
+    } else if (p.direct === "doc.read") {
+      arLast = { q: p.t, a: String(r.text || "") };
+      holder.innerHTML = '<span class="ar-tag">原文</span>' +
+        esc("读了 " + r.chars + " 字" + (r.chapter ? " · " + r.chapter : "") + "：") +
+        "<div class=\"ar-list\">" + esc(String(r.text || "").slice(0, 500)).replace(/\n/g, "<br>") + "</div>";
+    } else if (p.direct === "toc.scan") {
+      var lines = (r.toc || []).map(function (x) { return "第 " + x.lv + " 级 · " + x.x; });
+      holder.innerHTML = '<span class="ar-tag">建议</span>' +
+        esc("认出 " + r.count + " 节候选，逐条回原文查证过的都在这里；目录还没改，摊在目录面板里等你采用。") +
+        (r.cut ? "<div class=\"ar-act\">" + esc("本次只看了一部分：" + r.cut) + "</div>" : "") +
+        (r.note ? "<div class=\"ar-act\">" + esc(r.note) + "</div>" : "") +
+        "<div class=\"ar-list\">" + lines.map(function (s) { return "<div>" + esc(s) + "</div>"; }).join("") + "</div>";
+      var use = document.createElement("button");
+      use.className = "btn btn-accent btn-sm"; use.type = "button"; use.textContent = "采用这份目录";
+      use.addEventListener("click", function () { arConfirm("toc.apply", {}); });
+      holder.appendChild(document.createElement("br")); holder.appendChild(use);
+    }
+    arPaintCtx();
   }
 
   /* 工具型预置问题：走 §W1d′ 的「JSON 指令白名单」那条通道 —— 本版不请求原生
@@ -7209,6 +7788,10 @@
     "no-host": "这一页没有接入该能力", "not-found": "没找到那个位置", "no-doc": "没有当前书籍",
     "empty-text": "没有可写的文字", "empty-quotes": "没有可做的条目", "empty-titles": "没有可建的任务",
     "save-failed": "本机没能存下这条", "not-in-text": "这些句子在原文里查不到", "not-object": "指令形状不对",
+    "no-brain": "正文还没加载完", "empty-doc": "这本书是空的", "no-suggestion": "手上没有待采用的目录建议",
+    "frozen-or-empty": "这份目录已被你固化过，或建议已过期", "busy": "上一条还在跑",
+    "no-model": "没有配模型：AI 页填好地址与密钥再来", "manual": "目录已固化，模型不能覆盖它",
+    "no-cands": "正文里没有一行像标题，交给模型也扫不出东西",
     "error": "执行时出了错", "failed": "没有成功"
   };
   function arWhy(w) { return AR_WHY[w] || String(w || "failed"); }
@@ -7252,11 +7835,11 @@
       if (!InkWin.read()["aireader"]) arHome();
     }
     if (!arStream.childElementCount) {
-      arRow("sys", "带着「这本书 + 这一章" + (arSel() ? " + 你划的这段" : "") + "」问。下面六枚是常问的，也可以自己写。");
+      arRow("sys", "带着「这本书 + 这一章" + (arSel() ? " + 你划的这段" : "") + "」问。下面几枚是常问的，也可以自己写。");
     }
     if (!(window.API && API.hasModel && API.hasModel()) && !arNoted) {
       arNoted = true;
-      arRow("sys", "未接模型：常识问答用本机库，「出 5 张闪卡 / 生成本章任务」这类要模型从原文挑的办不了。");
+      arRow("sys", "未接模型：常识问答用本机库，「出 5 张闪卡 / 生成本章任务 / 扫目录」这类要模型读原文的办不了。");
     }
     arPaintCtx();
     setTimeout(function () { if (arInput) arInput.focus(); }, 40);
@@ -7324,6 +7907,12 @@
       selBi: arBi,
       selection: arSel,
       goto: jumpTo,
+      /* 目录扫描两枚工具（T6）的宿主能力：blocks 与 TOC 账本只有这一页拿得到，
+         所以本体长在阅读页，工具只把它端给模型。 */
+      tocScan: tocExScan,
+      tocSuggest: function () { return tocEx.items.slice(); },
+      tocApply: tocExAdopt,
+      tocUndo: tocExUndo,
       refresh: function () {
         return API.fetchNotes(docId).then(function (r) {
           state.notes = ((r && r.data) || []).slice();

@@ -1,7 +1,7 @@
 /* ============================================================
    ink-agent.js —— 主脑工具层（v2.23 W1d′ 首刀）
    ------------------------------------------------------------
-   做的事：把「主脑能碰应用」这件事收成一个面 —— 七枚工具、一份白名单、
+   做的事：把「主脑能碰应用」这件事收成一个面 —— 九枚工具、一份白名单、
    一套确认与撤销。工具本体不猜模型想要什么：调用方（阅读助手）交来指令，
    这里逐条对着注册表校验，认不出的名字、缺必填参数、参数类型不对，一律不执行。
 
@@ -94,7 +94,7 @@
      批量建 5 张卡时所有闭包会共用最后一个 id，撤销五条只删得掉最后一条。 */
   function pushUndo(kind, id, fn) { undoQ.push({ kind: kind, id: id, at: Date.now(), fn: fn }); }
 
-  /* ---------------- 七枚首刀工具 ---------------- */
+  /* ---------------- 工具名册：首刀七枚 + v1.3 目录两枚 ---------------- */
 
   define("shelf.list", "read", "列出书架上的书（书名 / 类别 / 进度）", {}, function () {
     var shelf = (window.InkStore && InkStore.getShelf()) || [];
@@ -226,6 +226,43 @@
       return { ok: true, to: href };
     });
 
+  /* ---------------- 目录扫描两枚（定案 §三 T6）----------------
+     为什么要拆成两枚：scan 是「读」——它问模型、把结果停在阅读页目录面板的建议位上，
+     账本一个字节都不动；apply 是「写」——它才换整张表，所以要确认卡，且落账前存好旧表。
+     这条边界和 S5b 的铁律是同一条：模型给的一切永远只是建议，改读者的东西要读者点头。
+     本体不在这里实现（候选行预筛、逐字回原文查证都在阅读页，那里才有 blocks）：
+     工具只负责把这份能力端给模型，并如实报告扫出了几节、为什么是 0 节。 */
+
+  define("toc.scan", "read", "扫描当前这本书的正文，让模型认标题、给出一份候选目录（只进建议位，不改目录）",
+    {},
+    async function () {
+      if (!host.tocScan) return { ok: false, why: "no-host" };
+      var r = await host.tocScan();
+      if (!r) return { ok: false, why: "failed" };
+      var n = r.count || 0;
+      trace(n ? "扫出 " + n + " 节候选目录（还没落账）" : "扫了一遍目录，没认出可用的节", "toc.scan", "read");
+      return {
+        ok: n > 0, count: n, why: n ? "" : (r.why || r.err || "none"),
+        note: str(r.note, 80), err: str(r.err, 80), cut: str(r.cut, 60),
+        toc: (r.items || []).slice(0, 8).map(function (x) { return { bi: x.bi, lv: x.lv, x: str(x.x, 40) }; })
+      };
+    }, { confirm: false });
+
+  define("toc.apply", "write", "把刚才扫出的候选目录落成这本书的目录（采用前那份会存下来，可当场收回）",
+    {},
+    async function () {
+      if (!host.tocApply) return { ok: false, why: "no-host" };
+      var list = (host.tocSuggest && host.tocSuggest()) || [];
+      if (!list.length) return { ok: false, why: "no-suggestion" };
+      var n = await host.tocApply(list);
+      if (!n) return { ok: false, why: "frozen-or-empty" };
+      /* 快照只有一份，存在阅读页：面板上那颗「收回」与这里的 undo 收回的是同一次采用，
+         谁先点都只回得去一次 —— 两处各存一份旧表迟早对不上，那是更坏的结局。 */
+      pushUndo("目录", curDocId(), function () { return Promise.resolve(host.tocUndo ? host.tocUndo() : false); });
+      trace("采用 " + n + " 节目录（旧表已存，可收回）", "toc.apply", "write");
+      return { ok: true, count: n, undo: true };
+    });
+
   /* ---------------- 白名单校验与执行 ---------------- */
 
   var TYPE_OF = { string: "s", number: "n", boolean: "b", array: "a", object: "o" };
@@ -280,6 +317,12 @@
       out.lines.push(a.page ? "出处 第 " + a.page + " 页"
         : (a.anchor ? "出处 " + str(a.anchor, 24) : "不带出处 · 存下后回不去原文"));
       out.count = 1; out.title = "将写 1 条笔记";
+    } else if (name === "toc.apply") {
+      var sug = (host.tocSuggest && host.tocSuggest()) || [];
+      out.lines = sug.slice(0, 8).map(function (r) { return "第 " + (r.lv || 1) + " 级 · " + str(r.x, 40); });
+      if (sug.length > 8) out.lines.push("…另有 " + (sug.length - 8) + " 节，面板上逐条能看");
+      out.count = sug.length;
+      out.title = "将把目录换成模型扫出的 " + sug.length + " 节 · 采用前那一份可以当场收回";
     } else if (name === "ui.navigate") {
       out.lines = [str(a.to, 20)]; out.count = 1; out.title = "将离开本页，去「" + str(a.to, 20) + "」";
     } else {

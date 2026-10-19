@@ -266,7 +266,8 @@
   "use strict";
 
   /* 存储键（与 api.js / modes.js 同一套语义，不新增旁路）
-     · inkread.cards.v1 —— SRS 调度：{noteId: {ef, ivl, reps, due, last, suspended}}
+     · inkread.cards.v1 —— SRS 调度：{noteId: {s, d, lapses, ef, ivl, reps, due, last,
+       suspended, excluded, cloze}}（s/d/lapses 为 FSRS-5 字段，ef 留给回退档）
        读：API.fetchCards()；写单卡：API.saveCard(id, st)（与阅读页闪卡面板同一条通路）；
        删除整组调度：api.js 没有删除端点，本页按同一形状直接覆盖写这个键（见 dropDeckCards）。
      · inkread.decks.v1 —— 卡组自定义名：{docId: name}（本页独有，无历史数据，缺省 {}）。
@@ -297,7 +298,7 @@
   var ymd = InkSRS.ymd;
   var isDueSt = InkSRS.isDueSt;
   var isSusp = InkSRS.isSusp;
-  var sm2Update = InkSRS.sm2Update;
+  var rateUpdate = InkSRS.rateUpdate;
   var RATE = InkSRS.RATE;
   var makeCloze = InkSRS.makeCloze;
 
@@ -1205,7 +1206,7 @@
       '<div class="fcs-sum">' + icon("circle-check", 34) +
         '<p class="big">复习 ' + rv.reviewed + " 张 · 下次到期 " + nextN + " 张</p>" +
         '<p class="card-note">' + (near ? "最近一次：" + esc(near) + " · " + nextN + " 张排队中" : "本组暂无排期中的卡") +
-          "<br>间隔按遗忘曲线自动排期（SM-2），已写入本机复习进度。</p>" +
+          "<br>间隔按 FSRS-5 遗忘曲线自动排期，已写入本机复习进度。</p>" +
         '<div class="row" style="justify-content:center;margin-top:18px">' +
           '<button class="btn btn-accent" id="fcsAgain">再复习一轮</button>' +
           '<button class="btn btn-ghost" id="fcsBack">回到卡组</button>' +
@@ -1213,12 +1214,15 @@
       "</div>";
   }
 
-  /* 评分：sm2Update 结算 → 落 inkread.cards.v1（经 API.saveCard，与阅读页同一通路）→ 下一张 */
+  /* 评分：rateUpdate 结算（引擎开关在 srs.js）→ 落 inkread.cards.v1
+     （经 API.saveCard，与阅读页同一通路）→ 下一张。
+     结算返回的是旧状态的副本：cloze / suspended / excluded 一起活着回来，
+     这里只做整体赋值，不许再往回退成「只留调度字段」。 */
   function rateCard(q) {
     var rv = state.rv;
     if (!rv || rv.done || !rv.flipped) return;
     var c = rv.list[rv.idx];
-    var next = sm2Update(q, state.cards[c.n.id]);
+    var next = rateUpdate(q, state.cards[c.n.id]);
     state.cards[c.n.id] = next;
     API.saveCard(c.n.id, next);
     rv.reviewed++;

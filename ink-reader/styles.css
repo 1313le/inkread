@@ -897,9 +897,10 @@ body[data-page="reader"] .app-content { overflow: clip; }   /* 同 .screen：cli
 }
 .reader[data-notes="open"] .reader-notes { transform: none; }
 .reader-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--paper); position: relative; }
-/* v2.24.1：沉浸态里朗读条 / 自动翻页条是文档流元素，会被固定的沉浸底栏（54px）盖住。
-   它们一现身就给这一列让出那条带子（见 reader.html 的 immBarPad）；
-   两条都收着时不留空 —— 这条带子只在有东西要站的时候才存在。 */
+/* v2.24.1 → v1.3 S3：沉浸底栏（固定 54px）会盖住贴着文档流末尾的东西。
+   朗读条已交给 InkWin 托管成浮层，自己躲（immClearTts），不再要这条带子；
+   剩下两类还在文档流里 —— 自动翻页条，以及 ≤600 窄屏按 .tts-stick 退回流内的朗读条。
+   两条都收着时不留空 —— 这条带子只在有东西要站的时候才存在（判据见 immBarPad）。 */
 body.immersive .reader-main.bar-pad { padding-bottom: var(--space-54); }
 
 .reader-bar {

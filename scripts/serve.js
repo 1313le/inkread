@@ -451,6 +451,9 @@ function serveLlm(req, res) {
     const up = t.mod.request({ host: t.host, port: t.port, path: t.path, method, headers: heads, timeout: 120000 }, (r) => {
       const out = { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
       if (r.headers["content-type"]) out["Content-Type"] = r.headers["content-type"];
+      /* Retry-After 也要原样回吐：限流时上游给了「等多久再来」，客户端读不到就只能瞎猜 ——
+         「状态码与字节原样回吐」这条承诺里，等待时长算字节之外的第二个例外（v1.3 D3）。 */
+      if (r.headers["retry-after"]) out["Retry-After"] = String(r.headers["retry-after"]);
       res.writeHead(r.statusCode, out);
       r.pipe(res);
     });

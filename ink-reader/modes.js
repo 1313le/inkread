@@ -33,7 +33,7 @@
         两套补载机制并存只会掩盖「谁负责加载」这一个事实。
      ------------------------------------------------------------ */
   var ymd = window.InkSRS.ymd;
-  var sm2Update = window.InkSRS.sm2Update;
+  var rateUpdate = window.InkSRS.rateUpdate;
   var RATE = window.InkSRS.RATE;
   var makeCloze = window.InkSRS.makeCloze;
   /* v2.19.6 · 闪卡出题逻辑（详见桌面《闪卡出题逻辑完善方案》）：
@@ -81,7 +81,7 @@
   };
 
   var ctx = null;
-  var detected = null;      /* {mode,conf,why,scores} —— 主脑给的建议，缓存一次 */
+  var detected = null;      /* {mode,conf,why,scores,by:"ai"|"rule",note} —— 识别结果，缓存一次 */
   var detecting = false;
   var panelKey = null;      /* 当前打开的工具面板 */
 
@@ -128,7 +128,7 @@
     var head =
       '<button class="ms-chip" id="msChip" aria-haspopup="dialog" aria-expanded="false">' +
         icon(meta.icon, 14) + '<b>' + esc(meta.name) + '</b>' +
-        (isAuto() ? '<i class="ms-auto">主脑</i>' : '<i class="ms-manual">手动</i>') +
+        (isAuto() ? '<i class="ms-auto">自动</i>' : '<i class="ms-manual">手动</i>') +
         icon("chevron-down", 12) +
       '</button>' +
       '<span class="ms-sep"></span>';
@@ -160,7 +160,8 @@
     if (!el) return;
     var m = resolve();
     if (detected && detected.ambiguous && isAuto()) {
-      el.innerHTML = icon("alert-triangle", 12) + " 主脑不太确定，可手动改判";
+      el.innerHTML = icon("alert-triangle", 12) + " " +
+        (detected.by === "ai" ? "主脑" : "本机打分") + "不太确定，可手动改判";
       return;
     }
     el.textContent = (META[m] || {}).desc || "";
@@ -202,13 +203,20 @@
 
     var why = "";
     if (detected) {
+      /* by 是 api.js 给的实话：ai＝这一刻真打了模型，rule＝本机打分（未配 / 失败 / kindmap 命中）。
+         标题与图标跟着它走，不再一律写「主脑识别」—— 那是 v1.3 D1 之前的谎。 */
+      var byAi = detected.by === "ai";
+      var conf = detected.conf === null || detected.conf === undefined
+        ? "" : " <b>" + detected.conf + "%</b>";
       why = '<div class="mp-why">' +
-        '<div class="mp-why-h">' + icon("sparkles", 13) + '主脑识别依据 <b>' + detected.conf + '%</b></div>' +
+        '<div class="mp-why-h">' + icon(byAi ? "sparkles" : "scan-text", 13) +
+        (byAi ? "主脑判读依据" : "本机打分依据") + conf + '</div>' +
         '<ul>' + (detected.why.length ? detected.why.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("")
           : "<li>依据书架分类与正文结构综合判断</li>") + '</ul>' +
+        (detected.note ? '<p class="mp-note">' + esc(detected.note) + "</p>" : "") +
         '</div>';
     } else if (detecting) {
-      why = '<div class="mp-why"><div class="mp-why-h">' + icon("loader-circle", 13) + '主脑正在识别…</div></div>';
+      why = '<div class="mp-why"><div class="mp-why-h">' + icon("loader-circle", 13) + '正在识别内容类别…</div></div>';
     }
 
     /* 全屏（沉浸）下模式条是收起的 —— 把本模式的工具一并搬进弹层，
@@ -235,7 +243,8 @@
         '<button class="mp-item' + (auto ? " on" : "") + '" data-mode="auto">' +
           '<span class="mp-ic">' + icon("sparkles", 15) + '</span>' +
           '<span class="mp-tx"><b>自动（主脑识别）</b><i>' +
-            (detected ? '当前识别为「' + esc((META[detected.mode] || {}).name || "") + '」' : "随内容自动切换") +
+            (detected ? (detected.by === "ai" ? "主脑判为「" : "本机打分判为「") +
+              esc((META[detected.mode] || {}).name || "") + '」' : "随内容自动切换") +
           '</i></span>' +
           (auto ? '<span class="mp-ck">' + icon("check", 14) + '</span>' : "") +
         '</button>' +
@@ -1086,9 +1095,12 @@
                strokes: function () { return strokes; }, redraw: redraw };
   }
 
-  /* ---------- 5.5 闪卡：高亮挖空 → 间隔重复复习（SM-2） ---------- */
+  /* ---------- 5.5 闪卡：高亮挖空 → 间隔重复复习（FSRS-5） ---------- */
   /* 复习状态与 api.js 的 inkread.cards.v1 同源，按笔记 id 索引：
-     {ef 难度系数, ivl 当前间隔(天), reps 连续答对次数, due 下次到期日, last 上次复习日} */
+     {s 稳定度(天), d 难度(1–10), lapses 遗忘次数, ef 难度系数, ivl 当前间隔(天),
+      reps 复习次数, due 下次到期日, last 上次复习日} —— ef/reps 是 SM-2 时代留下的，
+      回退档还在用，字段不能凭空蒸发。另有与人手编辑同仓的 side 字段：
+     {cloze 选定的洞, suspended 挂起, excluded 排除}，结算时必须一起活着回来。 */
   var cards = {};
   var cardsReady = false;
 
@@ -1129,7 +1141,7 @@
     }).catch(function () { cardsReady = true; });
   }
 
-  /* sm2Update / RATE 见文件顶部别名（srs.js 单一事实源） */
+  /* rateUpdate / RATE 见文件顶部别名（srs.js 单一事实源）：结算走引擎开关，本文件不判引擎 */
 
   function renderCard(box) {
     if (!cardsReady) {
@@ -1334,7 +1346,7 @@
 
     qsa("[data-q]", box).forEach(function (b) {
       b.addEventListener("click", async function () {
-        var next = sm2Update(+b.dataset.q, st);
+        var next = rateUpdate(+b.dataset.q, st);
         cards[n.id] = next;
         await API.saveCard(n.id, next);
         S().cardIdx = 0;   /* 评完自动切到下一张到期卡 */
