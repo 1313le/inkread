@@ -31,8 +31,36 @@
   /* 换场信号：标题块，以及「———」「＊＊＊」这类纯分隔行。 */
   var BREAK_RE = /^[\s—–―\-*＊＊＿_·・＃#*=～~]{1,24}$/;
 
-  function newCtx() { return { lastName: "", pron: "", recent: [], gender: {}, mentioned: "", gap: 0 }; }
-  function resetScene(ctx) { ctx.lastName = ""; ctx.pron = ""; ctx.recent = []; ctx.mentioned = ""; ctx.gap = 0; }
+  /* ---------------- 锚序列与链（v1.4-S3 A6-1/A6-2）----------------
+     根因 1（cast.js 旧版 219 行）：`alt` 外推出来的名字与「提示语认出来的」被一视同仁
+     推进 recent，而 recentPush 只留最近两个不同名字 —— 三人轮换（甲→乙→丙→甲…）
+     从第 7 句起必然把丙念成乙，且错一句就跟着错一片。
+     现在把状态拆成两本账：
+       · anchors —— **只有 tag / pron 进**（确定性推得出的），窗口 ANCHOR_WIN；
+       · chain   —— 外推指针（gap = 距锚几句），alt 的名字绝不回填锚。
+     ANCHOR_WIN 与 ALT_MAX 都是 6，但语义不同：前者是「几个锚才够认周期」，后者是
+     「一段无提示语的对白最多猜几句」。别把两个 6 合成一个常量。 */
+  var ANCHOR_WIN = 6;
+  /* 模型护栏 1：距锚深度超过 CHAIN_MAX 的外推，哪怕模型给 conf=0.99 也不收。 */
+  var CHAIN_MAX = 24;
+  /* 句级标记位：tag=提示语明示 / pron=带性别代词回指命中 / alt=外推 / none=判不出。
+     模型条目另带 basis（枚举外整条拒收，见 applyModel）。 */
+  var AT = ["tag", "pron", "alt", "none"];
+  var BASIS = ["tag", "alternation", "pronoun", "mention", "new", "aside"];
+  /* A3：规则侧的「把握」按判据分档（提示语 > 代词回指 > 交替外推）。
+     模型给 conf 时两边比大小；模型输了也把冲突留在句子上（D3：界面必须显示冲突，不许静默）。
+     CONF_LOW 是模型侧落地线：低于它的归属宁可不落 —— 错一句会把整段读成别人。 */
+  var RULE_CONF = { tag: 0.95, pron: 0.8, alt: 0.6, none: 0 };
+  var CONF_LOW = 0.5;
+
+  function newCtx() {
+    return { lastName: "", pron: "", recent: [], gender: {}, mentioned: "", gap: 0,
+      anchors: [], runId: 0, chained: false, broken: false };
+  }
+  function resetScene(ctx) {
+    ctx.lastName = ""; ctx.pron = ""; ctx.recent = []; ctx.mentioned = ""; ctx.gap = 0;
+    ctx.anchors = []; ctx.chained = false; ctx.broken = false;
+  }
 
   /* ---------------- ① 切台词 ----------------
      返回 [{t:"narr"|"say", x:文本, q:引号, at:内容在原文里的字符起点}]。
@@ -173,28 +201,77 @@
     return out;
   }
 
+  /* 名字变体（李小红 / 小红）在归属阶段还没并人，比较时先按同人兜一道 ——
+     否则周期检测会把同一个人的两个写法当成两个人，一条链从头到尾都对不上。 */
+  function sameName(a, b) {
+    if (!a || !b) return false;
+    return a === b || samePerson(a, b);
+  }
+
+  /* 锚序列里最短的周期 —— 只认 2 与 3（两人乒乓 / 三人轮换）。
+     要求 len ≥ 2p 且逐位 round-robin 成立：只看到「A B A」不许认成 A B 循环，
+     那可能只是偶然的两次回头；宁可少推一截，也不能把一条假循环顺下去。 */
+  function cyclePeriod(seq) {
+    for (var p = 2; p <= 3; p++) {
+      if (seq.length < p * 2) continue;
+      var ok = true;
+      for (var i = 0; i + p < seq.length; i++) {
+        if (!sameName(seq[i], seq[i + p])) { ok = false; break; }
+      }
+      if (ok) return p;
+    }
+    return 0;
+  }
+
+  /* 下一句该谁说。优先级：周期（2/3）→ 两人乒乓 → 不外推。
+     · 周期：seq[(len + gap) % p]，gap = 距最近锚已经外推了几句；
+     · 乒乓：锚窗口里只有两个人且 recent 也确实是这两位 —— 取「不是上一位」的那位；
+     · 其余（锚不够、锚里有第三人、一次都没锚住）一律返回 null，交给旁白。
+     alt 的名字**不进 anchors**（A6-1 根因 1）：外推只能消耗链，不能喂养链。 */
+  function predictAt(ctx) {
+    var seq = ctx.anchors || [], i;
+    if (!seq.length) return null;
+    var uniq = [];
+    for (i = 0; i < seq.length; i++) {
+      var dup = false;
+      for (var u = 0; u < uniq.length; u++) if (sameName(uniq[u], seq[i])) { dup = true; break; }
+      if (!dup) uniq.push(seq[i]);
+    }
+    if (uniq.length < 2) return null;
+    var p = cyclePeriod(seq);
+    if (p) return seq[(seq.length + ctx.gap) % p];
+    if (uniq.length === 2 && ctx.recent.length === 2) {
+      return sameName(ctx.lastName, uniq[0]) ? uniq[1] : uniq[0];
+    }
+    return null;
+  }
+
   /* ---------------- ④ 一行（一段 blocks）里的归属 ----------------
-     ctx 跨段传递：lastName / pron / recent（最近两位说话人，供轮转）/ gap（距上次明示归属几句）。
-     优先级：提示语 → 代词回指 → **有界**两人轮转 → 归旁白。 */
-  function attrLine(spans, ctx) {
+     ctx 跨段传递：lastName / pron / recent（供代词回指）/ gap（距最近锚几句）/
+     anchors（只有 tag·pron 进）/ chained（这一段外推过没有）/ broken（链被破口否掉）。
+     优先级：提示语 → 代词回指 → **锚序列外推** → 归旁白。
+     每句都带标记，便于面板把「推出来的」和「看出来的」分开显示：
+       at=tag 提示语明示 / pron 代词回指 / alt 链外推 / none 判不出
+       hold=true 破口段不落地 / reach=n 触顶后该 run 还有 n 句没判。 */
+  function attrLine(spans, ctx, text) {
     var said = [];
     for (var i = 0; i < spans.length; i++) {
       var sp = spans[i];
       if (sp.t !== "say") continue;
+      var gapBefore = ctx.gap;
       var prev = spans[i - 1], next = spans[i + 1];
       var who = (prev && prev.t === "narr") ? tagName(prev.x, true) : null;
       if (!who && next && next.t === "narr") who = tagName(next.x, false);
-      var explicit = false;
+      var at = "none";
       if (who && PRON[who] != null) {
         /* A2：只有**带性别**的代词（他/她）才值得回指。我/你/咱/它在 PRON 里的值是空串，
            旧写法 `if (!g || …)` 把空串当「匹配通过」，于是「我走了」直接判给上一个说话人 ——
-           第一人称叙事的书里，这句式几乎每段都有，错得成片。
-           现在性别不明的代词既不回指也不记 pron，让它落到有界交替或直接归旁白。 */
+           第一人称叙事的书里，这句式几乎每段都有，错得成片。 */
         if (PRON[who]) ctx.pron = who;
         who = null;
       } else if (who) {
         who = normName(who);
-        if (who) explicit = true;
+        if (who) at = "tag";
       }
       if (!who && prev && prev.t === "narr") {                          /* 旁白点过的名字：先记下，供代词回指 */
         var mn = normName(mentionName(prev.x));
@@ -210,15 +287,52 @@
         /* recent 里没有 → 用旁白刚点过的名字（「张三走了进来。他说道：…」正是这一型） */
         if (!hit && ctx.mentioned && g && (ctx.gender[ctx.mentioned] || "") === g) hit = ctx.mentioned;
         who = hit || null;
-        if (who) explicit = true;
+        if (who) at = "pron";
         ctx.pron = null;                                                /* 代词只用一次 */
       }
-      if (!who && ctx.recent.length === 2 && ctx.gap < ALT_MAX) {        /* A1 有界两人轮转 */
-        who = ctx.recent[0] === ctx.lastName ? ctx.recent[1] : ctx.recent[0];
+
+      var runId = ctx.runId;
+      if (at === "tag" || at === "pron") {
+        /* 破口：外推期回来一个提示语，且它不是链上预期的下一位 —— 说明这条链早就断了，
+           这一 run 外推出的名字全部收回（hold），从这一个锚重新起链。 */
+        var breakRun = -1, breakExp = null;
+        if (at === "tag" && gapBefore > 0 && ctx.chained) {
+          var exp = predictAt(ctx);
+          if (exp && !sameName(who, exp)) {
+            breakRun = runId; breakExp = exp;
+            ctx.anchors = [];
+            ctx.broken = true;
+          }
+        }
+        if (ctx.gender[who] == null) ctx.gender[who] = genderHint(who, text) || "";
+        ctx.anchors.push(who);
+        if (ctx.anchors.length > ANCHOR_WIN) ctx.anchors = ctx.anchors.slice(-ANCHOR_WIN);
+        if (ctx.broken && cyclePeriod(ctx.anchors) >= 2) ctx.broken = false;
+        ctx.lastName = who;
+        ctx.recent = recentPush(ctx.recent, who);
+        ctx.gap = 0; ctx.chained = false;
+        ctx.runId = runId + 1;
+        said.push({ i: i, who: who, at: at, depth: 0, run: ctx.runId,
+          breakRun: breakRun, breakExp: breakExp });
+        continue;
       }
-      if (who) { ctx.lastName = who; ctx.recent = recentPush(ctx.recent, who); }
-      ctx.gap = explicit ? 0 : ctx.gap + 1;
-      said.push({ i: i, who: who });
+
+      var pred = ctx.broken ? null : predictAt(ctx);
+      var hold = false, reach = false;
+      if (pred) {
+        if (gapBefore < ALT_MAX) { who = pred; at = "alt"; ctx.chained = true; }
+        else reach = true;                        /* 触顶：本地不猜，留给主脑（reach 在 build 里按 run 计数） */
+      } else if (ctx.broken) {
+        hold = true;                              /* 断链段的外推一律不落地 */
+      }
+      if (who) {
+        if (ctx.gender[who] == null) ctx.gender[who] = genderHint(who, text) || "";
+        ctx.lastName = who;
+        ctx.recent = recentPush(ctx.recent, who);
+      }
+      ctx.gap = gapBefore + 1;
+      said.push({ i: i, who: who || "", at: at, depth: gapBefore + 1, run: runId,
+        hold: hold, reach: reach });
     }
     return said;
   }
@@ -229,7 +343,7 @@
      A1：标题块与纯分隔行都算换场，换场即 resetScene —— 「乒乓交替」从此只在当幕有效。 */
   function build(blocks, prev) {
     var ctx = newCtx();
-    var chars = {}, lines = [], spansOf = {};
+    var chars = {}, lines = [], spansOf = {}, runMap = {}, breaks = [];
     (blocks || []).forEach(function (b, bi) {
       var type = String((b && b.type) || "");
       if (!/^(p|h1|h2|h3|quote|abstract)$/.test(type)) return;
@@ -238,17 +352,44 @@
       if (/^h[1-3]$/.test(type) || BREAK_RE.test(text.trim())) resetScene(ctx);
       var spans = splitSpans(text);
       spansOf[bi] = spans;
-      var said = attrLine(spans, ctx);
+      var said = attrLine(spans, ctx, text);
       said.forEach(function (it) {
         var sp = spans[it.i];
-        var who = it.who;
-        lines.push({ bi: bi, si: it.i, text: sp.x, speaker: who || "" });
-        if (who) {
-          if (!chars[who]) chars[who] = { name: who, count: 0, gender: genderHint(who, text), alt: [] };
-          chars[who].count++;
-          if (!ctx.gender[who]) ctx.gender[who] = chars[who].gender || "";
-        }
+        var li = lines.length;
+        lines.push({ bi: bi, si: it.i, text: sp.x, speaker: it.who || "",
+          at: it.at, depth: it.depth, run: it.run, via: it.at, by: "rule" });
+        if (it.hold) { lines[li].hold = true; lines[li].via = "hold"; }
+        if (it.reach) lines[li].reach = true;
+        if (!runMap[it.run]) runMap[it.run] = [];
+        runMap[it.run].push(li);
+        if (it.breakRun >= 0) breaks.push({ run: it.breakRun, line: li, exp: it.breakExp, got: it.who });
       });
+    });
+    /* 破口收回（A6-2）：该 run 里所有外推句清空归属、标 hold —— 链已经证明断了，
+       这一截猜出来的名字一个都不许落地。提示语本身（tag/pron）是看出来的，不收回。 */
+    breaks.forEach(function (br) {
+      (runMap[br.run] || []).forEach(function (li) {
+        if (lines[li].at === "tag" || lines[li].at === "pron") return;
+        lines[li].speaker = "";
+        lines[li].hold = true;
+        lines[li].via = "hold";
+      });
+    });
+    /* 触顶计数（A6-2）：每个 run 从**第一条**未判句数到 run 末尾，记在那一句的 reach 上。
+       run 跨块也照数 —— 裸对白常常一段一句，run 天然横跨多个段。 */
+    Object.keys(runMap).forEach(function (rid) {
+      var arr = runMap[rid], first = -1;
+      for (var z = 0; z < arr.length; z++) if (lines[arr[z]].reach) { first = z; break; }
+      if (first < 0) return;
+      for (var w = first; w < arr.length; w++) { delete lines[arr[w]].reach; lines[arr[w]].via = "cap"; }
+      lines[arr[first]].reach = arr.length - first;
+    });
+    /* 角色表按**落地**的归属统计（破口收回的句子不进 count）。 */
+    lines.forEach(function (l) {
+      if (!l.speaker) return;
+      var who = l.speaker;
+      if (!chars[who]) chars[who] = { name: who, count: 0, gender: ctx.gender[who] || "", alt: [] };
+      chars[who].count++;
     });
     /* A3 变体合并：把「小红 / 李小红」这类同人的两个写法并成一个键，规范名取**更长**的那个
        （更具体），短名记进 alt。先并再谈继承，否则上一版按「李小红」存的音色指派会落在被
@@ -268,10 +409,12 @@
     var merged = {};
     names.forEach(function (n) {
       var c = canon[n], t = merged[c];
-      if (!t) { t = merged[c] = { name: c, count: 0, gender: "", alt: [], voiceK: "", locked: false }; }
+      if (!t) { t = merged[c] = { name: c, count: 0, gender: "", alt: [], voiceK: "", locked: false, voiceLock: false }; }
       t.count += chars[n].count;
       if (!t.gender && chars[n].gender) t.gender = chars[n].gender;
-      if (chars[n].voiceK && !t.voiceK) { t.voiceK = chars[n].voiceK; t.locked = !!chars[n].locked; }
+      if (chars[n].voiceK && !t.voiceK) {
+        t.voiceK = chars[n].voiceK; t.locked = !!chars[n].locked; t.voiceLock = !!chars[n].voiceLock;
+      }
       if (n !== c && t.alt.indexOf(n) < 0) t.alt.push(n);
     });
     Object.keys(merged).forEach(function (c) {
@@ -300,48 +443,501 @@
         if (old.gender) chars[n].gender = old.gender;
         if (old.voiceK) chars[n].voiceK = old.voiceK;
         if (old.locked) chars[n].locked = true;
+        if (old.voiceLock) chars[n].voiceLock = true;
+        /* A2：上一版的别名、模型新建痕迹与证据也带过来，重识别不等于把人的来路冲掉。 */
+        if (Array.isArray(old.alt) && old.alt.length) {
+          if (!Array.isArray(chars[n].alt)) chars[n].alt = [];
+          old.alt.forEach(function (x) { if (x && x !== n && chars[n].alt.indexOf(x) < 0) chars[n].alt.push(x); });
+        }
+        if (old.by === "model") chars[n].by = "model";
+        if (old.role) chars[n].role = old.role;
+        if (old.evidence) chars[n].evidence = old.evidence;
       });
     }
     var out = { chars: chars, lines: lines };
     out.spans = spansOf;
+    /* 链的账：面板顶部「裸句率」与「交替链在第 x 句断裂」都读这一份。 */
+    var chain = { bare: 0, alt: 0, landed: 0, none: 0, hold: 0, reach: 0, breaks: [] };
+    lines.forEach(function (l) {
+      if (l.at === "alt" || l.at === "none") chain.bare++;
+      if (l.at === "alt") chain.alt++;
+      if (l.at === "alt" && !l.hold) chain.landed++;
+      if (l.at === "none") chain.none++;
+      if (l.hold) chain.hold++;
+      if (typeof l.reach === "number") chain.reach += l.reach;
+    });
+    chain.breaks = breaks.map(function (br) { return { run: br.run, say: br.line + 1, exp: br.exp, got: br.got }; });
+    out.chain = chain;
     if (prev && prev.lines) {           /* 用户改过的归属保留（按 (bi,si) 对齐） */
       var idx = {};
       prev.lines.forEach(function (l) { idx[l.bi + ":" + l.si] = l; });
       out.lines.forEach(function (l) {
         var old = idx[l.bi + ":" + l.si];
-        if (old && old.user) { l.speaker = old.speaker; l.user = true; }
+        if (old && (old.user || old.derivedFrom >= 0)) {
+          l.speaker = old.speaker; l.user = !!old.user;
+          if (old.derivedFrom >= 0) l.derivedFrom = old.derivedFrom;
+          delete l.hold;
+          l.via = old.user ? "user" : "derived";
+        }
       });
     }
     return out;
   }
 
-  /* ---------------- ⑥ L2 模型归属 ----------------
-     模型给 [{i, speaker}]（i = lines 的下标），只认**已知角色名或空**：
-     别的名字一律丢掉（白名单校验在本地做，不能把模型编的名字写进角色表）。 */
-  function applyModel(cast, pairs) {
-    if (!cast || !Array.isArray(pairs)) return cast;
-    var known = Object.keys(cast.chars || {});
-    var set = {}; known.forEach(function (n) { set[n] = 1; });
-    /* 模型爱写全称（「李小红」），角色表里可能是并人后的规范名或对不上大小写。
-       直接丢掉就白问一次模型 —— 先按同人后缀关系兜一道，兜不到才丢（白名单仍在本地，
-       模型编的新名字一律不进角色表）。 */
-    function resolve(nm) {
-      if (set[nm]) return nm;
-      for (var z = 0; z < known.length; z++) if (samePerson(nm, known[z])) return known[z];
-      return null;
+  /* ---------------- ⑤c 块间衔接：从已判结果复原交替链（A6-3） ----------------
+     分块问模型时，第二块起不能只给字面 —— 模型要知道「上面这条链走到哪、周期几位、
+     本块首句离锚多远」。只认 tag/pron 进锚（与 ANCHOR_WIN 同源），跨标题/换场即断：
+     换场之后旧链不成立，拿它当证据比不给更糟。 */
+  function crossesScene(blocks, a, b) {
+    for (var z = a; z <= b; z++) {
+      var x = blocks[z];
+      if (!x || /^h[1-3]$/.test(String(x.type || ""))) return true;
+      if (BREAK_RE.test(String(x.x || "").trim())) return true;
     }
-    pairs.forEach(function (p) {
-      var i = p && Number(p.i);
-      var nm = String((p && p.speaker) || "").trim();
-      if (!(i >= 0 && i < cast.lines.length)) return;
-      if (!nm) return;
-      var hit = resolve(nm);
-      if (!hit) return;                   /* 点了个真不认识的：不建角色，只留给用户看 */
-      if (cast.lines[i].user) return;     /* 用户改过的，模型不许覆盖 */
-      cast.lines[i].speaker = hit;
-      cast.lines[i].by = "model";
+    return false;
+  }
+  function chainState(lines, upto, blocks) {
+    var list = lines || [], seq = [], at = -1;
+    var stop = Math.min(Math.max(0, Number(upto) || 0), list.length);
+    var guardBi = -1;
+    for (var i = stop - 1; i >= 0; i--) {
+      var l = list[i];
+      if (blocks && guardBi >= 0 && crossesScene(blocks, l.bi, guardBi)) break;
+      guardBi = l.bi;
+      if (l.at === "tag" || l.at === "pron") {
+        if (!l.speaker) continue;
+        seq.unshift(l.speaker);
+        if (at < 0) at = i;
+        if (seq.length >= ANCHOR_WIN) break;
+      }
+    }
+    var first = stop < list.length ? list[stop] : null;
+    return { seq: seq, p: cyclePeriod(seq), depth: first ? (Number(first.depth) || 0) : 0, last: at };
+  }
+
+  /* ---------------- ⑤d 成段改派与两锚重算（A6-4） ----------------
+     面板把「连续同一说话人」压成链块（run）。两条边界：
+       · 跨章节标题 / 分隔行即断 —— 一次点击不该把上一章的名字抄到下一章；
+       · 同一锚派生出来的一整段交替链算**一块**（哪怕逐句换人）—— 人链改派同样要一次点完。
+     改派走 reassignRange（整块 → 一个人 / 旁白），重算走 recomputeChain（两锚 → 交替），
+     两条路都只动归属，不碰音色，也都不发网络请求。 */
+  function sceneMarks(blocks, lines) {
+    var out = [], scene = 0, bi = -1;
+    (lines || []).forEach(function (l) {
+      if (l.bi !== bi) {
+        if (bi < 0 && blocks && blocks[l.bi]) {
+          var b0 = blocks[l.bi];
+          if (/^h[1-3]$/.test(String(b0.type || "")) || BREAK_RE.test(String(b0.x || "").trim())) scene++;
+        } else if (bi >= 0 && blocks) {
+          for (var z = bi + 1; z <= l.bi; z++) {
+            var b = blocks[z];
+            if (!b) continue;
+            if (/^h[1-3]$/.test(String(b.type || "")) || BREAK_RE.test(String(b.x || "").trim())) scene++;
+          }
+        }
+        bi = l.bi;
+      }
+      out.push(scene);
+    });
+    return out;
+  }
+  function runKey(l) {
+    if (typeof l.derivedFrom === "number" && l.derivedFrom >= 0) return "d:" + l.derivedFrom;
+    return "s:" + (l.speaker || "");
+  }
+  function runsOf(cast, blocks) {
+    var lines = (cast && cast.lines) || [];
+    var scenes = sceneMarks(blocks, lines);
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var k = runKey(lines[i]), last = out[out.length - 1];
+      if (last && last.key === k && scenes[i] === last.scene) last.to = i + 1;
+      else out.push({ from: i, to: i + 1, key: k, who: lines[i].speaker || "", scene: scenes[i],
+        derived: typeof lines[i].derivedFrom === "number" });
+    }
+    out.forEach(function (r) {
+      r.n = r.to - r.from;
+      if (r.derived) {
+        r.names = [];
+        for (var i = r.from; i < r.to && r.names.length < 3; i++) {
+          var nm = lines[i].speaker || "";
+          if (nm && r.names.indexOf(nm) < 0) r.names.push(nm);
+        }
+        r.alt = r.names.length >= 2;
+      }
+    });
+    return out;
+  }
+  function recount(cast) {
+    if (!cast || !cast.chars) return cast;
+    var chars = cast.chars, lines = cast.lines || [];
+    Object.keys(chars).forEach(function (n) { chars[n].count = 0; });
+    lines.forEach(function (l) {
+      if (!l.speaker) return;
+      if (!chars[l.speaker]) chars[l.speaker] = { name: l.speaker, count: 0, gender: "", alt: [] };
+      chars[l.speaker].count++;
     });
     return cast;
+  }
+  function createChar(cast, name) {
+    if (!cast) return "";
+    var nm = String(name || "").trim().replace(/\s+/g, " ").slice(0, 12);
+    if (nm.length < 2 || PRON[nm] != null) return "";
+    var chars = cast.chars || (cast.chars = {});
+    if (chars[nm]) return nm;
+    var keys = Object.keys(chars);
+    for (var i = 0; i < keys.length; i++) if (samePerson(nm, keys[i])) return keys[i];
+    chars[nm] = { name: nm, count: 0, gender: genderHint(nm, "") || "", alt: [], voiceK: "", locked: false };
+    return nm;
+  }
+  function reassignRange(cast, from, to, who, opts) {
+    var lines = (cast && cast.lines) || [];
+    var a = Math.max(0, Math.min(lines.length, Number(from) || 0));
+    var b = Math.max(a, Math.min(lines.length, Number(to) || 0));
+    var aside = !!(opts && opts.aside);
+    var nm = String(who || "");
+    var n = 0;
+    for (var i = a; i < b; i++) {
+      var l = lines[i];
+      l.speaker = nm; l.user = true; l.by = "user"; l.via = "user"; l.conf = 1;
+      delete l.hold; delete l.uncertain; delete l.suggest; delete l.clash; delete l.why;
+      delete l.reach; delete l.ruleWho; delete l.derivedFrom;
+      if (aside) l.aside = true; else delete l.aside;
+      n++;
+    }
+    if (n) recount(cast);
+    return n;
+  }
+  /* 从 from 这一句起按 a ⇄ b 交替，直到下一个 tag/pron 锚或换场为止。
+     起点是**人给的锚**（user），下游是派生句（by:"user" + derivedFrom=起点）——
+     模型只认 derivedFrom 这条护栏，by 是给面板看的。两锚相同 / 空名一律不推。 */
+  function recomputeChain(cast, blocks, from, a, b) {
+    var lines = (cast && cast.lines) || [];
+    var start = Number(from);
+    if (!(start >= 0 && start < lines.length)) return { count: 0, from: start, to: start };
+    var A = String(a || ""), B = String(b || "");
+    if (!A || !B || sameName(A, B)) return { count: 0, from: start, to: start };
+    var scenes = sceneMarks(blocks, lines), scene0 = scenes[start];
+    var seq = [A, B], n = 0, end = start;
+    for (var i = start; i < lines.length; i++) {
+      if (i > start) {
+        if (scenes[i] !== scene0) break;
+        var cur = lines[i];
+        if (cur.user && !(typeof cur.derivedFrom === "number")) break;
+        if (cur.at === "tag" || cur.at === "pron") break;
+      }
+      var l = lines[i];
+      var who = seq[n % 2];
+      delete l.hold; delete l.uncertain; delete l.suggest; delete l.clash; delete l.why;
+      delete l.reach; delete l.ruleWho; delete l.aside;
+      l.speaker = who; l.by = "user"; l.conf = 1;
+      if (i === start) {
+        l.user = true; l.via = "user"; delete l.derivedFrom;
+      } else {
+        l.user = false; l.via = "derived"; l.derivedFrom = start;
+      }
+      n++;
+      end = i + 1;
+    }
+    if (n) recount(cast);
+    return { count: n, from: start, to: end };
+  }
+
+  /* ---------------- ⑤b 旧账惰性归一（v1.4-S3 #287）----------------
+     ver 2 给角色表多写句级标记（at/via/depth/run/hold/reach）与分配账（chain）。
+     旧账不批量改写：读的时候补形状，缺标记的行标 via="legacy"（面板据此提示
+     「旧版识别、没有链账」），等下一次用户动作落盘时才顺带写成新形状。
+     只补字段，**不动 speaker** —— 这是读旧账，不是替用户改归属。 */
+  function normalizeCast(book) {
+    if (!book || typeof book !== "object" || Array.isArray(book)) return null;
+    var out = book;
+    out.on = !!out.on;
+    if (!out.chars || typeof out.chars !== "object" || Array.isArray(out.chars)) out.chars = {};
+    if (!Array.isArray(out.lines)) out.lines = [];
+    Object.keys(out.chars).forEach(function (k) {
+      var c = out.chars[k];
+      if (!c || typeof c !== "object" || Array.isArray(c)) {
+        out.chars[k] = { name: k, count: 0, gender: "", alt: [] };
+        return;
+      }
+      if (!c.name) c.name = k;
+      c.count = Number(c.count) || 0;
+      c.gender = String(c.gender || "");
+      if (!Array.isArray(c.alt)) c.alt = [];
+      c.alt = c.alt.filter(function (x) { return typeof x === "string" && x; });
+      c.voiceK = String(c.voiceK || "");
+      c.locked = !!c.locked;
+      c.voiceLock = !!c.voiceLock;      /* A4：人亲手挑过的音色，任何重排都不碰 */
+      /* A2：模型新建的角色带 by/role/evidence（面板据此单列一档、点开看凭什么）。 */
+      if (c.by != null) c.by = String(c.by);
+      if (c.role != null) c.role = String(c.role).slice(0, 20);
+      if (!Array.isArray(c.evidence)) delete c.evidence;
+      else c.evidence = c.evidence.filter(function (e) {
+        return e && typeof e === "object" && typeof e.i === "number" && typeof e.text === "string";
+      }).slice(0, 3);
+    });
+    /* 并人建议只是待办，形状不对就丢；不在这里替用户并人。 */
+    if (!Array.isArray(out.merges)) out.merges = [];
+    out.merges = out.merges.filter(function (m) {
+      return m && typeof m === "object" && !Array.isArray(m) &&
+        typeof m.a === "string" && typeof m.b === "string" && m.a && m.b && m.a !== m.b;
+    });
+    /* 坏条目直接丢掉：unitsFor / 面板都假定每条是对象，留着 null 会在下游炸整页。 */
+    out.lines = out.lines.filter(function (l) { return l && typeof l === "object" && !Array.isArray(l); });
+    out.lines.forEach(function (l) {
+      if (typeof l.text !== "string") l.text = String(l.text || "");
+      if (typeof l.speaker !== "string") l.speaker = "";
+      if (AT.indexOf(l.at) < 0) { l.at = "none"; l.depth = 0; l.run = -1; }
+      if (!l.via) l.via = l.user ? "user" : (l.hold ? "hold" : "legacy");
+      if (!l.by) l.by = l.user ? "user" : "rule";
+    });
+    return out;
+  }
+
+  /* ---------------- ⑥ L2 模型归属 ----------------
+     输入每条 = {i, speaker, conf?, quote?, basis?, why?}（i = lines 的下标）。
+     A3 证据化：
+       · conf 落账、quote 存原文（面板点开看凭什么）；
+       · conf < CONF_LOW 不落地 —— speaker 清空、标 uncertain，候选留给面板两颗快捷钮；
+       · 规则与模型不一致时两边比 conf（规则侧按 at 分档），输的一方不落地但冲突必须留在句子上。
+     A6-3 合同（opts.strict）：basis 缺失或不在 BASIS 枚举内、conf 缺失 → 整条拒收。
+     旧调用（v226 H 组等）不传 opts，保持宽松口径，既有契约一条不改。
+     白名单仍在本地：模型编的新名字（A2 之前没有 new 通道）一律丢，并计入 rejected。 */
+  /* 名字认人：精确名 → 别名表 → 同人后缀。表外一律 null —— 白名单永远在本地。
+     模型爱写全称（「李小红」）或别名（「赵叔」），角色表里可能是并人后的规范名；
+     直接丢掉就白问一次模型，但也不能让模型编的名字混进来。 */
+  function findChar(cast, nm) {
+    var chars = (cast && cast.chars) || {}, raw = String(nm == null ? "" : nm).trim();
+    if (!raw) return null;
+    if (chars[raw]) return raw;
+    var keys = Object.keys(chars);
+    for (var i = 0; i < keys.length; i++) {
+      var alts = chars[keys[i]] && chars[keys[i]].alt;
+      if (Array.isArray(alts) && alts.indexOf(raw) >= 0) return keys[i];
+    }
+    for (var z = 0; z < keys.length; z++) if (samePerson(raw, keys[z])) return keys[z];
+    return null;
+  }
+  function applyModel(cast, pairs, opts) {
+    var stats = { got: Array.isArray(pairs) ? pairs.length : 0, kept: 0, low: 0,
+      rejected: 0, protected: 0, conflicts: 0, aside: 0, over: 0 };
+    if (!cast || !Array.isArray(pairs)) return cast;
+    var strict = !!(opts && opts.strict);
+    pairs.forEach(function (p) {
+      if (!p || typeof p !== "object") { stats.rejected++; return; }
+      var i = Number(p.i);
+      if (!(i >= 0 && i < cast.lines.length)) { stats.rejected++; return; }
+      var l = cast.lines[i];
+      /* 人给的锚（手改 / 派生）永远压过模型（红线一，D1/D4）。 */
+      if (l.user || (typeof l.derivedFrom === "number" && l.derivedFrom >= 0)) { stats.protected++; return; }
+      var basis = String(p.basis || "");
+      if (basis && BASIS.indexOf(basis) < 0) { stats.rejected++; return; }
+      if (strict && BASIS.indexOf(basis) < 0) { stats.rejected++; return; }
+      /* 护栏 1（A6-3）：距锚深度超过 CHAIN_MAX 的外推不收 —— 哪怕模型给 conf=0.99。
+         规则层已经说过「这么长的链本地不猜」，模型看不到累积误差，不能替它猜下去。 */
+      if (strict && basis === "alternation" && Number(l.depth) > CHAIN_MAX) {
+        stats.over++; stats.rejected++; return;
+      }
+      var hasConf = p.conf != null && isFinite(Number(p.conf));
+      if (strict && !hasConf) { stats.rejected++; return; }
+      /* 宽松调用（旧形状 / v226 契约）：模型结果是权威，与规则冲突时一律采纳 ——
+         这是 v2.25 的既有行为，H2 钉着它；A3 的置信度比较只在 strict（主脑分配流程）里生效。 */
+      var conf = hasConf ? Math.max(0, Math.min(1, Number(p.conf))) : 0.5;
+      var effConf = strict ? conf : 1;
+      var quote = String(p.quote == null ? "" : p.quote).slice(0, 200);
+      var raw = String(p.speaker == null ? "" : p.speaker).trim();
+      var hit = raw ? findChar(cast, raw) : null;
+      if (raw && !hit) { stats.rejected++; return; }   /* 表外名字（A2 之前没有新建通道） */
+      /* 「规则说的人」必须与「模型上轮改过的人」分开存：第二次再问模型时，
+         l.speaker 可能已经是模型自己写的，拿它当规则基线会把自己的旧答案当证据。
+         ruleWho 只在模型第一次覆盖规则时落一次，之后一直代表本地规则的原判。 */
+      var rule = (l.by === "model" && l.ruleWho != null) ? String(l.ruleWho || "") : (l.speaker || "");
+      var rc = RULE_CONF[l.at] || 0;
+      /* 上一轮的犹豫 / 冲突 / 非对白标记随这一轮新判决作废，避免旧账挂在新结论上。 */
+      delete l.uncertain; delete l.suggest; delete l.clash; delete l.aside;
+      l.conf = conf;
+      if (quote) l.quote = quote; else delete l.quote;
+      if (basis) l.basis = basis; else delete l.basis;
+      if (p.why) l.why = String(p.why).slice(0, 120); else delete l.why;
+      function keepRule() {
+        l.speaker = rule; l.by = "rule"; l.via = "rule";
+        delete l.hold; delete l.uncertain; delete l.suggest;
+      }
+      if (rule && hit && !sameName(hit, rule)) {
+        stats.conflicts++;
+        l.clash = { rule: rule, model: hit, conf: conf, ruleConf: rc };
+        if (effConf > rc) {
+          if (l.ruleWho == null) l.ruleWho = rule;
+          l.speaker = hit; l.by = "model"; l.via = "model";
+          delete l.hold; delete l.uncertain; delete l.suggest;
+        } else keepRule();
+        return;
+      }
+      if (basis === "aside") {
+        /* 引号里的独白 / 转述 / 书信：落地为旁白并标出来，让读者知道为什么这句没角色音。 */
+        if (rule && effConf <= rc) { keepRule(); return; }
+        if (!rule && effConf < CONF_LOW) {
+          /* 拿不准的「非对白」也不许把一句台词悄悄吞成旁白：留给人和下一轮模型。 */
+          l.uncertain = true; l.by = "model"; l.via = "model";
+          stats.low++;
+          return;
+        }
+        if (l.ruleWho == null && rule) l.ruleWho = rule;
+        l.speaker = ""; l.by = "model"; l.via = "model"; l.aside = true;
+        delete l.hold; delete l.uncertain; delete l.suggest;
+        stats.kept++; stats.aside++;
+        return;
+      }
+      if (rule && hit && sameName(hit, rule)) {
+        /* 模型与规则同判：不因模型 conf 低去动规则已经看出来的归属。 */
+        if (l.speaker !== rule) l.speaker = rule;
+        l.by = "rule"; l.via = "rule";
+        delete l.uncertain; delete l.suggest; delete l.hold;
+        stats.kept++;
+        return;
+      }
+      if (hit && effConf < CONF_LOW) {
+        if (l.ruleWho == null && rule) l.ruleWho = rule;
+        l.speaker = ""; l.uncertain = true; l.suggest = hit;
+        l.by = "model"; l.via = "model";
+        stats.low++;
+        return;
+      }
+      if (!hit) {
+        /* 模型说「判不出」只是弃权，不是反证：规则已经看出来的归属（提示语 / 代词）
+           不因模型弃权被抹掉 —— 否则一句「拿不准」就能把「张三道：…」降回旁白。
+           只有模型明确给了人（上面几条分支）或明确说不是对白（aside）才算主张。 */
+        if (rule) { keepRule(); return; }
+        l.speaker = ""; l.by = "model"; l.via = "model";
+        delete l.uncertain; delete l.suggest;
+        return;
+      }
+      if (l.ruleWho == null && rule) l.ruleWho = rule;
+      l.speaker = hit; l.by = "model"; l.via = "model";
+      delete l.uncertain; delete l.suggest; delete l.aside; delete l.hold; delete l.clash;
+      stats.kept++;
+    });
+    cast.lastModel = stats;
+    return cast;
+  }
+
+  /* ---------------- ⑥b 主脑提案落地（A2） ----------------
+     入参 prop = {chars:[{name, alias:[…], gender, role, evidence:[全局句号…]}],
+                  lines:[{i, speaker, basis, conf, quote, why}],
+                  merge:[{a, b, conf, why}]}。
+     三段各有各的口径：
+       · chars —— **新建通道**。名字先归一（过短 / 代词 / 虚词一律不收）；能按
+         「精确名 → alias 表 → 同人后缀」认出是表里已有的，就只补别名与缺的性别，不另起一行；
+         真新的记 by:"model" 并带原文证据（evidence 是**全书从 1 起**的句号，必须落在本块内）。
+         strict 下没有证据的新名字不收：模型编的人不许凭一句话进角色表。
+       · lines —— 交给 applyModel（人定/派生保护、basis/conf 合同、链深上限都在那边）。
+       · merge —— 只写进 cast.merges 作**建议**，不动角色表、不改归属；用户点「并」才走 mergeChars。
+     返回本轮总账（并写进 cast.lastModel），面板与 toast 读它。 */
+  function applyProposal(cast, prop, opts) {
+    var stats = { got: 0, kept: 0, low: 0, rejected: 0, protected: 0, conflicts: 0, aside: 0, over: 0,
+      newChars: 0, aliased: 0, newRejected: 0, merges: 0, mergeRejected: 0 };
+    if (!cast || !prop || typeof prop !== "object") return stats;
+    var strict = !!(opts && opts.strict);
+    var total = (cast.lines || []).length;
+    var from = opts && opts.from != null ? Math.max(0, Math.min(total, Number(opts.from) || 0)) : 0;
+    var to = opts && opts.to != null ? Math.max(from, Math.min(total, Number(opts.to) || 0)) : total;
+    function evid(list) {
+      var out = [];
+      (Array.isArray(list) ? list : []).forEach(function (e) {
+        var i = Math.round(Number(e)) - 1;      /* 提示词给模型的是全书从 1 起的句号 */
+        if (!(i >= from && i < to) || !cast.lines[i]) return;
+        for (var z = 0; z < out.length; z++) if (out[z].i === i) return;
+        out.push({ i: i, text: String(cast.lines[i].text || "").slice(0, 24) });
+      });
+      return out.slice(0, 3);
+    }
+    (Array.isArray(prop.chars) ? prop.chars : []).forEach(function (cd) {
+      if (!cd || typeof cd !== "object") { stats.newRejected++; return; }
+      var nm = String(cd.name || "").trim().replace(/\s+/g, " ").slice(0, 12);
+      if (nm.length < 2 || PRON[nm] != null || NOT_NAME.test(nm)) { stats.newRejected++; return; }
+      var ev = evid(cd.evidence);
+      if (strict && !ev.length) { stats.newRejected++; return; }
+      var aliases = (Array.isArray(cd.alias) ? cd.alias : []).map(function (a) {
+        return String(a || "").trim().replace(/\s+/g, " ").slice(0, 12);
+      }).filter(function (a) { return a.length >= 2 && a !== nm && PRON[a] == null; });
+      var gender = cd.gender === "m" || cd.gender === "f" ? cd.gender : "";
+      var hit = findChar(cast, nm);
+      if (hit) {
+        var ex = cast.chars[hit];
+        aliases.forEach(function (a) {
+          if (a === hit) return;
+          if (!Array.isArray(ex.alt)) ex.alt = [];
+          if (ex.alt.indexOf(a) < 0) ex.alt.push(a);
+        });
+        if (!ex.gender && gender) ex.gender = gender;
+        if (!ex.role && cd.role) ex.role = String(cd.role).slice(0, 20);
+        stats.aliased++;
+        return;
+      }
+      cast.chars[nm] = { name: nm, count: 0, gender: gender || genderHint(nm, "") || "", alt: aliases,
+        voiceK: "", locked: false, by: "model", role: String(cd.role || "").slice(0, 20), evidence: ev };
+      stats.newChars++;
+    });
+    applyModel(cast, Array.isArray(prop.lines) ? prop.lines : [], { strict: strict });
+    var ms = cast.lastModel || {};
+    ["got", "kept", "low", "rejected", "protected", "conflicts", "aside", "over"].forEach(function (k) {
+      stats[k] = Number(ms[k] || 0);
+    });
+    /* 并人建议：两边都得在表里（刚新建的也算）、不是同一个人；strict 下 conf 低于落地线的不收。
+       只收不并 —— 模型不许替用户改人。 */
+    (Array.isArray(prop.merge) ? prop.merge : []).forEach(function (m) {
+      if (!m || typeof m !== "object") { stats.mergeRejected++; return; }
+      var a = findChar(cast, m.a), b = findChar(cast, m.b);
+      var conf = Number(m.conf);
+      if (!isFinite(conf)) conf = 0.5;
+      if (!a || !b || a === b || samePerson(a, b)) { stats.mergeRejected++; return; }
+      if (strict && conf < CONF_LOW) { stats.mergeRejected++; return; }
+      cast.merges = Array.isArray(cast.merges) ? cast.merges : [];
+      var dup = cast.merges.some(function (x) {
+        return x && ((x.a === a && x.b === b) || (x.a === b && x.b === a));
+      });
+      if (dup) return;
+      if (cast.merges.length >= 12) { stats.mergeRejected++; return; }
+      cast.merges.push({ a: a, b: b, conf: Math.max(0, Math.min(1, conf)),
+        why: String(m.why || "").slice(0, 60), at: Date.now() });
+      stats.merges++;
+    });
+    recount(cast);      /* 面板上的 ×N 与音色分档都读这份计数，模型改完就得对账 */
+    cast.lastModel = stats;
+    return stats;
+  }
+  /* 并人（只由用户点「并」触发）：保留 b，把 a 的句子、别名、音色与性别缺项并过去。
+     返回改归的句数；-1 = 并不了（人不在表里 / 同一人）。0 句也能并 ——
+     模型新建但还没分到句子的角色允许被并走。 */
+  function mergeChars(cast, a, b) {
+    var A = String(a || ""), B = String(b || "");
+    if (!cast || !cast.chars || !A || !B || A === B) return -1;
+    var ca = cast.chars[A], cb = cast.chars[B];
+    if (!ca || !cb || samePerson(A, B)) return -1;
+    var n = 0;
+    (cast.lines || []).forEach(function (l) {
+      if (l.speaker === A) { l.speaker = B; n++; }
+      if (l.ruleWho === A) l.ruleWho = B;
+      if (l.suggest === A) l.suggest = B;
+      if (l.clash) {
+        if (l.clash.rule === A) l.clash.rule = B;
+        if (l.clash.model === A) l.clash.model = B;
+      }
+    });
+    if (!cb.gender && ca.gender) cb.gender = ca.gender;
+    if (!cb.voiceK && ca.voiceK) { cb.voiceK = ca.voiceK; cb.locked = !!ca.locked; }
+    if (!cb.role && ca.role) cb.role = ca.role;
+    if (!cb.evidence && ca.evidence) cb.evidence = ca.evidence;
+    if (!Array.isArray(cb.alt)) cb.alt = [];
+    [A].concat(Array.isArray(ca.alt) ? ca.alt : []).forEach(function (x) {
+      if (x && x !== B && cb.alt.indexOf(x) < 0) cb.alt.push(x);
+    });
+    delete cast.chars[A];
+    if (Array.isArray(cast.merges)) {
+      cast.merges = cast.merges.filter(function (m) { return m && m.a !== A && m.b !== A; });
+    }
+    recount(cast);
+    return n;
   }
 
   /* ---------------- ⑦ 配音分配：给每个角色一款尽量不撞的音色 ----------------
@@ -370,7 +966,7 @@
     var used = {}, i, c;
     for (i = 0; i < list.length; i++) {
       c = list[i];
-      if (c.voiceK && (c.locked || byK[c.voiceK])) { used[c.voiceK] = (used[c.voiceK] || 0) + 1; continue; }
+      if (c.voiceK && (c.locked || c.voiceLock || byK[c.voiceK])) { used[c.voiceK] = (used[c.voiceK] || 0) + 1; continue; }
       if (c.voiceK) c.voiceK = "";                /* 自动挑的款已不可用 → 只重排这一个 */
     }
     /* 重排的先后仍按戏份多少定序（多给主角留同性别的选择权），但结果不随池子顺序改变而漂移 */
@@ -399,6 +995,86 @@
       byVoice[cc.voiceK] = n + 1;
     });
     return chars;
+  }
+
+  /* ---------------- ⑦b A4 音色方案（模型只提建议，本地硬校验） ----------------
+     模型给的是 {char, voice, why}，这里只认三件：
+       · char 必须是角色表里的人（别名按 findChar 归一）；
+       · voice 必须是本机音色池里的键（池外 id / 显示名一律丢，模型不许凭空造声线）；
+       · voiceLock 的角色不参与重排（行照留，标 locked，采用时跳过）。
+     返回的是**预览行**（含本地算出的共用次数与音高偏移），不写任何字段。
+     采用走 applyVoicePlan：写 voiceK、重算音高，再交给 assignVoices 统一收口。 */
+  function planVoices(cast, plan, pool, narrK) {
+    var out = { rows: [], rejected: 0, locked: 0 };
+    if (!cast || !cast.chars) return out;
+    var byK = {};
+    (pool || []).forEach(function (v) { if (v && v.k) byK[v.k] = v; });
+    var seen = {};
+    (Array.isArray(plan) ? plan : []).forEach(function (p) {
+      if (!p || typeof p !== "object") { out.rejected++; return; }
+      var name = findChar(cast, p.char);
+      var k = String(p.voice == null ? "" : p.voice);
+      if (!name || !cast.chars[name] || !byK[k] || seen[name]) { out.rejected++; return; }
+      seen[name] = 1;
+      var c = cast.chars[name];
+      if (c.voiceLock) {
+        out.locked++;
+        out.rows.push({ char: name, voice: c.voiceK || "", name: c.voiceName || (byK[c.voiceK] && byK[c.voiceK].name) || "原音色",
+          why: "已锁定 · 不参与重排", locked: true, pitch: Number(c.pitch) || 0, reuse: false });
+        return;
+      }
+      out.rows.push({ char: name, voice: k, name: byK[k].name, why: String(p.why || "").slice(0, 40),
+        locked: false, pitch: 0, reuse: false });
+    });
+    /* 预览音高：照 assignVoices 的同一套规则算（可用池、已占用、Object.keys 顺序），
+       面板上看到「共用 +30Hz」，采用后播放层拿到的就是同一个数。 */
+    var avail = (pool || []).slice();
+    if (narrK) {
+      var keep = avail.filter(function (v) { return v.k !== narrK; });
+      if (keep.length >= 2) avail = keep;
+    }
+    var availK = {};
+    avail.forEach(function (v) { availK[v.k] = 1; });
+    var sim = {};
+    Object.keys(cast.chars).forEach(function (n) {
+      var cc = cast.chars[n], k = cc.voiceK || "";
+      if (k && !(cc.locked || cc.voiceLock || availK[k])) k = "";
+      sim[n] = k;
+    });
+    out.rows.forEach(function (r) { if (!r.locked) sim[r.char] = r.voice; });
+    var byVoice = {}, pitch = {};
+    Object.keys(cast.chars).forEach(function (n) {
+      var k = sim[n];
+      if (!k) { pitch[n] = 0; return; }
+      var idx = byVoice[k] || 0;
+      pitch[n] = idx === 0 ? 0 : PITCH_STEPS[idx % PITCH_STEPS.length];
+      byVoice[k] = idx + 1;
+    });
+    out.rows.forEach(function (r) {
+      r.pitch = pitch[r.char] || 0;
+      r.reuse = (byVoice[r.voice] || 0) > 1;
+    });
+    return out;
+  }
+  /* 采用方案：只改 voiceK / voiceName（不把模型挑的声线升成 voiceLock —— 那是人的意图），
+     随后 assignVoices 统一重算音高。locked 行与已锁角色一律跳过并计入 skipped。 */
+  function applyVoicePlan(cast, rows, pool, narrK) {
+    var res = { applied: 0, skipped: 0, pitched: 0 };
+    if (!cast || !cast.chars) return res;
+    var byK = {};
+    (pool || []).forEach(function (v) { if (v && v.k) byK[v.k] = v; });
+    (Array.isArray(rows) ? rows : []).forEach(function (r) {
+      if (!r || r.locked) return;
+      var c = cast.chars[r.char];
+      if (!c || c.voiceLock || !byK[r.voice]) { res.skipped++; return; }
+      c.voiceK = r.voice;
+      c.voiceName = byK[r.voice].name;
+      c.locked = false;
+      res.applied++;
+    });
+    assignVoices(cast.chars, pool, narrK);
+    Object.keys(cast.chars).forEach(function (k) { if (cast.chars[k].pitch) res.pitched++; });
+    return res;
   }
 
   /* ---------------- ⑧ 播放单元：旁白一段 + 每句台词一段 ----------------
@@ -484,9 +1160,15 @@
   }
 
   window.InkCast = {
-    splitSpans: splitSpans, tagName: tagName, build: build, applyModel: applyModel,
-    assignVoices: assignVoices, unitsFor: unitsFor, sentences: sentences,
+    splitSpans: splitSpans, tagName: tagName, build: build, applyModel: applyModel, normalizeCast: normalizeCast,
+    applyProposal: applyProposal, mergeChars: mergeChars, findChar: findChar,
+    assignVoices: assignVoices, planVoices: planVoices, applyVoicePlan: applyVoicePlan,
+    unitsFor: unitsFor, sentences: sentences,
     normName: normName, samePerson: samePerson, hashName: hashName,
-    ALT_MAX: ALT_MAX, SAY_RE: SAY_RE, PAIRS: PAIRS
+    cyclePeriod: cyclePeriod, predictAt: predictAt, chainState: chainState,
+    runsOf: runsOf, recount: recount, createChar: createChar,
+    reassignRange: reassignRange, recomputeChain: recomputeChain,
+    ALT_MAX: ALT_MAX, ANCHOR_WIN: ANCHOR_WIN, CHAIN_MAX: CHAIN_MAX,
+    AT: AT, BASIS: BASIS, RULE_CONF: RULE_CONF, CONF_LOW: CONF_LOW, SAY_RE: SAY_RE, PAIRS: PAIRS
   };
 })();

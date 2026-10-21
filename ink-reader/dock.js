@@ -979,6 +979,7 @@
          收起来的窗照样算得出一个 float，五态里的 hidden 就永远没人写得出来（§W2.1）。
          钮上的 aria-pressed 仍按 geom()：窗收起来时，那枚「浮窗」钮还该照着记忆里的形态亮着。 */
       el.dataset.inwState = mode();
+      el.dataset.inwForm = form();
       el.dataset.inwText = valuetext();
       /* 分隔条得把「现在拖得出什么」说清楚：浮动态报实测宽高，其余形态明说不可缩放，
          否则读屏里那八条边只是八个同名控件，用户无从知道按下去有没有反应。 */
@@ -1039,8 +1040,10 @@
     function reset() { var m = load(); delete m[id]; store(m); }
     /* 五态口径（方案 §W2.1）：state() 那三个值 + 边 + 「收起了没有」。
        不动 state() 的返回形状 —— 批注、草稿纸、工具抽屉三处已在按它写文案。 */
-    function mode() {
-      if (!shown()) return "hidden";
+    function mode() { return shown() ? form() : "hidden"; }
+    /* 形态本身，与「收起来没收起来」无关。退场动画必须读它而不是 mode()：
+       关闭的第一帧 mode() 已经是 hidden，CSS 无从知道这个正在滑走的窗是浮窗还是停靠。 */
+    function form() {
       var m = narrow() ? "max" : st.state;
       return m === "docked" ? "docked-" + st.side : m === "float" ? "floating" : "maximized";
     }

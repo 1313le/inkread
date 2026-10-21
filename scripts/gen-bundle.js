@@ -28,11 +28,19 @@ const DOCS = [
 const EXTRAS = [
   { abs: "c:\\Users\\张展洲\\CodeBuddy\\20261007190606\\v2.10-方案与验收报告.md", label: "v2.10-方案与验收报告（存于 CodeBuddy 工作目录）" }
 ];
-const CODE = [
-  "index.html", "reader.html", "notes.html", "cards.html", "tasks.html", "themes.html", "ai.html",
-  "app.js", "api.js", "brain.js", "theme.js", "modes.js", "dock.js", "mock.js", "md.js",
-  "scene.js", "srs.js", "voices.js", "voices-data.js", "fonts.js", "styles.css"
-].map(f => "ink-reader/" + f);
+const CODE = (() => {
+  /* 源码清单改成扫盘现取（跟下面引画素材同一款规矩）。原先这里手抄 21 个名字，
+     而盘上有 32 个：v1.4 的 ink-loop.js / cast.js 连同 reader-app.js、ink-agent.js
+     等 11 件共 795KB 从来没进过汇编——本文档头注写的却是「全部源码」。
+     清单一旦手抄就必然过期，让它跟着盘走，顺手挡掉 *.bak-* / *.base-* 这类刀痕件。 */
+  const dir = path.join(ROOT, "ink-reader");
+  return fs.readdirSync(dir)
+    .filter((f) => /\.(js|css|html)$/.test(f))
+    .filter((f) => !/\.(bak|base)[.-]/.test(f))
+    .filter((f) => fs.statSync(path.join(dir, f)).isFile())
+    .sort()
+    .map((f) => "ink-reader/" + f);
+})();
 const INFRA = [
   "scripts/serve.js", "electron/main.js", "electron/preload.js",
   "package.json", "android/capacitor.config.json", "android/package.json"
@@ -80,6 +88,17 @@ const PURPOSE = {
   "ink-reader/srs.js": "间隔重复调度算法",
   "ink-reader/voices.js": "听书 TTS 引擎（/api/tts 客户端、缓存）",
   "ink-reader/voices-data.js": "音色目录数据（build-voice-catalog.js 生成）",
+  "ink-reader/reader-app.js": "阅读页主控（近万行）：分页/滚动引擎、划词批注、朗读条与 @Voice 点段起读、任务清单抽屉、模式环与悬浮球、原文定位",
+  "ink-reader/reader-extra.css": "阅读页页面级样式：起点式播放条、轮盘标签、悬浮球、触屏 44px 热区补丁（ID 选择器需与 @media(pointer:coarse) 同等专一性）",
+  "ink-reader/cast.js": "多角色朗读引擎（阅读模式读小说）：说话人归组与配音、旧账惰性归一（ver 2 只在读到时改写）、分配落库走 api.js 的 cast.assign / cast.voices",
+  "ink-reader/ink-agent.js": "主脑工具层：工具注册表 `define(\"x.y\", …)`，2026-10-21 实测在册 23 枚（v1.4 前为 9 枚）；主脑页与阅读页共用",
+  "ink-reader/ink-loop.js": "主脑自主多轮 tool-calling 回合编排器（v1.4-S2）：预算 DEF_BUDGET={rounds:6,calls:24,ms:180000}、进度与「卡住」判定、诚实化收敛",
+  "ink-reader/ink-keys.js": "快捷键注册表 + 命令面板 + `?` 总览（v2.22 S5/S6）",
+  "ink-reader/layout.js": "智能排版引擎（v1.1-S5d）：一键排版，所有排版量走「唯一出口十位」",
+  "ink-reader/paper-spec.js": "出纸规格算法唯一真源（v2.21 E9）：print.html 以 <script> 载入，服务端 /api/export/<id>.html 用 new Function 跑同一份",
+  "ink-reader/paper.css": "一张纸的排法（v2.21 E7/E9）：纸面视图与 PDF 导出管线共用",
+  "ink-reader/print.html": "打印 / PDF 导出页：纸面预览 → 浏览器打印管线",
+  "ink-reader/tokens.css": "尺寸刻度 token（v1.1-S6-G1）：只做等值替换 + ≤1px 邻近归并，取值由 .work/g1-plan.json 定，不是新设计的间距系统",
   "ink-reader/fonts.js": "字体加载与回退",
   "ink-reader/styles.css": "全站样式（CSS 滚动链：min-height:0 / minmax(0,1fr)；.work-card 定高上界）",
   "scripts/serve.js": "本地服务器：静态服务 + /api/tts（node-edge-tts）+ /api/store 同步快照 + Moss 音色代理；端口 8791；必须非沙箱启动（要写 .work/sync-store.json）",
@@ -135,7 +154,11 @@ const stamp = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "
 const out = [];
 out.push("# 墨读 InkRead · 源码与开发资料汇编");
 out.push("");
-out.push("> 生成时间：" + stamp + " · 项目版本：v2.11.0（已出包）+ v2.12 候选功能已落源码（笔记自由文本搜索 + 天幕主题页入口，验收 38/38，未动版本号、未打包）");
+/* 版本行改成现读 package.json：原先手抄的是「v2.11.0（已出包）+ v2.12 候选…」，
+   此后三十多版从没同步过，而快照抬头讲的却是当前事实。一处真源，重跑就不说谎。 */
+let PKG_VER = "(读不到 package.json)";
+try { PKG_VER = JSON.parse(read(path.join(ROOT, "package.json"))).version; } catch (e) { /* 保持上面的实话 */ }
+out.push("> 生成时间：" + stamp + " · 项目版本：**" + PKG_VER + "**（版本号取自 `package.json`，不在这里手抄）");
 out.push("> 项目根：`C:\\Users\\张展洲\\.zcode\\workspace\\default\\InkRead`");
 out.push("> 用途：后续开发的单一入口——先查「位置索引」定位真实文件（**编辑一律改真实文件**，本汇编只是快照），再按需读对应章节全文。");
 out.push("> 重新生成：`node scripts/gen-bundle.js`（源码/资料变更后重跑，保持快照新鲜）。");

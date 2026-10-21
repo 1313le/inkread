@@ -56,7 +56,9 @@ window.INK_SCHEMA = {
   "inkread.cards.search.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.cards.ui.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.cards.v1": { ver: 2, kind: "ledger", store: "local", sync: true, label: "闪卡" },
-  "inkread.cast.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  /* v1.4-S3：角色表多写句级标记（at/via/depth/run/hold/reach）与分配账（assign/merges），
+     见 INK_MIGRATIONS 下方那条 ver 1 → 2。 */
+  "inkread.cast.v1": { ver: 2, kind: "pref", store: "local", sync: true, label: "多角色角色表" },
   "inkread.checkins.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "打卡" },
   "inkread.contents.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "导入正文" },
   "inkread.covers.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "封面" },
@@ -75,7 +77,8 @@ window.INK_SCHEMA = {
   "inkread.notes.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "笔记" },
   "inkread.notewin.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.nwmeasure.v1": { ver: 1, kind: "ui", store: "local", sync: true },
-  "inkread.orb.v1": { ver: 1, kind: "ui", store: "local", sync: true },
+  /* v1.4 顶格修复 R3：值里多了 h（悬浮球是否显示）。老备份没写过 h，见下面的迁移。 */
+  "inkread.orb.v1": { ver: 2, kind: "ui", store: "local", sync: true },
   "inkread.pad.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.panel.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.paper.v1": { ver: 1, kind: "pref", store: "local", sync: true },
@@ -91,6 +94,10 @@ window.INK_SCHEMA = {
   "inkread.synclog.v1": { ver: 1, kind: "derived", store: "local", sync: true, label: "同步日志" },
   "inkread.syncmeta.v1": { ver: 1, kind: "derived", store: "local", sync: false },
   "inkread.syncseen.v1": { ver: 1, kind: "derived", store: "local", sync: false },
+  /* v1.4 顶格修复 R1：点字/点空白的分工换过一次（旧版按纸面坐标分带，带子吞了半张版心）。
+     这一枚记「这套规矩有没有讲给过这个人」——空=没讲过，told=-toast 过一次，
+     seen=他自己已经点出过朗读气泡（不用讲了）。跨设备共用是对的：换台机器不必再教一遍。 */
+  "inkread.tapHint.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.tasks.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "任务" },
   "inkread.theme.v1": { ver: 1, kind: "pref", store: "local", sync: true, label: "主题", fromKey: "inkread.theme" },
   "inkread.themes.custom.v1": { ver: 1, kind: "ledger", store: "local", sync: true },
@@ -161,6 +168,39 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
      真正需要就地改写的形状变化（删字段、改类型）出现时再回来写实体。
      ------------------------------------------------------------ */
   window.INK_MIGRATIONS["inkread.cards.v1"] = {
+    1: function (old) {
+      if (!old || typeof old !== "object" || Array.isArray(old)) return;
+      return old;
+    }
+  };
+  /* ------------------------------------------------------------
+     v1.4 顶格修复 R3 · 悬浮球位置键 inkread.orb.v1 的 ver 1 → 2
+     ------------------------------------------------------------
+     ver 1 的值是 {x, y}，ver 2 多写一个 h（1 = 用户把球收起来了）。
+     老备份里没有 h —— 而读侧把 `d.h === 1` 之外的任何值（含 undefined）
+     一律当「显示」，所以 ver 2 的读者原样能吃 ver 1 的账，不必就地补字段。
+     这条迁移存在的意义不是改写，是**别让人跳过这一项**：恢复路径遇到
+     备份 ver ≠ 当前 ver 且查不到迁移函数时，会 skipped++ 后直接 return，
+     于是用户装好新版再恢复旧备份，悬浮球位置会**静默丢失**（toast 只剩一句
+     「版本不合跳过 N 项」）。升 ver 不配迁移 = 丢数据，这一条就是那把锁。
+     ------------------------------------------------------------ */
+  window.INK_MIGRATIONS["inkread.orb.v1"] = {
+    1: function (old) {
+      if (!old || typeof old !== "object" || Array.isArray(old)) return;
+      return old;
+    }
+  };
+  /* ------------------------------------------------------------
+     v1.4-S3 · 角色表 inkread.cast.v1 的 ver 1 → 2（#287）
+     ------------------------------------------------------------
+     ver 2 给角色表多写句级标记（at/via/depth/run/hold/reach）与分配账
+     （chain / breaks），旧字段一个没删、语义也没改 —— ver 2 的读者原样
+     能吃 ver 1 的账：缺标记的行由 cast.js 的 normalizeCast 在读取侧惰性
+     补成 via="legacy"，不批量改写磁盘。这条迁移与 cards.v1 一样是「原样
+     收下」；它存在的意义同 orb.v1 —— 恢复路径查不到迁移函数就会把整份
+     角色表当「版本不合」静默跳过，升 ver 不配迁移 = 丢数据。
+     ------------------------------------------------------------ */
+  window.INK_MIGRATIONS["inkread.cast.v1"] = {
     1: function (old) {
       if (!old || typeof old !== "object" || Array.isArray(old)) return;
       return old;
@@ -2257,6 +2297,18 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       return { code: 0, data: setCard(id, st) };
     },
 
+    /* DELETE /api/cards/{id} —— 抹掉一张卡的复习记录（助手「暂停→收回」要用它把
+       本来不存在的记录还原成不存在）。只删这一个键，不整表覆盖 ——
+       整表覆盖要先把全表读进内存，并发复习结算时会把别人刚写的那条洗掉。 */
+    async deleteCard(id) {
+      await delay(120);
+      var all = getCards();
+      if (!id || all[id] === undefined) return { code: 1, msg: "not-found" };
+      delete all[id];
+      try { localStorage.setItem(K_CARDS, JSON.stringify(all)); } catch (e) { return { code: 1, msg: "save-failed" }; }
+      return { code: 0, removed: String(id) };
+    },
+
     /* POST /api/tasks —— 新建一条独立任务（v2.23 W1d′：助手「变成任务」的落点）。
        与导入任务同一口径：只有带 x 的整条记录才算独立任务（mergedTasks 按 x 判别），
        演示任务住在 DB.tasks、本机库里没有整条记录，删不掉也不该假装删得掉。
@@ -2299,6 +2351,9 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
        工具层再抄一份就会和溯源/解析走出两套容错口径。 */
     aiJson(sys, usr, o) { return askJson(getModelCfg(), sys, usr, o || {}); },
     aiParse(txt, keys) { return parseStructured(txt, keys); },
+    /* 降级通路（循环里那一半）自己从一段话里取 JSON —— 用同一把扫括号的手，
+       别在循环里再写一套「找第一个 { 到最后一个 }」，那套会把围栏里的注释一起吞进去。 */
+    pickJson(txt) { return pickJson(txt); },
     /* v1.1-S5c 提示词注册表的公开口 —— 表在本文件下方，这里只是梯子。
        run() 是所有 AI 功能的唯一入口：调用点只交材料与占位符，不再自带系统提示词。 */
     run(feature, input, opts) { return Prompt.run(feature, input, opts); },
@@ -2407,9 +2462,30 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         "（如「复述…」「整理…」「对照…」），彼此不重复，不要写「阅读本章」这类空话。只回 JSON，不要解释。" +
         "\n\n{{material}}" },
 
-    { k: "cast.assign", n: "朗读 · 对白归属", g: "朗读", json: 0, temp: 0.1, maxTokens: 1200, timeout: 45000,
+    { k: "cast.assign", n: "朗读 · 对白归属", g: "朗读", json: 0, temp: 0.1, maxTokens: 2000, timeout: 45000,
       ph: {},
-      t: "你是中文小说的对白归属标注器。只输出 JSON 数组，不要解释、不要代码块。" },
+      t: "你是中文小说的对白归属标注器。每次会收到一块对白：块头有【角色表】（正名、别名、已出场句数）、" +
+        "【锚】（最近由提示语/代词确认的说话人，旧→新）、【链状态】（交替链周期 p 与本块首句距锚深度）、" +
+        "【衔接】（上一块末几句的归属），随后每行是「全局句号. [本地规则提示] 「台词」｜上文…｜下文…」。" +
+        "只输出一个 JSON 对象：{\"chars\":[],\"merge\":[],\"lines\":[]}。" +
+        "lines 给每句判说话人：优先写角色表里的正名（别名会自动归到正名），判不出就 null。每句必须给 basis 与 conf：" +
+        "basis 只取 tag（提示语明示）/ alternation（按交替轮次）/ pronoun（代词回指）/ mention（旁白刚点过名）/ " +
+        "new（本块新建的角色）/ aside（引号里不是对白：内心独白、转述、引文）；conf 是 0 到 1 的数。" +
+        "本地规则提示只是猜测，可以推翻。若【链状态】说首句距锚超过 24 句，这一段不要按 alternation 外推，判不出就 null。" +
+        "i 必须原样抄回收到的全局句号（不是块内序号）。quote 抄一句支持判断的原文（不超过 16 字），why 不超过 12 字。" +
+        "chars 只放角色表里没有、但确实在出场的新角色：{name 正名, alias 别名数组, gender m/f/空, role 一句话身份, " +
+        "evidence 支持他出场的全局句号数组（1-3 个，必须落在本块内）}；没有新角色给 []。没有 evidence 的新名字会被丢弃。" +
+        "merge 只放你怀疑是同一个人的两条表内名字：{a 别名, b 正名, conf, why}；这只是给读者看的建议，不会自动执行，" +
+        "lines 里请直接写你判断的正名。不要解释、不要代码块。" },
+
+    { k: "cast.voices", n: "朗读 · 音色方案", g: "朗读", json: 0, temp: 0.2, maxTokens: 600, timeout: 30000,
+      ph: { roster: "角色表（名字 / 性别 / 戏份 / 身份 / 是否锁定）", pool: "本机音色池（键 · 显示名 · 语言 · 性别）" },
+      t: "你是中文有声书的配音导演。给下面每个角色从**本机音色池**里挑一款声线。\n\n" +
+        "角色表：\n{{roster}}\n\n本机音色池（voice 只能填第一列的键，不许编）：\n{{pool}}\n\n" +
+        "只输出一个 JSON 对象：{\"plan\":[{\"char\":\"角色名\",\"voice\":\"池内键\",\"why\":\"一句话，20字内\"}]}。\n" +
+        "规则：char 照抄角色表里的正名；voice 只能取自音色池清单；标着「已锁定」的角色不要写进 plan；" +
+        "同性别优先；池子不够时允许两名角色共用一款，但要在 why 里如实写「池子里男声只有 N 款，共用换音高」；" +
+        "不要选旁白正在用的那款（它已从池子里排除）。不要解释、不要代码块。" },
 
     { k: "density.suggest", n: "版式 · 一键推荐疏密", g: "阅读", json: 0, temp: 0.2, maxTokens: 200, timeout: 15000,
       ph: { denKeys: "五档档位键（从紧到疏）" },
@@ -2906,15 +2982,26 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       }
       if (stream && res.body && res.body.getReader) {
         var sent = 0;
+        /* raw 模式下多带一只 accumulator：流式里 tool_calls 是分片吐的，
+           拼装的活在这儿干，循环只认拼好的整条调用。 */
+        var acc = o.raw ? { calls: [] } : null;
         try {
-          return await readStream(res, function (t) {
+          var stxt = await readStream(res, function (t) {
             sent += String(t || "").length;
             if (o.onDelta) o.onDelta(t);
-          });
+          }, acc);
+          if (o.raw) return rawMsg(stxt, acc);
+          return stxt;
         } catch (se) { if (sent) se.partial = sent; throw se; }
       }
       var j = await res.json();
-      var txt = String(((((j.choices || [])[0] || {}).message) || {}).content || "").trim();
+      var msg = ((((j.choices || [])[0] || {}).message) || {});
+      /* raw：一条调用带 tool_calls 时 content 合法地是 null（OpenAI 就是这么发的），
+         「响应为空」这句老判据会把整条循环掐死 —— 所以 raw 分支原样交出，不判空。
+         不传 raw 的老调用方（翻译 / 解析 / 溯源）走的还是下面那两行，逐字节不变。 */
+      if (o.raw) return rawMsg(String(msg.content == null ? "" : msg.content),
+        Array.isArray(msg.tool_calls) ? { calls: msg.tool_calls } : null);
+      var txt = String(msg.content || "").trim();
       if (!txt) throw new Error("响应为空");
       return txt;
     } catch (e) {
@@ -3005,6 +3092,15 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       stream: !!stream,
       messages: messages
     };
+    /* v1.4-S2：主脑循环在这一发里把工具名册交给上游。哪些参数必填由 InkAgent.toolsPayload
+       按注册表的 "string?" 方言算好，这里只负责原样发出去。
+       tool_choice 只在真有名册时才带 —— 空名册还挂 tool_choice，有些兼容层直接 400，
+       而 400 会被上层认成「这一家不认工具」，把能力位悄悄翻成降级。 */
+    if (Array.isArray(o.tools) && o.tools.length) {
+      body.tools = o.tools;
+      body.tool_choice = o.toolChoice || "auto";
+    }
+    if (o.jsonFormat) body.response_format = { type: "json_object" };
     return llmChat(cfg, body, Object.assign({}, o, { timeout: o.timeout || 30000 }), stream);
   }
 
@@ -3020,16 +3116,46 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
     return s ? s + "\n\n" : "";
   }
 
+  /* 上游回来的调用可能缺 id（个别兼容层不给），补一个稳定的本地 id：
+     回灌 role:tool 时要按 tool_call_id 对上号，缺了它下一轮模型就不知道哪条结果是哪条。 */
+  function rawMsg(content, acc) {
+    var calls = ((acc && acc.calls) || []).filter(function (c) { return c && ((c.function && c.function.name) || c.name); });
+    calls.forEach(function (c, i) { if (!c.id) c.id = "call_local_" + (i + 1); });
+    var out = { role: "assistant", content: String(content == null ? "" : content) };
+    if (calls.length) out.tool_calls = calls;
+    return out;
+  }
+
+  /* 流式里一枚调用分好几分片：第一片带 id 与 name，后面的片只带 arguments 的一截。
+     按 index 归位而不是「看见就叫下一枚」—— 并行两枚时 index 会交替出现，
+     认顺序就会把 B 的参数接到 A 上，拼出来一条谁也执行不了的调用。 */
+  function mergeToolDelta(acc, frag) {
+    if (!frag) return;
+    var i = typeof frag.index === "number" ? frag.index : (acc.next || 0);
+    if (typeof frag.index !== "number") acc.next = i + 1;
+    var slot = acc.calls[i];
+    if (!slot) slot = acc.calls[i] = { id: "", type: "function", "function": { name: "", arguments: "" } };
+    if (frag.id) slot.id = String(frag.id);
+    if (frag.type) slot.type = String(frag.type);
+    if (frag.function) {
+      if (frag.function.name) slot.function.name += String(frag.function.name);
+      if (frag.function.arguments != null) slot.function.arguments += String(frag.function.arguments);
+    }
+  }
+
   /* SSE 增量：逐行取 `data: {...}`，`data: [DONE]` 收尾。
      网关若无视 stream 直接回整段 JSON（content-type 非 event-stream），此处兜底按整段解析 ——
-     流式是「更快」，不该变成「更容易坏」。 */
-  async function readStream(res, onDelta) {
+     流式是「更快」，不该变成「更容易坏」。
+     第三个参数 acc 只在 raw 模式下传进来：它顺手收 tool_calls 的分片，别的功能一个字节不经过它。 */
+  async function readStream(res, onDelta, acc) {
     var ct = res.headers && res.headers.get ? String(res.headers.get("content-type") || "") : "";
     if (ct && ct.indexOf("text/event-stream") < 0) {
       var j = await res.json();
-      var t = String(((((j.choices || [])[0] || {}).message) || {}).content || "").trim();
-      if (!t) throw new Error("响应为空");
-      onDelta(t);
+      var jm = ((((j.choices || [])[0] || {}).message) || {});
+      var t = String(jm.content || "").trim();
+      if (acc && Array.isArray(jm.tool_calls)) jm.tool_calls.forEach(function (c) { acc.calls.push(c); });
+      if (!t && !(acc && acc.calls.length)) throw new Error("响应为空");
+      if (t) onDelta(t);
       return t;
     }
     var reader = res.body.getReader();
@@ -3046,13 +3172,18 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         if (line.indexOf("data:") !== 0) continue;
         var payload = line.slice(5).trim();
         if (!payload || payload === "[DONE]") continue;
-        var piece = "";
-        try { piece = (((JSON.parse(payload).choices || [])[0] || {}).delta || {}).content || ""; } catch (e) { continue; }
+        var delta = {};
+        try { delta = (((JSON.parse(payload).choices || [])[0] || {}).delta) || {}; } catch (e) { continue; }
+        if (acc && Array.isArray(delta.tool_calls)) {
+          for (var q = 0; q < delta.tool_calls.length; q++) mergeToolDelta(acc, delta.tool_calls[q]);
+        }
+        var piece = String(delta.content || "");
         if (piece) { all += piece; onDelta(piece); }
       }
     }
     var out = all.trim();
-    if (!out) throw new Error("响应为空");
+    /* 纯工具调用的一发流式里一个字都没有 —— 那不是「响应为空」，那是这一发的正事。 */
+    if (!out && !(acc && acc.calls.length)) throw new Error("响应为空");
     return out;
   }
 
@@ -3102,8 +3233,10 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
   }
   function capJsonOk(cfg) { var e = capMap()[capKeyOf(cfg)]; return !e || e.json !== 0; }
   function capMarkJson(cfg, ok) {
-    var m = capMap();
-    m[capKeyOf(cfg)] = { json: ok ? 1 : 0, at: Date.now() };
+    var m = capMap(), k = capKeyOf(cfg);
+    /* 只动 json 这一位：整条覆盖会把同一本上「这一家认不认原生工具调用」的记账一起洗掉，
+       下一轮循环又去撞那个 400 —— 白烧读者一发请求，界面上「不认原生工具调用」那行还会改口。 */
+    m[k] = Object.assign({}, m[k], { json: ok ? 1 : 0, at: Date.now() });
     try { localStorage.setItem(K_CAP, JSON.stringify(m)); } catch (e) {}
   }
   function capSnapshot() { return capMap(); }

@@ -1314,10 +1314,13 @@ html[data-auto="on"] .doc[data-doc-theme="academic"] p { text-align: justify; }
   border-top: 1px solid var(--rule); background: var(--paper-2);
   font-size: var(--fs-12_5); color: var(--ink-2); flex-wrap: wrap;
 }
+/* 暂停钮也是圆钮：与朗读条 #ttsPlay 同一套规矩（宽高成对 + min-width 归零 + grid 盒居中 +
+   图标 display:block 退出基线），只写 width 会得到 34×32 的蛋形。 */
 .auto-bar .auto-play {
   border-color: var(--mark); color: var(--mark-ink); border-radius: 50%;
-  width: 34px; padding: 0;
+  width: 34px; height: 34px; min-width: 0; padding: 0; display: grid; place-items: center;
 }
+.auto-bar .auto-play .ic { display: block; }
 .auto-bar .auto-play:hover { border-color: var(--mark-ink); }
 .auto-bar .auto-now {
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2168,6 +2171,52 @@ body.nw .work-card { max-height: none; min-height: 0; }
 .ap-k { font-size: var(--fs-13); color: var(--ink-2); letter-spacing: .04em; flex: none; }
 .ap-c { display: inline-flex; align-items: center; gap: var(--space-8); flex: 1; justify-content: flex-end; min-width: 0; }
 .ap-hint { font-size: var(--fs-10_8); color: var(--ink-3); letter-spacing: .02em; line-height: 1.65; padding: 0 0 var(--space-4); }
+
+/* ---------- v1.4-S3 A3 · 对白归属的徽标与证据行 ----------
+   每句「凭什么这么判」要能看见：徽标标来源，证据行摊模型引的原文与两边冲突；
+   拿不准的给一键采纳。徽标 warn 只描边不填色 —— 这一屏已经有太多实心块，
+   再用实心会把「哪句要人管」淹没。 */
+.ap-badge {
+  display: inline-block; margin-left: var(--space-5); padding: 0 var(--space-5);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  font-size: var(--fs-10_5); font-style: normal; color: var(--ink-3);
+  letter-spacing: .04em; vertical-align: 1px; white-space: nowrap;
+}
+.ap-badge.warn { color: var(--accent); border-color: currentColor; }
+.ap-ev {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-6);
+  padding: 0 0 var(--space-8);
+  font-size: var(--fs-10_8); color: var(--ink-3); letter-spacing: .02em; line-height: 1.6;
+}
+.ap-ev-t { flex: 1 1 100%; min-width: 0; }
+.ap-mini {
+  border: 1px solid var(--line); background: var(--paper-2); color: var(--ink-2);
+  border-radius: var(--r-sm); padding: var(--space-2) var(--space-8);
+  font: inherit; font-size: var(--fs-10_8); letter-spacing: .04em; cursor: pointer;
+  transition: color .16s, border-color .16s;
+}
+.ap-mini:hover { color: var(--ink); border-color: var(--ink-3); }
+.ap-mini:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- v1.4-S3 A6-4 · 链块（成段改派） ----------
+   连续同一人 / 同一锚派生的交替链是一块：块头一次点击改整段，不再一句一下拉。
+   块头只承担「谁 + 几块 + 三个动作」，正文行保持原样（单句仍可细调）。 */
+.ap-run { border-top: 1px solid var(--line-2); margin-top: var(--space-6); padding-top: var(--space-5); }
+.ap-run:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+.ap-run-h {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-6); padding: var(--space-2) 0 var(--space-4);
+}
+.ap-run-t {
+  font-size: var(--fs-11_5); color: var(--ink-2); letter-spacing: .03em;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ap-run-a { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-5); }
+.ap-run-new, .ap-run-alt {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5);
+  padding: 0 0 var(--space-5);
+}
+.ap-run-new .ap-sel { min-width: 120px; }
 
 /* ---------- 分段控件 ---------- */
 .ap-seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; background: var(--paper-2); }
@@ -3090,6 +3139,26 @@ html[data-int="bold"] .ap-rd { border-radius: 0; }
 }
 .task-drawer[data-open="on"] { transform: none; visibility: visible; }
 
+/* 退场要认形态：translateX(102%) 只对「靠右停靠」成立。浮起来的窗本来悬在正文上方，
+   102% 只把它横挪一个自身宽度（实测 left 216→616，仍在视口正中），而 visibility
+   要到 340ms 才翻 —— 用户看到的不是滑出，是面板在屏幕中间凭空消失。
+   铺满同理：1232px 的面板横推 1256px 才算「出屏」，那是一段没人该看见的位移。
+   窄屏更露骨：几何归 InkWin（实测 390×760 下 inline top 197、高 489），
+   102% 只推到 top 696 —— 底边一条 64px 的抽屉残片压住底栏 340ms 再眨眼消失。
+   根子是一条：位移退场只有「盒体确实贴着那条边」才成立，而窗的几何由 InkWin 逐帧
+   下发，没人能保证贴合。所以 floating / maximized 一律原地淡走，不分宽窄；
+   只有 docked-left / docked-right（InkWin 把左/右贴边算进几何）仍按原样滑出视口。
+   visibility 与 opacity 同拍收尾，不给透明面板留一段还能吞点击的窗口。
+   原地淡走的窗这 220ms 整个压在正文与底栏上方，所以退场第一帧就摘掉 pointer-events：
+   一只正在消失的手不该还能抓走点击（滑出视口那种没这问题，它压根没盖着别人）。 */
+.task-drawer[data-inw-form="floating"],
+.task-drawer[data-inw-form="maximized"] {
+  transform: none;
+  transition: opacity .22s ease, visibility .22s;
+}
+.task-drawer[data-inw-form="floating"][data-open="off"],
+.task-drawer[data-inw-form="maximized"][data-open="off"] { opacity: 0; pointer-events: none; }
+
 .td-grip { display: none; flex: none; width: 42px; height: 4px; border-radius: var(--radius-3); background: var(--line); margin: var(--space-9) auto 0; }
 
 .td-head { display: flex; align-items: center; gap: var(--space-9); padding: var(--space-13) var(--space-15); border-bottom: 1px solid var(--line); flex: none; }
@@ -3181,7 +3250,10 @@ html[data-int="bold"] .tbadge { border-radius: 0; }
   .task-drawer { position: fixed; top: 0; right: 0; bottom: 0; height: auto; border-radius: 0; }
 }
 
-/* 窄屏：转底部抽屉，符合拇指区；固定定位以对齐视口而非文档高度 */
+/* 窄屏：转底部抽屉，符合拇指区；固定定位以对齐视口而非文档高度。
+   退场位移不在这里写 —— 几何归 InkWin，任何 translateY(102%) 都只是照着自己的
+   74vh 设想排版，真跑起来盒体被 inline top/height 接管，推不出视口（见上面形态退场）。
+   窄屏下 InkWin 一律强制 maximized（dock.js narrow()），所以退场恒为原地淡走。 */
 @media (max-width: 640px) {
   .task-drawer {
     position: fixed; top: auto; left: 0; right: 0; bottom: 0;
@@ -3189,9 +3261,7 @@ html[data-int="bold"] .tbadge { border-radius: 0; }
     border-left: none; border-top: var(--int-bd-2) solid var(--line);
     border-radius: var(--int-r) var(--int-r) 0 0;
     box-shadow: 0 -22px 46px -26px var(--edge);
-    transform: translateY(102%);
   }
-  .task-drawer[data-open="on"] { transform: none; }
   .td-grip { display: block; }
   .td-body { padding-bottom: calc(var(--space-14) + env(safe-area-inset-bottom)); }
   html[data-int="bold"] .task-drawer { border-top-color: var(--ink); }
@@ -5941,8 +6011,11 @@ body.dock-drag { user-select: none; -webkit-user-select: none; }
 body.dock-drag .sel-bar { display: none !important; }   /* 拖动中不弹划选条 */
 
 /* 停靠态：主内容让位重排（M3 的「固定」语义 —— 挤压而非遮挡）
-   按边独立：批注吸右、草稿纸吸左时可同时存在，正文两侧各让一份 */
-.reader .reader-main { transition: margin .17s cubic-bezier(.2, .8, .3, 1); }
+   按边独立：批注吸右、草稿纸吸左时可同时存在，正文两侧各让一份。
+   时长必须 ≥ 窗体自身的滑入滑出（任务抽屉 .34s）：让位比窗体先走完，
+   正文会从一只还看得见的面板底下钻出去（实测关闭全程最大重叠 90.87px）。
+   取最长的 .34s 让所有停靠面板都是「窗体先行、正文随后」，两侧永不交叠。 */
+.reader .reader-main { transition: margin .34s cubic-bezier(.2, .8, .3, 1); }
 .reader[data-dock-right] .reader-main { margin-right: var(--dock-w-right, 0px); }
 .reader[data-dock-left]  .reader-main { margin-left: var(--dock-w-left, 0px); }
 html[data-reduce="on"] .reader .reader-main { transition: none; }

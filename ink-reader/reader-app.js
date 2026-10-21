@@ -41,7 +41,10 @@
     /* v2.24.2：多角色角色表 */
     icCastX: "x",
     /* v2.25.1：阅读设置（方案 B）—— 更多项 / 沉浸底栏 / 面板收起与版式转发 */
-    immIcSet: "settings", icReadSet: "settings", icSetX: "x", icRsAa: "type"
+    immIcSet: "settings", icReadSet: "settings", icSetX: "x", icRsAa: "type",
+    /* v1.4 顶格修复 R3：悬浮球与沉浸顶栏的工具包入口是同一件事，就该同一枚图形。
+       球的这由 CSS 放大到 --ic-xl（28px），顶栏那枚随大流 16px。 */
+    orbIc: "tool-wheel", immIcKit: "tool-wheel"
   };
   Object.keys(IC).forEach(function (id) {
     var el = qs("#" + id); if (el) el.innerHTML = icon(IC[id], 16);
@@ -2042,21 +2045,39 @@
     sheet.scrollTop = Math.max(0, sheet.scrollTop + d - 12);
   }
 
+  /* 锚点可能是空串：导入任务与 AI 记录都按 anchor:"" 落库（mergedTasks 铺的底），
+     拼成 "#" 之后 querySelector 直接抛 SyntaxError —— 用户点一次「原文定位」就是
+     一次未捕获异常，屏幕上什么都不会发生。空 id 在这里判死，并如实返回「没落到」，
+     让调用方自己退到下一档，而不是假装成功。 */
   function gotoAnchor(id) {
+    var a = String(id == null ? "" : id);
+    if (!a) return false;
     scPulse("chapter");
     if (state.scroll) {
-      var t = qs("#" + CSS.escape(id));
-      if (t) t.scrollIntoView({ block: "start", behavior: read.reduce ? "auto" : "smooth" });
-      return;
+      var t = qs("#" + CSS.escape(a));
+      if (!t) return false;
+      t.scrollIntoView({ block: "start", behavior: read.reduce ? "auto" : "smooth" });
+      flashEl(a);
+      return true;
     }
     for (var i = 0; i < state.pages.length; i++) {
-      if (state.pages[i].indexOf('id="' + id + '"') >= 0) { state.cur = i; renderPage(0, false); flashEl(id); return; }
+      if (state.pages[i].indexOf('id="' + a + '"') >= 0) { state.cur = i; renderPage(0, false); flashEl(a); return true; }
     }
+    return false;
   }
 
   function flashEl(id) {
-    var el = qs("#" + CSS.escape(id));
+    var el = id ? qs("#" + CSS.escape(id)) : null;
     if (el) { el.classList.add("flash"); setTimeout(function () { el.classList.remove("flash"); }, 1900); }
+  }
+
+  /* 按块闪一下：正文里绝大多数块没有 id，落点只有 data-bi。走这条真实选择器，
+     不往 DOM 上贴临时标记 —— 自造的标志会被下一次合法渲染清掉（老账）。 */
+  function flashBi(bi) {
+    var el = biEl(bi);
+    if (!el) return;
+    el.classList.add("flash");
+    setTimeout(function () { el.classList.remove("flash"); }, 1900);
   }
 
   /* ============================================================
@@ -5259,7 +5280,10 @@
     var on = InkVoice.list().filter(function (v) { return v.installed; });
     if (!on.some(function (v) { return v.k === cur; })) on.unshift(InkVoice.meta(cur) || { k: cur, name: cur });
     sel.innerHTML = on.map(function (v) {
-      return '<option value="' + v.k + '">' + esc(v.name) + "（" + esc(v.mood) + "）</option>";
+      /* 气质（mood）不进 option 文本：闭合态的下拉只显示选中那一条，
+         「晓丹（沉稳）」在 148px 里被截成「晓丹（沉…」——名字才是读者要的，气质是补充说明，
+         放 title 里悬停可见（展开列表每一行都带，比挤进文本强）。 */
+      return '<option value="' + v.k + '" title="' + esc(v.name + (v.mood ? " · " + v.mood : "")) + '">' + esc(v.name) + "</option>";
     }).join("");
     sel.value = cur;
   }
@@ -5290,7 +5314,12 @@
      铺满=吃掉整屏，两种形态对它都不是「更大的工作区」而是「挡住一切」。
      收起 ≠ 停止：条子缩成右下角 #ttsPill（同一枚 ▶ + 第几句），朗读继续；× 才是停止。 */
   var ttsBar = qs("#ttsBar"), ttsPillEl = qs("#ttsPill");
-  function ttsNarrow() { return window.innerWidth <= 600; }   /* 窄屏不浮动：贴底常驻，可收起不可拖 */
+  /* 判窄看 clientWidth，不看 innerWidth：移动端首帧的 innerWidth 报的是**布局视口**，
+     内容还没收进屏时它是 788（390 实机口径：documentElement.clientWidth 已是 390，innerWidth 还是 788）。
+     init 那一刻按它判一次就再没有第二次 —— 布局随后落回 393 并不发 resize，
+     .tts-stick 永久缺席，InkWin 的 narrow 分支照旧把条子按整屏高度（851px）铺开。
+     clientWidth 是文档的可视宽，从第一帧起就是真实的那条线。 */
+  function ttsNarrow() { return (document.documentElement.clientWidth || window.innerWidth) <= 600; }
   var ttsWin = window.InkWin && InkWin.create(ttsBar, {
     id: "tts", host: "viewport", bar: false, dockable: false, autoH: true,
     handle: "#ttsGrip", title: "朗读条", f: { w: 640, h: 56 }, min: { w: 320, h: 44 },
@@ -5317,6 +5346,17 @@
       var b = el.getBoundingClientRect();
       if (b.width > 0 && b.height > 0) rs.push(b);
     }
+    /* 悬浮球也在这条常驻带上 —— 它是 position:fixed，offsetParent 恒为 null，
+       所以**不能**塞进上面那张表（塞了就是静默空转，看着像修了）。可见性只问计算样式：
+       「藏球」的三条路（非沉浸 / tk-orb-off / 轮盘开着）最终都落到 display 或 opacity 上，
+       按 display 判就不必知道是哪条类在管它。
+       1280×860 实测：胶囊 1090,758→1266,798 与球 1218,732→1262,776 交集 792px²，
+       球被压在胶囊底下点不动 —— 想开轮盘得先把胶囊拖走。 */
+    var orb = qs("#inkOrb");
+    if (orb && getComputedStyle(orb).display !== "none") {
+      var ob = orb.getBoundingClientRect();
+      if (ob.width > 0 && ob.height > 0) rs.push(ob);
+    }
     return rs;
   }
   /* 常驻横条里最高的那条上缘。v1.3.0 的第二个根因就在这儿：旧版写的是
@@ -5331,19 +5371,30 @@
       var b = el.getBoundingClientRect();
       if (b.width > 0 && b.height > 0) t = Math.min(t, b.top - 10);
     }
+    /* 沉浸态多一条常驻带：#immBot（54px，IMM_BAND 留 8px 缝）。这条不能按 .hide 现量 ——
+       enterImm 是先 immClearTts() 后 immWake()，重挑那一刻底栏还挂着 .hide（transform 把它
+       推到视口外，量到的 top 是假的 860），而它 6 行后就会醒，且任何 pointerdown 都会唤醒。
+       所以按「身处沉浸态就预留」算，跟 liftClear 同一口径，免得两套逻辑互相不知道对方留过。 */
+    if (document.body.classList.contains("immersive")) t = Math.min(t, window.innerHeight - IMM_BAND);
     return t;
   }
-  function ttsSpotOk(x, y, w, h, kept) {
+  /* 落点要同时过两道闸：不压任何常驻控件（kept），也不许站进常驻带里（band）。
+     band 这条以前没人守：候选里「叠到翻页器上方」那两枚是按 navT 算的，而 navT 可以低于
+     band（1280×860 沉浸态实测 navT=860、band=798）→ 选中的 y=810 站在底栏里，
+     接着 liftClear 只把它往上一抬到 758，正好落进悬浮球（732..776）的怀里 ——
+     交集 792px² 的账就是这么来的：不是没算球，是先算出一个不合法的落点、再由抬升补出来。 */
+  function ttsSpotOk(x, y, w, h, kept, band) {
     if (x < 8 || y < 8 || x + w > window.innerWidth - 8 || y + h > window.innerHeight - 8) return false;
+    if (y + h > band) return false;
     for (var i = 0; i < kept.length; i++) {
       var r = kept[i];
       if (x < r.right && r.left < x + w && y < r.bottom && r.top < y + h) return false;
     }
     return true;
   }
-  function ttsPick(cands, w, h, kept) {
+  function ttsPick(cands, w, h, kept, band) {
     for (var i = 0; i < cands.length; i++)
-      if (ttsSpotOk(cands[i].x, cands[i].y, w, h, kept)) return cands[i];
+      if (ttsSpotOk(cands[i].x, cands[i].y, w, h, kept, band)) return cands[i];
     return cands[0];
   }
   /* 系统上一次替它挑的落点。账上的坐标还是这两个 ⇒ 读者没动过，带子一变就跟着重挑；
@@ -5371,12 +5422,12 @@
           { x: Math.round(vw - w - 14), y: Math.round(navT - 10 - h) },   /* 右下角有翻页器就叠到它上方 */
           { x: 14, y: Math.round(band - h) },                             /* 实在挤不下就换左下角 */
           { x: Math.round(vw - w - 14), y: Math.round(navT - 10 - h - 44) }
-        ], w, h, kept)
+        ], w, h, kept, band)
       : ttsPick([
           { x: Math.round((vw - w) / 2), y: Math.round(band - h) },        /* 居中接管常驻带上方 */
           { x: Math.round(navL - 10 - w), y: Math.round(band - h) },       /* 同带子，整个让到翻页器左边 */
           { x: Math.round((vw - w) / 2), y: Math.round(navT - 10 - h) }    /* 让到翻页器上方 */
-        ], w, h, kept);
+        ], w, h, kept, band);
     win.place(s.x, s.y);
     ttsHome[k] = { x: s.x, y: s.y };
   }
@@ -5405,7 +5456,17 @@
       win.place(f.x, Math.round(Math.max(8, Math.min(back, window.innerHeight - h - 8))));
     }
   }
-  function immClearTts() { liftClear("tts", ttsWin, ttsBar); liftClear("pill", pillWin, ttsPillEl); }
+  function immClearTts() {
+    /* 顺序有讲究：先按新账重挑落点，再让 liftClear 兜底。
+       进/退沉浸时脚下这条常驻带的账整批改（#readerDock 退场、#immBot 与悬浮球入场），
+       旧落点是按旧账挑的，新账下正好可能压住刚出现的球。liftClear 只搬 y、不看 kept，
+       单靠它挪不开这种横向冲突；反过来若先抬再挑，抬完坐标就不再等于 ttsHome，
+       重挑会当成「读者动过手」而拒绝动手 —— 带子最矮的那种落点反而永远算不到。
+       重挑只认系统挑的位置：被读者拖过（或上一笔 lift 还挂着账）的，它自己会拒绝。 */
+    if (ttsBar && ttsLive()) ttsPlaceHome(ttsBar.hidden ? "pill" : "bar");
+    liftClear("tts", ttsWin, ttsBar);
+    liftClear("pill", pillWin, ttsPillEl);
+  }
   ttsApplyMode();
   window.addEventListener("resize", function () { ttsApplyMode(); immClearTts(); });
 
@@ -5566,6 +5627,7 @@
      同步写死，和上面那句 hidden=false 在同一个任务里，中间没有一帧被浏览器画出来。 */
   function openTTSBar() {                       /* 起读：整条现身，胶囊收掉 */
     ttsPillEl.hidden = true;
+    ttsApplyMode();                             /* 现身这一刻重定形态：init 可能量在布局视口未落定的瞬间（见 ttsNarrow） */
     if (ttsWin) { ttsBar.hidden = false; ttsPlaceHome("bar"); ttsWin.open(); } else ttsBar.hidden = false;
     ttsProg(false);
     immClearTts();
@@ -5574,6 +5636,7 @@
   function ttsShowBar() {                       /* 胶囊 → 整条：朗读不停，也不抹进度 */
     if (!ttsBar.hidden) return;
     ttsPillEl.hidden = true;
+    ttsApplyMode();
     if (ttsWin) { ttsBar.hidden = false; ttsPlaceHome("bar"); ttsWin.open(); } else ttsBar.hidden = false;
     immClearTts();
     ttsSyncBook();
@@ -5763,7 +5826,10 @@
     if (book) all[docId] = book; else delete all[docId];
     try { localStorage.setItem(CAST_KEY, JSON.stringify(all)); } catch (e) {}
   }
-  var CAST = castAll()[docId] || { on: false, chars: {}, lines: [] };
+  /* ver 2 的旧账在读取侧惰性归一（补句级标记、缺标记的行标 legacy），不批量改写磁盘；
+     下一次用户动作落盘时才顺带写成新形状。归一失败（损坏值）退回空表，不让整页起不来。 */
+  var CAST_RAW = castAll()[docId];
+  var CAST = (window.InkCast ? InkCast.normalizeCast(CAST_RAW) : CAST_RAW) || { on: false, chars: {}, lines: [] };
   CAST.on = !!CAST.on;
   /* 角色音色的候选池：**先把自己（旁白）那款排除掉** —— 旁白用用户选的音色，
      角色若也分到同一款，听起来就是「换了半天等于没换」（首跑实测正是如此）。
@@ -5775,11 +5841,21 @@
     return rest.length >= 2 ? rest : all;
   }
   var SPEAK_UNITS_PLAIN = SPEAK_UNITS;      /* 原始单元（无角色）；开了多角色才换成带角色的那份 */
-  /* 角色表面板列多少句、让模型一次判多少句 —— 两个数不是一回事，写死在一个常量上会互相牵制：
-     面板要能翻到几百句（300 一屏够用、DOM 也不炸），模型那边受 maxTokens=1200 的出口限制，
-     超过约 120 句就会被截半（截半比不判更容易错），所以只送前 120 句并在面板说清。 */
+  /* 角色表面板列多少句、模型一次判多少句、一次点击最多判几块 —— 三个数各管一件事：
+     面板要能翻到几百句（300 一屏够用、DOM 也不炸）；每块 40 句是出口 token 的天花板
+     （A3 起每句要回 basis/conf/quote，2000 token 判 40 句正好，60 句会截半 —— 截半比不判更容易错）；
+     每本首次分配默认最多 40 块（≈1600 句），超了明说「后半未判」，再点一次接着判。 */
   var CAST_LINE_MAX = 300;
-  var CAST_AI_MAX = 120;
+  var CAST_CHUNK_MAX = 40;
+  var CAST_BLOCK_CAP = 40;
+  var CAST_UNDO_MAX = 20;
+  var castCtl = null;
+  var castPage = 0;             /* 面板翻到第几页（显示上限只限显示，不限改派） */
+  var castUndo = [];            /* 成段改派的撤销栈：整份 lines/chars 的快照 */
+  var castPlan = null;          /* A4 音色建议（只在内存里，采用才写盘） */
+  var castVoiceMsg = "";        /* 配声失败/提示：不落账，但原因要能读 */
+  var castStage = null;         /* A5 分配提案：整份临时角色表（只在内存里，采用才换成正本） */
+  var castAllMsg = "";          /* A5 面板提示：没配模型 / 已收回 / 已过期 */
 
   /* 池子 + 旁白那款交给 cast.js 去排（谁撞款谁重排、谁共用谁偏移音高）。 */
   function castVoices(chars) {
@@ -5793,8 +5869,15 @@
     var next = window.InkCast ? InkCast.build(blocks, keep) : null;
     if (!next) return;
     next.on = !!CAST.on;
+    /* A2：并人建议是跨识别的待办，重识别只丢掉两边已经不在表里的那几条。 */
+    next.merges = (Array.isArray(CAST.merges) ? CAST.merges : []).filter(function (m) {
+      return m && next.chars[m.a] && next.chars[m.b];
+    });
     castVoices(next.chars);
     CAST = next;
+    castPlan = null; castVoiceMsg = "";    /* 角色表整个换了，旧音色建议不再对得上 */
+    castStage = null; castAllMsg = "";     /* A5 提案对着旧表算的，一并作废 */
+    castUndo.length = 0; castPage = 0;     /* 坐标系整个换了，旧快照不能再往上盖 */
     castPut(CAST);
   }
   /* 按角色表重建播放单元：旁白 cast 空（用用户选的音色），台词带角色名、角色音色与音高偏移。
@@ -5858,41 +5941,328 @@
     if (!body) return;
     var names = Object.keys(CAST.chars || {});
     var pool = castPool();
+    var linesAll = CAST.lines || [];
+    /* 链的账：从**当前** lines 现算（手改一句归属后要立刻反映），断裂位置从上次识别结果读。 */
+    var ch = { bare: 0, alt: 0, landed: 0, none: 0, hold: 0, reach: 0, uncertain: 0, clash: 0,
+      breaks: (CAST.chain && CAST.chain.breaks) || [] };
+    linesAll.forEach(function (l) {
+      if (l.at === "alt" || l.at === "none") ch.bare++;
+      if (l.at === "alt") { ch.alt++; if (!l.hold) ch.landed++; }
+      if (l.at === "none") ch.none++;
+      if (l.hold) ch.hold++;
+      if (l.uncertain) ch.uncertain++;
+      if (l.clash) ch.clash++;
+      if (typeof l.reach === "number") ch.reach += l.reach;
+    });
+    function confStr(v) { return isFinite(Number(v)) ? Number(v).toFixed(2) : "?"; }
     var h = [];
     h.push('<label class="tmp-row"><b>本书启用多角色</b><input type="checkbox" id="castOn"' + (CAST.on ? " checked" : "") + "></label>");
+    var linesN = linesAll.length;
+    var asg = CAST.assign || null;
+    var resume = !!(asg && asg.more > 0 && asg.total === linesN);
     h.push('<div class="tmp-row" style="gap:6px">' +
+      '<button class="btn btn-accent btn-sm" id="castAll"' + (castCtl ? " disabled" : "") +
+        ' title="一趟完成：分块判归属、新建角色、配声；先摊成提案，采用才写入">交给主脑分配</button>' +
       '<button class="btn btn-ghost btn-sm" id="castScan">重新识别</button>' +
-      '<button class="btn btn-ghost btn-sm" id="castModel"' + (window.API && API.hasModel && API.hasModel() ? "" : " disabled title=\"先在「主脑 · 模型配置」里填好模型\"") + ">用模型重认</button>" +
+      '<button class="btn btn-ghost btn-sm" id="castModel"' + (window.API && API.hasModel && API.hasModel() ? "" : " disabled title=\"先在「主脑 · 模型配置」里填好模型\"") + ">" + (resume ? "接着判后半" : "用模型重认") + "</button>" +
+      '<button class="btn btn-ghost btn-sm" id="castStop" hidden>停止</button>' +
+      '<button class="btn btn-ghost btn-sm" id="castUndo"' + (castUndo.length ? "" : " disabled") +
+        (castUndo.length ? ' title="撤销：' + esc(castUndo[castUndo.length - 1].label) + '"' : "") + ">撤销</button>" +
       '<button class="btn btn-ghost btn-sm" id="castClear">清空</button></div>');
+    /* A1：模型判归属要遍历全书，进度与「每轮判几块」都得能看见、能停、能调；
+       块数上限防的是一次点下去烧掉整本书的额度，不是判据本身。 */
+    h.push('<div class="tmp-row" style="gap:6px;align-items:center">' +
+      '<span class="ap-hint" id="castProg" role="status" aria-live="polite" style="flex:1;min-width:0"></span>' +
+      '<label class="ap-sec-note" for="castCap">每轮最多</label>' +
+      '<input class="ap-num" id="castCap" type="number" min="1" max="400" step="1" value="' +
+        Math.max(1, Math.min(400, Number(CAST.cap) || CAST_BLOCK_CAP)) + '" aria-label="每轮最多判几块（一块 ' + CAST_CHUNK_MAX + ' 句）">' +
+      '<span class="ap-sec-note">块</span></div>');
+    if (castAllMsg) {
+      h.push('<div class="ap-hint" id="castAllMsg" role="status" aria-live="polite">' + esc(castAllMsg) + "</div>");
+    }
+    if (asg && linesN) {
+      var ab = [];
+      if (asg.judged) ab.push("判了 " + asg.judged + " 句 · " + (asg.blocks || 0) + " 块");
+      if (asg.kept) ab.push("落地 " + asg.kept);
+      if (asg.low) ab.push("拿不准 " + asg.low);
+      if (asg.rejected) ab.push("拒收 " + asg.rejected + (asg.over ? "（超链深 " + asg.over + "）" : ""));
+      if (asg.conflicts) ab.push("冲突 " + asg.conflicts);
+      if (asg.newChars) ab.push("新建角色 " + asg.newChars);
+      if (asg.merges) ab.push("并人建议 " + asg.merges);
+      if (asg.more > 0) ab.push("后半未判：还差 " + asg.more + " 块（" + (asg.done || 0) + "/" + asg.total + " 句）");
+      else if (asg.done) ab.push("全书 " + asg.total + " 句判完");
+      if (asg.error) ab.push("上一轮中途停了：" + asg.error);
+      if (ab.length) h.push('<div class="ap-hint" id="castAssignNote">上次分配：' + esc(ab.join(" · ")) + "</div>");
+    }
+    if (linesAll.length && !CAST.chain) {
+      /* 旧版识别结果没有链账：不装作「裸句 0 句」也不显示一条假链，直说重识别能补什么。 */
+      h.push('<div class="ap-hint" id="castChainNote">这份角色表来自旧版识别，没有链账（外推 / 断链明细）。点「重新识别」可按新版链规则重认；手改的归属与音色会保留。</div>');
+    } else if (linesAll.length) {
+      var bits = ["裸句 " + ch.bare + " / " + linesAll.length];
+      if (ch.landed) bits.push("链外推落地 " + ch.landed);
+      if (ch.none) bits.push("未判 " + ch.none);
+      if (ch.hold) bits.push("断链收回 " + ch.hold);
+      if (ch.reach) bits.push("触顶待判 " + ch.reach);
+      if (ch.uncertain) bits.push("拿不准 " + ch.uncertain);
+      if (ch.clash) bits.push("规则/模型冲突 " + ch.clash);
+      var brk = ch.breaks.length ? "；交替链在第 " + ch.breaks[0].say + " 句断裂（预期" + esc(ch.breaks[0].exp) + "，实到" + esc(ch.breaks[0].got) + "）" : "";
+      h.push('<div class="ap-hint" id="castChainNote">' + bits.join(" · ") + esc(brk) + "</div>");
+    }
+    /* 模型这一轮的诚实账（A3/A6-3）：收到多少、落地多少、拿不准/拒收/冲突各多少，全上屏。 */
+    if (CAST.lastModel) {
+      var lm = CAST.lastModel, mb = ["收到 " + lm.got + " 条", "落地 " + lm.kept];
+      if (lm.low) mb.push("拿不准 " + lm.low);
+      if (lm.rejected) mb.push("拒收 " + lm.rejected);
+      if (lm.protected) mb.push("人定的 " + lm.protected + " 句未动");
+      if (lm.conflicts) mb.push("冲突 " + lm.conflicts);
+      if (lm.aside) mb.push("非对白 " + lm.aside);
+      if (lm.newChars) mb.push("新建角色 " + lm.newChars);
+      if (lm.newRejected) mb.push("无据新名 " + lm.newRejected + " 未入表");
+      if (lm.merges) mb.push("并人建议 " + lm.merges);
+      h.push('<div class="ap-hint" id="castModelNote">上次模型：' + mb.join(" · ") + "</div>");
+    }
+    /* A5 提案总表：数字先给全，细节只摊与「改了什么」最相关的三样（新角色 / 并人 / 配音）。
+       采用前一个字都不写；过期了就明说过期，别让读者点一颗会静默失败的钮。 */
+    if (castStage) {
+      var cs = castStage.stats || {};
+      var stale = castSig(CAST) !== castStage.baseSig;
+      if (stale) castStage.stale = true;
+      var pb = [];
+      if (cs.judged) pb.push("判了 " + cs.judged + " 句 · " + (cs.blocks || 0) + " 块");
+      pb.push("新建 " + (cs.newChars || 0) + " 个角色");
+      pb.push("改了 " + (cs.changed || 0) + " 句归属");
+      if (cs.uncertain) pb.push(cs.uncertain + " 句拿不准");
+      if (cs.merges) pb.push("并人建议 " + cs.merges + " 条");
+      pb.push("配音方案 " + (cs.voice || 0) + " 条");
+      if (cs.rejected) pb.push("拒收 " + cs.rejected + " 条");
+      h.push('<section class="ap-sec" id="castAllSec"><h4>主脑分配提案<span class="ap-sec-note">' +
+        (stale ? "已过期：角色表在提案后被改过" : "只是提案，点「采用」才写入") + "</span></h4>");
+      h.push('<div class="ap-hint" id="castAllNote">' + esc(pb.join(" · ")) + "</div>");
+      var flags = [];
+      var left = Math.max(0, (cs.total || 0) - (cs.doneTo || 0));
+      if (castStage.aborted) {
+        flags.push("你中途停下了：已判的 " + (cs.judged || 0) + " 句在提案里，未判的 " + left + " 句没有判。");
+      } else if (castStage.err) {
+        flags.push("判到一半停了：" + castStage.err + "；已判的 " + (cs.judged || 0) +
+          " 句在提案里，未判的 " + left + " 句没有判。");
+      } else if (cs.more) {
+        flags.push("后半未判：还差 " + cs.more + " 块（" + (cs.doneTo || 0) + "/" + (cs.total || 0) +
+          " 句）。采用后可以再点一次「接着判后半」。");
+      }
+      if (castStage.voiceErr) flags.push("配音：" + castStage.voiceErr + "（归属部分不受影响）");
+      if (!(cs.judged > 0)) flags.push("这一趟没有判到任何句子：没有可采用的归属，角色表不会变。");
+      flags.forEach(function (t) { h.push('<div class="ap-hint">' + esc(t) + "</div>"); });
+      var news = (castStage.newNames || []).filter(function (n) { return castStage.cast.chars[n]; });
+      if (news.length) {
+        h.push('<div class="ap-hint">新建角色：' + news.slice(0, 20).map(function (n) {
+          var c = castStage.cast.chars[n] || {};
+          return esc(n) + "（" + (c.gender === "m" ? "男" : c.gender === "f" ? "女" : "未知") +
+            " · " + (c.count || 0) + " 句" + (c.role ? " · " + esc(c.role) : "") + "）";
+        }).join("、") + (news.length > 20 ? "…共 " + news.length + " 个" : "") + "</div>");
+      }
+      var smg = (Array.isArray(castStage.cast.merges) ? castStage.cast.merges : []).filter(function (m) {
+        return m && castStage.cast.chars[m.a] && castStage.cast.chars[m.b];
+      });
+      if (smg.length) {
+        h.push('<div class="ap-hint">并人建议：' + smg.slice(0, 10).map(function (m) {
+          return esc(m.a) + " → " + esc(m.b);
+        }).join("、") + (smg.length > 10 ? "…" : "") + "（采用后仍只是建议，点「并」才真并）</div>");
+      }
+      var vrows = (castStage.voice && Array.isArray(castStage.voice.rows) ? castStage.voice.rows : [])
+        .filter(function (r) { return r && castStage.cast.chars[r.char]; });
+      if (vrows.length) {
+        h.push('<div class="ap-hint">配音：' + vrows.slice(0, 16).map(function (r) {
+          return esc(r.char) + " → " + esc(r.locked ? (r.name || "原音色") : r.name) +
+            (r.locked ? "（已锁定）" : (r.pitch ? "（" + (r.pitch > 0 ? "+" : "") + r.pitch + "Hz）" : ""));
+        }).join("、") + (vrows.length > 16 ? "…共 " + vrows.length + " 条" : "") + "</div>");
+      }
+      var noGo = stale || !(cs.judged > 0);
+      h.push('<div class="tmp-row" style="gap:6px">' +
+        '<button class="btn btn-accent btn-sm" id="castAllAdopt"' +
+          (noGo ? ' disabled title="' + (stale ? "提案已过期，请重新分配" : "这一趟没有判到任何句子") + '"' : "") +
+          ">采用这份分配</button>" +
+        '<button class="btn btn-ghost btn-sm" id="castAllNo">收回提案</button></div>');
+      h.push("</section>");
+    }
     if (!names.length) {
-      h.push('<div class="ap-hint">还没有识别到角色。点「重新识别」：先按对白提示语（「张三道：“…”」）认，再看两人轮转。判不出的一律算旁白。</div>');
+      h.push('<div class="ap-hint">还没有识别到角色。点「重新识别」：先按对白提示语（「张三道：“…”」）认，再看交替链。判不出的一律算旁白。</div>');
       body.innerHTML = h.join("");
       castWire();
       return;
     }
     h.push('<section class="ap-sec"><h4>角色<span class="ap-sec-note">音色默认按性别自动配</span></h4>');
+    /* A4：不自动烧额度 —— 读者点一次才问模型；问回来的只是建议，采用才落盘。 */
+    h.push('<div class="tmp-row" style="gap:6px;align-items:center">' +
+      '<button class="btn btn-ghost btn-sm" id="castVoiceAsk"' +
+        (window.API && API.hasModel && API.hasModel() ? "" : ' disabled title="先在「主脑 · 模型配置」里填好模型"') +
+        '>主脑配音</button>' +
+      '<span class="ap-hint" id="castVoiceHint" role="status" aria-live="polite" style="flex:1;min-width:0">' +
+        esc(castVoiceMsg || "让主脑按性别与戏份从本机音色池里配一套；只是建议，采用才写入") + "</span></div>");
     names.sort(function (a, b) { return (CAST.chars[b].count || 0) - (CAST.chars[a].count || 0); }).forEach(function (n) {
       var c = CAST.chars[n];
-      h.push('<div class="ap-row"><span class="ap-k">' + esc(n) + ' <em class="ap-sec-note">×' + c.count + "</em></span>" +
+      var mk = "";
+      if (c.by === "model") {
+        var ev0 = c.evidence && c.evidence[0];
+        var why = ev0 ? "模型新建 · 依据第 " + (ev0.i + 1) + " 句：「" + ev0.text + "」" : "模型新建（没有原文证据）";
+        if (c.role) why += " · " + c.role;
+        mk = '<em class="ap-badge" title="' + esc(why) + '">模型新建</em>';
+      }
+      var lk = c.voiceLock ? '<em class="ap-sec-note" title="你手选的音色，主脑重排不会动它">已锁定 · 不参与重排</em>' : "";
+      /* 手选过的音色可能已不在池里（旁白占走 / 已下架）—— 仍要把那款列出来，
+         否则下拉显示「按性别自动」会骗人。 */
+      var vopts = pool.slice();
+      if (c.voiceK && !vopts.some(function (v) { return v.k === c.voiceK; })) {
+        var vn = (window.InkVoice && InkVoice.meta && InkVoice.meta(c.voiceK) || {}).name || c.voiceName || c.voiceK;
+        vopts = [{ k: c.voiceK, name: vn }].concat(vopts);
+      }
+      h.push('<div class="ap-row"><span class="ap-k">' + esc(n) + ' <em class="ap-sec-note">×' + c.count + "</em>" + mk + lk + "</span>" +
         '<span class="ap-c">' +
         '<select class="ap-sel" data-cast-gender="' + esc(n) + '" aria-label="' + esc(n) + " 的性别\">" +
         [["", "未知"], ["m", "男"], ["f", "女"]].map(function (g) { return '<option value="' + g[0] + '"' + ((c.gender || "") === g[0] ? " selected" : "") + ">" + g[1] + "</option>"; }).join("") +
         "</select>" +
         '<select class="ap-sel" data-cast-voice="' + esc(n) + '" aria-label="' + esc(n) + " 的音色\">" +
         '<option value="">按性别自动</option>' +
-        pool.map(function (v) { return '<option value="' + v.k + '"' + (c.voiceK === v.k ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") +
+        vopts.map(function (v) { return '<option value="' + v.k + '"' + (c.voiceK === v.k ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") +
         "</select></span></div>");
     });
     h.push("</section>");
-    var lines = (CAST.lines || []);
+    /* A4 建议表：一行一位角色，共用声线把音高偏移与「为什么共用」一起摊开。 */
+    if (castPlan) {
+      var prow = (castPlan.rows || []).filter(function (r) { return r && CAST.chars[r.char]; });
+      h.push('<section class="ap-sec" id="castVoiceSec"><h4>主脑配音建议<span class="ap-sec-note">只是建议，点「采用」才写入</span></h4>');
+      prow.forEach(function (r) {
+        var bits = "";
+        if (r.locked) bits += '<em class="ap-sec-note">已锁定 · 不参与重排</em>';
+        else {
+          if (r.reuse) bits += '<em class="ap-badge" title="池子里这款声线被多位角色共用，播放层按音高区分">共用' +
+            (r.pitch ? " · 音高 " + (r.pitch > 0 ? "+" : "") + r.pitch + "Hz" : " · 首位") + "</em>";
+          if (r.why) bits += '<em class="ap-sec-note">' + esc(r.why) + "</em>";
+        }
+        h.push('<div class="ap-row"><span class="ap-k">' + esc(r.char) + " → " + esc(r.name) + " " + bits + "</span></div>");
+      });
+      var locks = names.filter(function (n) { return CAST.chars[n].voiceLock; });
+      if (locks.length) h.push('<div class="ap-hint" id="castVoiceLockNote">已锁定：' + locks.map(esc).join("、") +
+        "（不参与重排，采用后仍是原来那款）</div>");
+      if (castPlan.rejected) h.push('<div class="ap-hint" id="castVoiceDrop">丢弃 ' + castPlan.rejected +
+        " 条：角色不在表里，或音色不在本机池里 —— 模型不许凭空造声线。</div>");
+      if (!prow.length) h.push('<div class="ap-hint">模型没给出可采用的条目。</div>');
+      h.push('<div class="tmp-row" style="gap:6px">' +
+        '<button class="btn btn-ghost btn-sm" id="castVoiceAdopt"' +
+          (prow.some(function (r) { return !r.locked; }) ? "" : " disabled") + ">采用这套配音</button>" +
+        '<button class="btn btn-ghost btn-sm" id="castVoiceNo">不用</button></div>');
+      h.push("</section>");
+    }
+    /* A2：并人只作建议 —— 两条各留是默认；点「并」才动表，动作进撤销栈。 */
+    var mgs = (Array.isArray(CAST.merges) ? CAST.merges : []).filter(function (m) {
+      return m && CAST.chars[m.a] && CAST.chars[m.b];
+    });
+    if (mgs.length) {
+      h.push('<section class="ap-sec" id="castMergeSec"><h4>模型建议并人<span class="ap-sec-note">点「并」才真并，可撤销</span></h4>');
+      mgs.forEach(function (m) {
+        h.push('<div class="ap-row"><span class="ap-k">' + esc(m.a) + " → " + esc(m.b) +
+          ' <em class="ap-sec-note">' + (isFinite(Number(m.conf)) ? confStr(m.conf) : "?") + "</em>" +
+          (m.why ? ' <em class="ap-sec-note">' + esc(m.why) + "</em>" : "") + "</span>" +
+          '<span class="ap-c">' +
+          '<button class="ap-mini" data-cast-merge="' + esc(m.a) + '" data-cast-merge-b="' + esc(m.b) + '">并</button>' +
+          '<button class="ap-mini" data-cast-merge-no="' + esc(m.a) + '" data-cast-merge-no-b="' + esc(m.b) + '">不用</button>' +
+          "</span></div>");
+      });
+      h.push("</section>");
+    }
+    var lines = linesAll;
     if (lines.length) {
-      h.push('<section class="ap-sec"><h4>对白归属<span class="ap-sec-note">手改一次即写回本书角色表 · 只列前 ' + CAST_LINE_MAX + ' 句</span></h4>');
-      lines.slice(0, CAST_LINE_MAX).forEach(function (l, i) {
-        h.push('<div class="ap-row"><span class="ap-k" style="max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(l.text) + '">“' + esc(String(l.text).slice(0, 16)) + "”</span>" +
-          '<span class="ap-c"><select class="ap-sel" data-cast-line="' + i + '" aria-label="第 ' + (i + 1) + ' 句对白是谁说的">' +
-          '<option value="">旁白</option>' +
-          names.map(function (n) { return '<option value="' + esc(n) + '"' + (l.speaker === n ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("") +
-          "</select></span></div>");
+      /* A6-4：连续同一说话人的句子压成一块；同一锚派生的交替链也算一块（哪怕逐句换人）。
+         显示仍按 CAST_LINE_MAX 分页 —— 上限只限显示，块头动作对整块生效，翻页不挡改派。 */
+      var runs = window.InkCast ? InkCast.runsOf(CAST, blocks) : [];
+      var pageN = Math.max(1, Math.ceil(lines.length / CAST_LINE_MAX));
+      if (castPage >= pageN) castPage = pageN - 1;
+      if (castPage < 0) castPage = 0;
+      var pageStart = castPage * CAST_LINE_MAX;
+      var pageEnd = Math.min(lines.length, pageStart + CAST_LINE_MAX);
+      h.push('<section class="ap-sec"><h4>对白归属<span class="ap-sec-note">第 ' + (pageStart + 1) + "–" + pageEnd +
+        " 句 / 共 " + lines.length + " 句 · 连续同一人的句子是一块</span></h4>");
+      if (pageN > 1) {
+        h.push('<div class="tmp-row" style="gap:6px;align-items:center">' +
+          '<button class="ap-mini" id="castPrev"' + (castPage <= 0 ? " disabled" : "") + ">上一页</button>" +
+          '<span class="ap-hint" id="castPageN" style="flex:1;text-align:center">第 ' + (castPage + 1) + " / " + pageN + " 页</span>" +
+          '<button class="ap-mini" id="castNext"' + (castPage >= pageN - 1 ? " disabled" : "") + ">下一页</button></div>");
+      }
+      function runHead(r, visFrom, visTo) {
+        var lap = visFrom > r.from || visTo < r.to;
+        var title = r.derived
+          ? "人链 " + (r.names || []).map(esc).join(" ⇄ ")
+          : (r.who ? esc(r.who) : "旁白");
+        var opts = [["", "整块改给：旁白"]].concat(names.map(function (n) { return [n, "整块改给：" + n]; }))
+          .concat([["__new__", "整块改给：新建角色…"]]);
+        var sel = '<select class="ap-sel" data-cast-run="' + r.from + '" data-run-to="' + r.to + '" aria-label="把第 ' + (r.from + 1) + " 到 " + r.to + ' 句整块改给谁">' +
+          opts.map(function (o) { return '<option value="' + esc(o[0]) + '">' + esc(o[1]) + "</option>"; }).join("") + "</select>";
+        /* 旁白块没有 who 可当甲 —— 直接落回角色表第一位，再取一位不同的作乙。
+           旧写法拿 r.who（空串）当甲，乙按「不等于甲」取到第一个人，两个下拉就都成了张三。 */
+        var a = (r.derived && r.names && r.names[0]) ||
+          (r.who && names.indexOf(r.who) >= 0 ? r.who : "") || names[0] || "";
+        var b = (r.derived && r.names && r.names[1]) || names.filter(function (n) { return n !== a; })[0] || "";
+        function altSel(k, cur) {
+          return '<select class="ap-sel" data-cast-' + k + '="' + r.from + '" data-run-to="' + r.to + '" aria-label="' + (k === "alt-a" ? "甲" : "乙") + '">' +
+            names.map(function (n) { return '<option value="' + esc(n) + '"' + (n === cur ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("") + "</select>";
+        }
+        return '<div class="ap-run-h"><span class="ap-run-t">第 ' + (r.from + 1) + "–" + r.to + " 句 · " + title +
+          ' <em class="ap-sec-note">' + r.n + " 句" + (lap ? "，本页显示 " + (visFrom + 1) + "–" + visTo : "") + "</em></span>" +
+          '<span class="ap-run-a">' + sel +
+          (names.length >= 2 ? '<button class="ap-mini" data-cast-alt="' + r.from + '" data-run-to="' + r.to + '">两人交替…</button>' : "") +
+          '<button class="ap-mini" data-cast-aside="' + r.from + '" data-run-to="' + r.to + '">不是对白</button></span></div>' +
+          '<div class="ap-run-new" data-run-new="' + r.from + '" hidden>' +
+          '<input class="ap-sel" type="text" maxlength="12" data-cast-newname="' + r.from + '" placeholder="新角色名" aria-label="新角色名字">' +
+          '<button class="ap-mini" data-cast-newgo="' + r.from + '" data-run-to="' + r.to + '">建并改这块</button></div>' +
+          (names.length >= 2 ? '<div class="ap-run-alt" data-run-alt="' + r.from + '" hidden>' +
+            altSel("alt-a", a) + '<span class="ap-sec-note">⇄</span>' + altSel("alt-b", b) +
+            '<button class="ap-mini" data-cast-alt-go="' + r.from + '" data-run-to="' + r.to + '">开始交替</button></div>' : "");
+      }
+      runs.forEach(function (r) {
+        var visFrom = Math.max(r.from, pageStart), visTo = Math.min(r.to, pageEnd);
+        if (visFrom >= visTo) return;
+        var head = (r.n >= 2 || r.derived) ? runHead(r, visFrom, visTo) : "";
+        if (head) h.push('<div class="ap-run">' + head);
+        for (var i = visFrom; i < visTo; i++) {
+          var l = lines[i];
+          /* 徽标优先级＝「最该让人停下来的那条」：断链 > 触顶 > 拿不准 > 非对白 > 冲突 > 人链 > 人定 > 模型 > 推 > 代。
+             模型句带 conf 才写数字（旧账宽松并入的没有 conf，写个假 0.50 比不写更糟）。 */
+          var badge = "", warn = false, btitle = "";
+          if (l.hold) { badge = "断链"; warn = true; btitle = "交替链已断裂，这句不落地，按旁白处理"; }
+          else if (typeof l.reach === "number") { badge = "待判 " + l.reach + " 句"; warn = true; btitle = "触顶后本地不猜，留给主脑判"; }
+          else if (l.uncertain) { badge = "拿不准"; warn = true; btitle = "模型也没把握（置信度低于 " + InkCast.CONF_LOW + "），归属暂空，等你定"; }
+          else if (l.aside) { badge = "非对白"; btitle = "这句在引号里，但不是对白"; }
+          else if (l.clash) { badge = "冲突"; warn = true; btitle = "规则与模型给出了不同的人，按置信度取了一方；两边都留在下面"; }
+          else if (typeof l.derivedFrom === "number") { badge = "人链"; btitle = "从第 " + (l.derivedFrom + 1) + " 句按两人交替推出来的（模型不会覆盖）"; }
+          else if (l.user) { badge = "人定"; btitle = "你手动指派的，模型不会覆盖"; }
+          else if (l.by === "model") { badge = isFinite(l.conf) ? "模型 " + confStr(l.conf) : "模型"; btitle = "模型判的"; }
+          else if (l.at === "alt") { badge = "推"; btitle = "按交替链推出来的（不是提示语明示）"; }
+          else if (l.at === "pron") { badge = "代"; btitle = "按代词回指判的"; }
+          h.push('<div class="ap-row"><span class="ap-k" style="max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(l.text) + '">“' + esc(String(l.text).slice(0, 16)) + "”" +
+            (badge ? '<em class="ap-badge' + (warn ? " warn" : "") + '" title="' + esc(btitle) + '">' + badge + "</em>" : "") + "</span>" +
+            '<span class="ap-c"><select class="ap-sel" data-cast-line="' + i + '" aria-label="第 ' + (i + 1) + ' 句对白是谁说的">' +
+            '<option value="">旁白</option>' +
+            names.map(function (n) { return '<option value="' + esc(n) + '"' + (l.speaker === n ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("") +
+            "</select></span></div>");
+          /* 证据行（A3）：为什么判成这样要能看见 —— 冲突摊两边、模型引的原文、判断依据；
+             拿不准的给两颗一键采纳（模型猜的人 / 旁白），人一点就走 user 这条路。 */
+          var ev = [];
+          if (l.clash) ev.push("规则：" + esc(l.clash.rule || "旁白") + "（" + confStr(l.clash.ruleConf) + "）· 模型：" + esc(l.clash.model || "旁白") + "（" + confStr(l.clash.conf) + "）");
+          if (l.aside) ev.push("模型说这句不是对白（内心独白 / 转述 / 引文）");
+          if (typeof l.derivedFrom === "number") ev.push("从第 " + (l.derivedFrom + 1) + " 句的人定锚按两人交替推出来");
+          if (l.quote) ev.push("模型引：「" + esc(l.quote) + "」");
+          if (l.why) ev.push(esc(l.why));
+          var pick = "";
+          if (l.uncertain) {
+            var cand = l.suggest || (l.clash && l.clash.model) || "";
+            if (cand) pick += '<button class="ap-mini" data-cast-pick="' + i + '" data-cast-to="' + esc(cand) + '">是' + esc(cand) + "</button>";
+            pick += '<button class="ap-mini" data-cast-pick="' + i + '" data-cast-to="">按旁白</button>';
+          }
+          var go = (l.bi != null && blocks[l.bi]) ? '<button class="ap-mini" data-cast-go="' + i + '">跳过去看一眼</button>' : "";
+          if (ev.length || pick || go) {
+            h.push('<div class="ap-ev">' + (ev.length ? '<span class="ap-ev-t" id="castEv' + i + '">' + ev.join(" · ") + "</span>" : "") + pick + go + "</div>");
+          }
+        }
+        if (head) h.push("</div>");
       });
       h.push("</section>");
     }
@@ -5912,9 +6282,102 @@
     var sc = qs("#castScan");
     if (sc) sc.addEventListener("click", function () { castScan(); castApplyUnits(); castRender(); toast("已按对白重新识别角色", "users"); });
     var cl = qs("#castClear");
-    if (cl) cl.addEventListener("click", function () { CAST = { on: false, chars: {}, lines: [] }; castPut(null); castApplyUnits(); castRender(); var b = qs("#ttsCast"); if (b) b.checked = false; toast("本书角色表已清空", "rotate-ccw"); });
+    if (cl) cl.addEventListener("click", function () { CAST = { on: false, chars: {}, lines: [] }; castUndo.length = 0; castPage = 0; castStage = null; castAllMsg = ""; castPlan = null; castVoiceMsg = ""; castPut(null); castApplyUnits(); castRender(); var b = qs("#ttsCast"); if (b) b.checked = false; toast("本书角色表已清空", "rotate-ccw"); });
     var mo = qs("#castModel");
     if (mo) mo.addEventListener("click", function () { castModel(); });
+    var va = qs("#castVoiceAsk");
+    if (va) va.addEventListener("click", function () { castAskVoices(); });
+    var vad = qs("#castVoiceAdopt");
+    if (vad) vad.addEventListener("click", function () { castAdoptVoices(); });
+    var vno = qs("#castVoiceNo");
+    if (vno) vno.addEventListener("click", function () { castDropVoices(); });
+    var stp = qs("#castStop");
+    if (stp) stp.addEventListener("click", function () {
+      if (!castCtl) { stp.hidden = true; return; }
+      castCtl.abort();
+      stp.disabled = true; stp.textContent = "停止中…";
+    });
+    /* A5：一趟分配 / 采用 / 收回。采用是唯一写正本的入口。 */
+    var all = qs("#castAll");
+    if (all) all.addEventListener("click", function () { castAssignAll(); });
+    var allAdopt = qs("#castAllAdopt");
+    if (allAdopt) allAdopt.addEventListener("click", function () { castAdoptAll(); });
+    var allNo = qs("#castAllNo");
+    if (allNo) allNo.addEventListener("click", function () { castDropAll(); });
+    var cp = qs("#castCap");
+    if (cp) cp.addEventListener("change", function () {
+      var v = Math.max(1, Math.min(400, Math.round(Number(cp.value) || CAST_BLOCK_CAP)));
+      CAST.cap = v; cp.value = v; castPut(CAST);
+      toast("每轮最多判 " + v + " 块（一块 " + CAST_CHUNK_MAX + " 句）", "sliders");
+    });
+    var pv = qs("#castPrev");
+    if (pv) pv.addEventListener("click", function () { if (castPage > 0) { castPage--; castRender(); } });
+    var nx = qs("#castNext");
+    if (nx) nx.addEventListener("click", function () { castPage++; castRender(); });
+    var un = qs("#castUndo");
+    if (un) un.addEventListener("click", function () {
+      var s = castUndo.pop();
+      if (!s) return;
+      CAST.lines = s.lines; CAST.chars = s.chars;
+      if (s.merges) CAST.merges = s.merges;
+      castPut(CAST); castApplyUnits(); castRender();
+      toast("已撤销：" + s.label, "rotate-ccw");
+    });
+    /* A6-4 块头动作：整块改给 / 新建角色 / 两人交替 / 整块非对白。
+       全部只改归属、即时生效；「两人交替」不发任何网络请求。 */
+    body.querySelectorAll("[data-cast-run]").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var from = Number(sel.dataset.castRun), to = Number(sel.dataset.runTo);
+        if (sel.value === "__new__") {
+          var box = body.querySelector('[data-run-new="' + from + '"]');
+          if (box) { box.hidden = false; var inp = box.querySelector("input"); if (inp) inp.focus(); }
+          return;
+        }
+        castRunAssign(from, to, sel.value, false);
+      });
+    });
+    body.querySelectorAll("[data-cast-newgo]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var from = Number(b.dataset.castNewgo), to = Number(b.dataset.runTo);
+        var inp = body.querySelector('[data-cast-newname="' + from + '"]');
+        var nm = String((inp && inp.value) || "").trim();
+        if (nm.length < 2) { toast("先给新角色起个名字（至少 2 个字）", "info"); if (inp) inp.focus(); return; }
+        castBulk("新建角色 " + nm + " 并改第 " + (from + 1) + "–" + to + " 句", function () {
+          var key = InkCast.createChar(CAST, nm);
+          if (!key) return 0;
+          castVoices(CAST.chars);
+          return InkCast.reassignRange(CAST, from, to, key, {});
+        });
+      });
+    });
+    body.querySelectorAll("[data-cast-alt]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var from = Number(b.dataset.castAlt);
+        var box = body.querySelector('[data-run-alt="' + from + '"]');
+        if (!box) return;
+        box.hidden = !box.hidden;
+        if (!box.hidden) { var s = box.querySelector("select"); if (s) s.focus(); }
+      });
+    });
+    body.querySelectorAll("[data-cast-alt-go]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var from = Number(b.dataset.castAltGo), to = Number(b.dataset.runTo);
+        var ea = body.querySelector('[data-cast-alt-a="' + from + '"]');
+        var eb = body.querySelector('[data-cast-alt-b="' + from + '"]');
+        castRunAlt(from, to, ea ? ea.value : "", eb ? eb.value : "");
+      });
+    });
+    body.querySelectorAll("[data-cast-aside]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        castRunAssign(Number(b.dataset.castAside), Number(b.dataset.runTo), "", true);
+      });
+    });
+    body.querySelectorAll("[data-cast-merge]").forEach(function (b) {
+      b.addEventListener("click", function () { castDoMerge(b.dataset.castMerge, b.dataset.castMergeB); });
+    });
+    body.querySelectorAll("[data-cast-merge-no]").forEach(function (b) {
+      b.addEventListener("click", function () { castDropMerge(b.dataset.castMergeNo, b.dataset.castMergeNoB); });
+    });
     body.querySelectorAll("[data-cast-gender]").forEach(function (sel) {
       sel.addEventListener("change", function () {
         var c = CAST.chars[sel.dataset.castGender]; if (!c) return;
@@ -5926,45 +6389,642 @@
     body.querySelectorAll("[data-cast-voice]").forEach(function (sel) {
       sel.addEventListener("change", function () {
         var c = CAST.chars[sel.dataset.castVoice]; if (!c) return;
-        if (sel.value) { c.voiceK = sel.value; c.locked = true; } else { delete c.voiceK; c.locked = false; }
+        if (sel.value) {
+          c.voiceK = sel.value; c.locked = true; c.voiceLock = true;
+          /* 手选也要同步显示名：锁定角色的建议行直接读 voiceName，
+             只改键会把它标成上一款声线的名字。 */
+          c.voiceName = (window.InkVoice && InkVoice.meta && InkVoice.meta(sel.value) || {}).name || sel.value;
+        } else { delete c.voiceK; delete c.voiceName; c.locked = false; c.voiceLock = false; }
         castVoices(CAST.chars);      /* 手改后重算音高偏移：指到别人那一款就得让两者听得出区别 */
         castPut(CAST); castApplyUnits(); castRender();
       });
     });
     body.querySelectorAll("[data-cast-line]").forEach(function (sel) {
       sel.addEventListener("change", function () {
-        var l = CAST.lines[Number(sel.dataset.castLine)]; if (!l) return;
-        l.speaker = sel.value; l.user = true;
-        castPut(CAST); castApplyUnits();
+        castEditLine(Number(sel.dataset.castLine), sel.value, null);
+      });
+    });
+    body.querySelectorAll("[data-cast-pick]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        castEditLine(Number(b.dataset.castPick), b.dataset.castTo || "", function (l) {
+          return "已按你点的落地：" + (l.speaker || "旁白");
+        });
+      });
+    });
+    body.querySelectorAll("[data-cast-go]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var l = CAST.lines[Number(b.dataset.castGo)]; if (!l || l.bi == null || !blocks[l.bi]) return;
+        var p = qs("#castPanel");
+        if (p) { p.classList.remove("on"); p.hidden = true; }
+        gotoBlock(l.bi); flashBi(l.bi);
       });
     });
   }
-  /* L2：让模型按上下文判归属。白名单在本地（cast.js 的 applyModel），模型点的新名字不写进角色表。 */
-  async function castModel() {
-    if (!(window.API && API.hasModel && API.hasModel()) || !API.llm) { toast("要先在「主脑 · 模型配置」里填好模型", "alert-triangle"); return; }
-    if (!(CAST.lines || []).length) castScan();
-    var names = Object.keys(CAST.chars || {});
-    if (names.length < 2) { toast("先认出两个以上角色再让模型判", "info"); return; }
-    toast("正在让模型判对白归属…", "brain");
-    var lines = CAST.lines.slice(0, CAST_AI_MAX);
-    var list = lines.map(function (l, i) { return (i + 1) + ". " + String(l.text).slice(0, 80); }).join("\n");
+  /* 人一改就是最终裁决：清掉模型留下的证据与犹豫（拿不准 / 冲突 / 非对白），
+     但这些标记的清空只发生在**人动手**这一条路上；重识别与模型回填都不许动它。 */
+  function castAssignByUser(l, who) {
+    l.speaker = String(who || ""); l.user = true; l.by = "user"; l.via = "user";
+    delete l.hold;                 /* 人一改就落地：断链标记只约束本地外推，不约束人 */
+    l.conf = 1;
+    delete l.uncertain; delete l.suggest; delete l.clash; delete l.aside; delete l.why;
+    delete l.derivedFrom;          /* 直接改了派生句：它此后是人定的锚，不再是别人的下游 */
+  }
+  /* ---------------- A6-4 成段改派 ----------------
+     两次点击替代 40 次下拉：块头选一次 → 整块改；两锚点一次 → 整段交替。
+     撤销栈只收人做的成段动作；重识别 / 模型回填会把栈清掉（那时旧快照已不是同一个坐标系）。 */
+  function castSnap(label) {
+    if (!CAST) return;
+    castUndo.push({ label: label,
+      lines: JSON.parse(JSON.stringify(CAST.lines || [])),
+      chars: JSON.parse(JSON.stringify(CAST.chars || {})),
+      merges: JSON.parse(JSON.stringify(CAST.merges || [])) });
+    if (castUndo.length > CAST_UNDO_MAX) castUndo.shift();
+  }
+  function castBulk(label, fn) {
+    castSnap(label);
+    var n = fn();
+    if (!n) { castUndo.pop(); return 0; }
+    castPut(CAST); castApplyUnits(); castRender();
+    return n;
+  }
+  function castRunAssign(from, to, who, aside) {
+    var nm = String(who || "");
+    var n = castBulk("第 " + (from + 1) + "–" + to + " 句改成" + (aside ? "非对白" : nm || "旁白"), function () {
+      return InkCast.reassignRange(CAST, from, to, nm, { aside: aside });
+    });
+    if (!n) return;
+    toast("第 " + (from + 1) + "–" + to + " 句已" + (aside ? "整块按非对白" : "改给" + (nm || "旁白")) + "（" + n + " 句）", "users");
+  }
+  function castRunAlt(from, to, a, b) {
+    if (!a || !b || a === b) { toast("两人交替要选两个不同的角色", "info"); return; }
+    var r = castBulk("从第 " + (from + 1) + " 句起 " + a + " ⇄ " + b, function () {
+      return InkCast.recomputeChain(CAST, blocks, from, a, b).count;
+    });
+    if (!r) { toast("这一段没有可重算的句子", "info"); return; }
+    toast("从第 " + (from + 1) + " 句起按 " + a + " ⇄ " + b + " 交替，重算 " + r + " 句", "users");
+  }
+  function castHasDerived(from) {
+    return (CAST.lines || []).some(function (l) { return l.derivedFrom === from; });
+  }
+  /* A2 并人建议：用户点「并」才动表（模型只负责提），整份快照进撤销栈，点错能原样收回。 */
+  function castDoMerge(a, b) {
+    var A = String(a || ""), B = String(b || "");
+    if (!CAST.chars[A] || !CAST.chars[B]) return;
+    castSnap("并人 " + A + " → " + B);
+    var n = InkCast.mergeChars(CAST, A, B);
+    if (n < 0) { castUndo.pop(); toast("这两个人并不到一起（不在表里或本来就是同一人）", "info"); return; }
+    castPlan = null; castVoiceMsg = "";   /* 角色表变了，旧配音建议作废 */
+    castVoices(CAST.chars);            /* 并掉的那位可能占着一款声线，音高偏移要重算 */
+    castPut(CAST); castApplyUnits(); castRender();
+    toast("已并人：" + A + " → " + B + (n ? "（" + n + " 句改归 " + B + "）" : "（没有句子要改归）"), "users");
+  }
+  function castDropMerge(a, b) {
+    var A = String(a || ""), B = String(b || "");
+    var list = Array.isArray(CAST.merges) ? CAST.merges : [];
+    var next = list.filter(function (m) { return !(m && m.a === A && m.b === B); });
+    if (next.length === list.length) return;
+    CAST.merges = next;
+    castPut(CAST); castRender();
+    toast("已忽略这条并人建议；两条名字仍各留", "x");
+  }
+  /* 人改了派生链的起点（锚）→ 下游按新锚重算；只认这一条链，别处一律不碰。 */
+  function castRedoDerived(from) {
+    var l = CAST.lines && CAST.lines[from];
+    if (!l || !l.speaker || !castHasDerived(from)) return false;
+    var other = "";
+    for (var i = from + 1; i < CAST.lines.length; i++) {
+      var x = CAST.lines[i];
+      if (x.derivedFrom !== from) continue;
+      if (x.speaker && x.speaker !== l.speaker) { other = x.speaker; break; }
+    }
+    if (!other) return false;
+    return InkCast.recomputeChain(CAST, blocks, from, l.speaker, other).count > 0;
+  }
+  function castEditLine(idx, who, note) {
+    var l = CAST.lines && CAST.lines[idx];
+    if (!l) return;
+    var anchor = castHasDerived(idx);
+    if (anchor) castSnap("改第 " + (idx + 1) + " 句锚并重算下游");
+    castAssignByUser(l, who);
+    if (anchor) castRedoDerived(idx);
+    InkCast.recount(CAST);
+    castPut(CAST); castApplyUnits(); castRender();
+    if (note) toast(note(l), "check");
+  }
+  /* L2：让模型按上下文判归属。白名单在本地（cast.js 的 applyModel），模型点的新名字不写进角色表。
+     A3 契约：每句必须回 basis + conf（strict 模式缺一条就拒收），低置信不落地，冲突留在句子上屏。
+     A1/A6-3（v1.4-S3）：按 CAST_CHUNK_MAX 句一块遍历全书，块间带上角色表、锚序列、链周期与
+     距锚深度、上一块末 6 句；每块单独入账，中途「停止」已判部分照常留下。 */
+  function castRoster(cast) {
+    cast = cast || CAST;
+    var cnt = {};
+    (cast.lines || []).forEach(function (l) { if (l.speaker) cnt[l.speaker] = (cnt[l.speaker] || 0) + 1; });
+    return Object.keys(cast.chars || {}).map(function (n) {
+      var c = cast.chars[n] || {};
+      var extra = [];
+      if (Array.isArray(c.alt) && c.alt.length) extra.push("别名：" + c.alt.slice(0, 4).join("、"));
+      if (c.role) extra.push(c.role);
+      return n + "（" + (c.gender === "m" ? "男" : c.gender === "f" ? "女" : "性别未知") +
+        " · 已出场 " + (cnt[n] || 0) + " 句" + (extra.length ? " · " + extra.join(" · ") : "") + "）";
+    }).join(" / ");
+  }
+  /* 引文紧邻的旁白（「张三站起身来。」这类）是模型判归属最有用的上下文 ——
+     按 build 同一把尺（原文 b.x）取 span，不在渲染文本上猜位。 */
+  function castNeighbor(l, side) {
+    var b = blocks[l.bi];
+    var spans = window.InkCast ? InkCast.splitSpans(String((b && b.x) || "")) : [];
+    var sp = spans[l.si + side];
+    if (sp && sp.t === "narr") return String(sp.x).replace(/\s+/g, " ").trim().slice(0, 30);
+    for (var z = l.bi + side; z >= 0 && z < blocks.length; z += side) {
+      var x = String((blocks[z] && blocks[z].x) || "").replace(/\s+/g, " ").trim();
+      if (!x) continue;
+      return side < 0 ? x.slice(-30) : x.slice(0, 30);
+    }
+    return "";
+  }
+  function castPrevTail(from, cast) {
+    cast = cast || CAST;
+    var out = [];
+    for (var i = Math.max(0, from - 6); i < from; i++) {
+      var l = cast.lines[i];
+      if (!l) continue;
+      var by = l.user ? "人定" : l.by === "model"
+        ? "模型" + (isFinite(l.conf) ? " " + Number(l.conf).toFixed(2) : "") : "规则";
+      out.push((i + 1) + "." + String(l.text).slice(0, 12) + "→" + (l.speaker || "旁白") + "（" + by + "）");
+    }
+    return out.join("；");
+  }
+  function castPromptLine(l, gi) {
+    var tag = l.at === "tag" ? "提示语" : l.at === "pron" ? "代词" : l.at === "alt" ? "链推" : "裸";
+    var hint = [tag];
+    if (l.at === "alt" || l.at === "none") hint.push("距锚" + (l.depth || 0));
+    if (l.speaker) hint.push("规则猜:" + l.speaker);
+    if (l.hold) hint.push("断链待判");
+    else if (typeof l.reach === "number") hint.push("触顶待判 " + l.reach + " 句");
+    var ctx = [];
+    var up = castNeighbor(l, -1); if (up) ctx.push("上文：" + up);
+    var dn = castNeighbor(l, 1); if (dn) ctx.push("下文：" + dn);
+    return gi + ". [" + hint.join(" · ") + "] 「" + String(l.text).slice(0, 80) + "」" +
+      (ctx.length ? "｜" + ctx.join("｜") : "");
+  }
+  function castChunkPrompt(from, to, cast) {
+    cast = cast || CAST;
+    var st = InkCast.chainState(cast.lines, from, blocks);
+    var head = ["【角色表】" + (castRoster(cast) || "（空：本书还没有认出任何角色，需要你用 chars 新建）")];
+    head.push("【锚】" + (st.seq.length ? st.seq.join(" → ") + "（最近 " + st.seq.length + " 个，只算提示语/代词）" : "无"));
+    head.push("【链状态】" + (st.p ? "周期 " + st.p : "未认出周期") + " · 本块首句距锚 " + st.depth + " 句" +
+      (st.depth > InkCast.CHAIN_MAX ? "（超过本地护栏 " + InkCast.CHAIN_MAX + "：这一段不许再按链外推）" : ""));
+    var tail = castPrevTail(from, cast);
+    if (tail) head.push("【衔接】上一块末 6 句：" + tail);
+    head.push("【本块对白】i 用下面的全局句号（全书从 1 起，不是块内序号）");
+    var list = [];
+    for (var i = from; i < to; i++) list.push(castPromptLine(cast.lines[i], i + 1));
+    return head.join("\n") + "\n" + list.join("\n") +
+      "\n\n只回一个 JSON 对象，三个键都别省：" +
+      "{\"chars\":[…],\"merge\":[…],\"lines\":[…]}。" +
+      "\"lines\" 每句一项：{\"i\":全局句号,\"speaker\":\"角色表里的名字或 null\",\"basis\":\"tag|alternation|pronoun|mention|new|aside\",\"conf\":0到1,\"quote\":\"原文片段\",\"why\":\"一句话\"}。" +
+      "\"chars\" 只放角色表里没有、但确实在出场的新角色：{\"name\":\"正名\",\"alias\":[\"别的叫法\"],\"gender\":\"m|f|空\",\"role\":\"一句话身份\",\"evidence\":[支持他出场的全局句号，最多 3 个]}；没有新角色给 []。" +
+      "\"merge\" 只放你怀疑是同一个人的两条**表内**名字：{\"a\":\"别名\",\"b\":\"正名\",\"conf\":0到1,\"why\":\"依据\"}；没有给 []。" +
+      "merge 只是建议，不会自动执行；lines 里请直接写你判断的正名。新角色必须先登记进 chars，lines 里才能用他的名字（这些句子 basis 用 new）；" +
+      "判不出就 speaker:null 并在 why 里说清。不要解释、不要代码块。";
+  }
+  function castStat(upto, fn, cast) {
+    cast = cast || CAST;
+    var n = 0;
+    (cast.lines || []).slice(0, upto).forEach(function (l) { if (fn(l)) n++; });
+    return n;
+  }
+  /* A5 提案是对着「跑之前那张表」算出来的：采用时必须确认这张表没被人动过，
+     否则会把读者在提案期间的手改悄悄盖掉。只算会改变提案含义的字段 ——
+     assign / lastModel 这类账变了不影响提案能不能盖上去。 */
+  function castSig(cast) {
+    cast = cast || CAST;
+    var h = 2166136261;
+    function add(s) {
+      s = String(s == null ? "" : s);
+      for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+      h ^= 10; h = Math.imul(h, 16777619);
+    }
+    Object.keys(cast.chars || {}).sort().forEach(function (n) {
+      var c = cast.chars[n] || {};
+      add(n); add(c.gender); add(c.voiceK);
+      add(c.voiceLock ? 1 : 0); add(c.locked ? 1 : 0);
+    });
+    (cast.lines || []).forEach(function (l) {
+      add(l.speaker); add(l.user ? 1 : 0); add(l.at);
+      add(l.derivedFrom == null ? "" : l.derivedFrom);
+      add(l.uncertain ? 1 : 0); add(l.aside ? 1 : 0);
+    });
+    (Array.isArray(cast.merges) ? cast.merges : []).forEach(function (m) {
+      add(m && m.a); add(m && m.b);
+    });
+    return (h >>> 0).toString(36) + "-" + (cast.lines || []).length;
+  }
+  /* 提案写在一份整表副本上：castPass / applyVoicePlan 随便改，正本一个字都不动。
+     chain 也复制 —— 否则提案渲染会把「有链账的表」当成旧版识别结果。 */
+  function castStageClone(cast) {
+    var raw = JSON.parse(JSON.stringify({
+      chars: cast.chars || {},
+      lines: cast.lines || [],
+      merges: Array.isArray(cast.merges) ? cast.merges : [],
+      chain: cast.chain || null
+    }));
+    return {
+      on: !!cast.on, cap: Math.max(1, Math.min(400, Number(cast.cap) || CAST_BLOCK_CAP)),
+      chars: raw.chars, lines: raw.lines, merges: raw.merges, chain: raw.chain, assign: {}
+    };
+  }
+  /* 一趟分块判归属。目标由调用方给（可以是临时副本），这里**不落盘、不碰面板**：
+     「用模型重认」写正本、A5 的提案写副本，两条路共用同一套块输入、护栏与账。 */
+  async function castPass(target, opt) {
+    opt = opt || {};
+    var signal = opt.signal || null;
+    var total = (target.lines || []).length;
+    var cap = Math.max(1, Math.min(400, Number(target.cap) || CAST_BLOCK_CAP));
+    /* 继续判：上一轮停在哪儿就从哪块起。书上句子变了（总数对不上）或已判完再点 → 从头判。 */
+    var done = Number(target.assign && target.assign.total === total && target.assign.done) || 0;
+    if (done >= total) done = 0;
+    var todo = Math.min(Math.ceil((total - done) / CAST_CHUNK_MAX), cap);
+    var acc = { got: 0, kept: 0, low: 0, rejected: 0, protected: 0, conflicts: 0, aside: 0, over: 0,
+      newChars: 0, aliased: 0, merges: 0, newRejected: 0, mergeRejected: 0 };
+    var judged = 0, okBlocks = 0, lastErr = "";
     var sysTxt = API.promptSys("cast.assign");
     var prm = API.promptParams("cast.assign");
-    var usr = "已知角色：" + names.join("、") + "\n下面是按顺序出现的对白。给每一句判一个说话人；判不出就用 null。\n" +
-      "输出格式：[{\"i\":1,\"speaker\":\"角色名\"},…]（i 从 1 开始，对应下面的序号）\n\n" + list;
     try {
-      /* API.llm 的签名是 (sys, user) —— 别按变量名顺序顺手写反（v2.25.0 首版就反过一次） */
-      var txt = String(await API.llm(sysTxt, usr, Object.assign({ cfg: prm.cfg }, prm.send)) || "");
-      var m = txt.match(/\[[\s\S]*\]/);
-      var arr = m ? JSON.parse(m[0]) : null;
-      if (!Array.isArray(arr)) { toast("模型没给出可用的 JSON，保留规则识别结果", "alert-triangle"); return; }
-      var pairs = arr.map(function (x) { return { i: Number(x && x.i) - 1, speaker: x && x.speaker }; }).filter(function (x) { return x.i >= 0; });
-      InkCast.applyModel(CAST, pairs);
-      castPut(CAST); castApplyUnits(); castRender();
-      toast("模型归属已并入（" + pairs.length + " 句" + (CAST.lines.length > CAST_AI_MAX ? "，只判前 " + CAST_AI_MAX + " 句" : "") + "）", "circle-check");
+      for (var n = 0; n < todo; n++) {
+        if (signal && signal.aborted) break;
+        var from = done + n * CAST_CHUNK_MAX;
+        var to = Math.min(from + CAST_CHUNK_MAX, total);
+        var block = target.lines.slice(from, to);
+        if (opt.onProgress) opt.onProgress(n, todo, judged, acc, from, to);
+        /* API.llm 的签名是 (sys, user) —— 别按变量名顺序顺手写反（v2.25.0 首版就反过一次） */
+        var txt = String(await API.llm(sysTxt, castChunkPrompt(from, to, target),
+          Object.assign({ cfg: prm.cfg, signal: signal }, prm.send)) || "");
+        /* A2 起要的是 {chars, merge, lines}；旧形状（裸数组）仍收 —— 换提示词不该让旧回答直接作废。 */
+        var obj = null;
+        var mo = txt.match(/\{[\s\S]*\}/);
+        if (mo) { try { obj = JSON.parse(mo[0]); } catch (e1) { obj = null; } }
+        if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+          var ma = txt.match(/\[[\s\S]*\]/);
+          if (ma) {
+            try { var arr0 = JSON.parse(ma[0]); if (Array.isArray(arr0)) obj = { lines: arr0 }; }
+            catch (e2) { obj = null; }
+          }
+        }
+        if (!obj || !Array.isArray(obj.lines)) { lastErr = "模型没给出可用的 JSON"; break; }
+        var outside = 0;
+        var pairs = obj.lines.map(function (x) {
+          return { i: Number(x && x.i) - 1, speaker: x && x.speaker != null ? x.speaker : "",
+            basis: x && x.basis, conf: x && x.conf, quote: x && x.quote, why: x && x.why };
+        }).filter(function (x) {
+          if (x.i >= from && x.i < to) return true;
+          outside++; return false;
+        });
+        InkCast.applyProposal(target, { chars: obj.chars, merge: obj.merge, lines: pairs },
+          { strict: true, from: from, to: to });
+        castVoices(target.chars);     /* 新建角色要立刻拿到音色，否则第一遍播放是旁白音 */
+        var s = target.lastModel || {};
+        ["got", "kept", "low", "rejected", "protected", "conflicts", "aside", "over",
+          "newChars", "aliased", "merges", "newRejected", "mergeRejected"].forEach(function (k) {
+          acc[k] += Number(s[k] || 0);
+        });
+        acc.rejected += outside;      /* 答了块外句号＝同一句可能被改两遍，宁可算拒收也不试探着落 */
+        judged += block.length;
+        okBlocks++;
+        target.assign = Object.assign({}, target.assign || {}, { at: Date.now(), total: total, done: to, via: "model" });
+        if (opt.onBlock) opt.onBlock(n, todo, judged, acc, to, total, s, block);
+        if (window.InkAgent && InkAgent.log) {
+          InkAgent.log("判完第 " + (n + 1) + "/" + todo + " 块：" + block.length + " 句，落地 " +
+            (s.kept || 0) + "，新建 " + (s.newChars || 0) + " 角色，拒收 " + (s.rejected || 0),
+            "cast.assign", "read");
+        }
+      }
     } catch (e) {
-      toast("模型判归属失败，保留规则结果：" + String((e && e.message) || e).slice(0, 40), "alert-triangle");
+      if (!(e && e.aborted) && !(signal && signal.aborted)) lastErr = String((e && e.message) || e).slice(0, 60);
     }
+    var judgedTo = Number(target.assign && target.assign.total === total && target.assign.done) || 0;
+    return { acc: acc, judged: judged, okBlocks: okBlocks, lastErr: lastErr, total: total,
+      done: done, doneTo: judgedTo, more: Math.max(0, Math.ceil((total - judgedTo) / CAST_CHUNK_MAX)),
+      aborted: !!(signal && signal.aborted), cap: cap, todo: todo };
+  }
+  /* 这一轮的账与「判到哪儿」分开存：账只描述这一轮，done 决定下一次从哪块接着判。 */
+  function castFinishAssign(cast, r) {
+    cast.assign = Object.assign({}, cast.assign || {}, {
+      at: Date.now(), total: r.total, done: r.doneTo, blocks: r.okBlocks, judged: r.judged,
+      kept: r.acc.kept, low: r.acc.low, rejected: r.acc.rejected, over: r.acc.over,
+      protected: r.acc.protected, conflicts: r.acc.conflicts, aside: r.acc.aside,
+      newChars: r.acc.newChars, aliased: r.acc.aliased, merges: r.acc.merges,
+      newRejected: r.acc.newRejected, mergeRejected: r.acc.mergeRejected,
+      bare: castStat(r.doneTo, function (l) { return l.at === "none" || l.at === "alt"; }, cast),
+      reach: (function () {
+        var n = 0;
+        (cast.lines || []).slice(0, r.doneTo).forEach(function (l) { if (typeof l.reach === "number") n += l.reach; });
+        return n;
+      })(),
+      cap: r.cap, more: r.more, via: "model"
+    });
+    if (r.lastErr) cast.assign.error = r.lastErr;
+    cast.lastModel = r.acc;          /* 面板与 toast 读本轮总账，不是最后一块的账 */
+    return cast.assign;
+  }
+  async function castModel() {
+    if (castCtl) { toast("正在判；要换就先点「停止」", "info"); return; }
+    if (!(window.API && API.hasModel && API.hasModel()) || !API.llm) { toast("要先在「主脑 · 模型配置」里填好模型", "alert-triangle"); return; }
+    if (!(CAST.lines || []).length) castScan();
+    if (!(CAST.lines || []).length) { toast("这本书还没有识别出对白，先点「重新识别」", "info"); return; }
+    /* A2 起不再要求「先认出两个角色」：角色发现本身就是这一步的活 ——
+       全书只有裸对白、规则一个名字都没认出来时，正是最需要主脑新建的时候。 */
+    castPlan = null; castVoiceMsg = ""; castStage = null; castAllMsg = "";
+    castUndo.length = 0;          /* 模型要整本遍历，旧快照作废（模型可能改到任意一句） */
+    var ctl = castCtl = new AbortController();
+    var prog = qs("#castProg"), btn = qs("#castModel"), stop = qs("#castStop");
+    function say(t) { if (prog) prog.textContent = t; }
+    if (btn) { btn.disabled = true; btn.textContent = "判归属中…"; }
+    if (stop) stop.hidden = false;
+    var r = null;
+    try {
+      r = await castPass(CAST, {
+        signal: ctl.signal,
+        onProgress: function (n, todo, judged, acc) {
+          say("第 " + (n + 1) + "/" + todo + " 块 · 已判 " + judged + " 句 · 落地 " + acc.kept + " 句" +
+            (acc.newChars ? " · 新建 " + acc.newChars + " 个角色" : ""));
+        },
+        onBlock: function () { castPut(CAST); }
+      });
+    } finally {
+      castCtl = null;
+      if (btn) { btn.disabled = false; btn.textContent = "用模型重认"; }
+      if (stop) { stop.hidden = true; stop.disabled = false; stop.textContent = "停止"; }
+      if (!r) r = { acc: {}, judged: 0, okBlocks: 0, lastErr: "分配没能起跑", total: (CAST.lines || []).length,
+        doneTo: 0, more: 0, aborted: false, cap: 0 };
+      if (!r.acc || typeof r.acc.kept !== "number") {
+        r.acc = { got: 0, kept: 0, low: 0, rejected: 0, protected: 0, conflicts: 0, aside: 0, over: 0,
+          newChars: 0, aliased: 0, merges: 0, newRejected: 0, mergeRejected: 0 };
+      }
+      castFinishAssign(CAST, r);
+      castPut(CAST); castApplyUnits(); castRender();
+      var mb = ["判了 " + r.judged + " 句", "落地 " + r.acc.kept + " 句"];
+      if (r.acc.low) mb.push("拿不准 " + r.acc.low);
+      if (r.acc.rejected) mb.push("拒收 " + r.acc.rejected + (r.acc.over ? "（超链深 " + r.acc.over + "）" : ""));
+      if (r.acc.conflicts) mb.push("冲突 " + r.acc.conflicts);
+      if (r.acc.newChars) mb.push("新建角色 " + r.acc.newChars);
+      if (r.acc.newRejected) mb.push("无据新名 " + r.acc.newRejected + " 未入表");
+      if (r.acc.merges) mb.push("并人建议 " + r.acc.merges + " 条（面板里点「并」）");
+      if (ctl.signal.aborted) toast("已停下：" + mb.join(" · ") + "；已判的留在表里", "pause");
+      else if (r.lastErr) toast("判到一半停了：" + r.lastErr + "；已判的留在表里", "alert-triangle");
+      else if (r.more) toast(mb.join(" · ") + "；后半未判（还差 " + r.more + " 块），再点一次继续", "circle-check");
+      else toast(mb.join(" · ") + "；全书判完", "circle-check");
+    }
+  }
+  /* ---------------- A5 一次跑通：提案 → 采用 ----------------
+     一趟里把「分块归属 → 新角色 → 音色方案」算完，但**全写在一份临时副本上**：
+     算完摊成一张提案总表，读者点「采用」才换成正本。采用前存旧表（一份），可整份收回。
+     与「用模型重认」共用 castPass —— 两条路只差写在哪张表、谁来点头。 */
+  async function castAssignAll() {
+    if (castCtl) { toast("正在分配；要换就先点「停止」", "info"); return; }
+    if (!(window.API && API.hasModel && API.hasModel()) || !API.llm) {
+      /* H3：不猜、不假装跑过 —— 把「去哪配」说清楚。 */
+      castAllMsg = "这一步要模型：先去「主脑 · 模型配置」填好接口地址、密钥与模型名，再回来点「交给主脑分配」。";
+      castRender();
+      toast("这一步要模型：先去「主脑 · 模型配置」填好模型", "alert-triangle");
+      return;
+    }
+    if (!(CAST.lines || []).length) castScan();
+    if (!(CAST.lines || []).length) {
+      castAllMsg = "这本书还没识别出对白：先点「重新识别」（规则层先认提示语与交替链），再交给主脑。";
+      castRender(); toast("还没识别出对白，先点「重新识别」", "info"); return;
+    }
+    var baseSig = castSig(CAST);
+    var stage = castStageClone(CAST);
+    castStage = null; castAllMsg = ""; castPlan = null; castVoiceMsg = "";
+    var ctl = castCtl = new AbortController();
+    var prog = qs("#castProg"), btn = qs("#castAll"), stop = qs("#castStop"), mbtn = qs("#castModel");
+    function say(t) { if (prog) prog.textContent = t; }
+    if (btn) { btn.disabled = true; btn.textContent = "分配中…"; }
+    if (mbtn) mbtn.disabled = true;
+    if (stop) stop.hidden = false;
+    var r = null, voice = null, voiceErr = "", voiceRes = null;
+    try {
+      r = await castPass(stage, {
+        signal: ctl.signal,
+        onProgress: function (n, todo, judged, acc) {
+          say("第 " + (n + 1) + "/" + todo + " 块 · 已判 " + judged + " 句 · 落地 " + acc.kept + " 句" +
+            (acc.newChars ? " · 新建 " + acc.newChars + " 个角色" : ""));
+        }
+      });
+      if (!ctl.signal.aborted && r.judged > 0 && Object.keys(stage.chars || {}).length) {
+        say("归属判完 · 正在配声…");
+        var vp = await castVoicePlanOf(stage, ctl.signal);
+        voice = vp.plan; voiceErr = vp.err || "";
+        if (voice && (voice.rows || []).length && !ctl.signal.aborted) {
+          voiceRes = InkCast.applyVoicePlan(stage, voice.rows,
+            castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }),
+            window.InkVoice ? InkVoice.current() : "");
+          if (!voiceRes.applied) voiceErr = "配音方案里的角色都已锁定，没有可改的条目。";
+        }
+      }
+    } finally {
+      castCtl = null;
+      if (btn) { btn.disabled = false; btn.textContent = "交给主脑分配"; }
+      if (mbtn) mbtn.disabled = !(window.API && API.hasModel && API.hasModel());
+      if (stop) { stop.hidden = true; stop.disabled = false; stop.textContent = "停止"; }
+    }
+    if (!r) {
+      var tot = (stage.lines || []).length;
+      r = { acc: { got: 0, kept: 0, low: 0, rejected: 0, protected: 0, conflicts: 0, aside: 0, over: 0,
+        newChars: 0, aliased: 0, merges: 0, newRejected: 0, mergeRejected: 0 },
+        judged: 0, okBlocks: 0, lastErr: "分配没能起跑", total: tot, done: 0, doneTo: 0,
+        more: Math.ceil(tot / CAST_CHUNK_MAX), aborted: true, cap: stage.cap, todo: 0 };
+    }
+    castFinishAssign(stage, r);
+    var lineDiff = 0, unc = 0;
+    var liveLines = CAST.lines || [];
+    (stage.lines || []).forEach(function (l, i) {
+      var b = liveLines[i];
+      if ((l.speaker || "") !== ((b && b.speaker) || "")) lineDiff++;
+      if (l.uncertain) unc++;
+    });
+    var newNames = Object.keys(stage.chars || {}).filter(function (n) { return !(CAST.chars || {})[n]; });
+    var merges = (Array.isArray(stage.merges) ? stage.merges : []).filter(function (m) {
+      return m && stage.chars[m.a] && stage.chars[m.b];
+    });
+    var voiceRows = (voice && Array.isArray(voice.rows) ? voice.rows : []).filter(function (x) {
+      return x && stage.chars[x.char];
+    });
+    var voiceN = voiceRows.filter(function (x) { return !x.locked; }).length;
+    var aborted = !!(ctl.signal && ctl.signal.aborted);
+    castStage = {
+      cast: stage, baseSig: baseSig, at: Date.now(), newNames: newNames,
+      stats: {
+        total: r.total, doneTo: r.doneTo, judged: r.judged, blocks: r.okBlocks,
+        changed: lineDiff, uncertain: unc, newChars: newNames.length,
+        merges: merges.length, voice: voiceN,
+        rejected: r.acc.rejected, low: r.acc.low, more: r.more
+      },
+      voice: voice, voiceErr: voiceErr, voiceRes: voiceRes,
+      err: r.lastErr, aborted: aborted
+    };
+    castRender();
+    var tb = ["判了 " + r.judged + " 句", "改了 " + lineDiff + " 句归属"];
+    if (newNames.length) tb.push("新建 " + newNames.length + " 个角色");
+    if (unc) tb.push("拿不准 " + unc);
+    if (merges.length) tb.push("并人建议 " + merges.length);
+    if (voiceN) tb.push("配音 " + voiceN + " 位");
+    if (aborted) toast("已停下：" + tb.join(" · ") + "；提案已摊开，采用前不落账", "pause");
+    else if (r.lastErr) toast("判到一半停了：" + r.lastErr + "；提案已摊开", "alert-triangle");
+    else toast(tb.join(" · ") + "；只是提案，点「采用」才写入", "circle-check");
+    if (window.InkAgent && InkAgent.log) {
+      InkAgent.log("分配提案：" + tb.join("，") + (aborted ? "（中途停下，未判部分明说）" : ""),
+        "cast.assign", "read");
+    }
+  }
+  function castAdoptAll() {
+    if (!castStage || !castStage.cast) return;
+    if (!(castStage.stats && castStage.stats.judged > 0)) {
+      castAllMsg = "这一趟没有判到任何句子，没有可采用的归属；角色表没有改动。";
+      castRender(); toast("没有可采用的归属；角色表没有改动", "info"); return;
+    }
+    if (castSig(CAST) !== castStage.baseSig) {
+      castStage.stale = true;
+      castAllMsg = "这份提案已过期：跑完之后角色表又被改过，不能直接盖上去。请重新点「交给主脑分配」。";
+      castRender(); toast("提案已过期，请重新分配", "alert-triangle"); return;
+    }
+    var s = castStage.stats || {}, v = castStage.voiceRes || {};
+    /* 整表替换＝坐标系整个换了：旧快照作废，只留这一份「采用前」的底（与 toc.apply 同口径）。 */
+    castUndo.length = 0;
+    castSnap("采用主脑分配（新建 " + (s.newChars || 0) + " 角色 / 改 " + (s.changed || 0) + " 句）");
+    var stage = castStage.cast;
+    stage.on = CAST.on;
+    stage.cap = CAST.cap;
+    castVoices(stage.chars);       /* 旁白或音色池在提案期间变了：按当前池重收口，音高跟着重算 */
+    castStage = null; castAllMsg = ""; castPlan = null; castVoiceMsg = "";
+    CAST = stage;
+    castPut(CAST); castApplyUnits(); castRender();
+    var tb = ["新建 " + (s.newChars || 0) + " 个角色", "改了 " + (s.changed || 0) + " 句归属"];
+    if (s.uncertain) tb.push("拿不准 " + s.uncertain + " 句留在面板里");
+    if (v.applied) tb.push("配声 " + v.applied + " 位" + (v.pitched ? " · " + v.pitched + " 位带音高偏移" : ""));
+    toast("已采用主脑分配：" + tb.join(" · ") + "，可撤销", "circle-check");
+    if (window.InkAgent && InkAgent.log) {
+      InkAgent.log("采用主脑分配：" + tb.join("，"), "cast.assign", "write");
+    }
+  }
+  function castDropAll() {
+    castStage = null; castAllMsg = "已收回这份提案，角色表没有改动。";
+    castRender(); toast("已收回提案；角色表没有改动", "x");
+  }
+  /* ---------------- A4 音色方案 ----------------
+     主脑只提建议：回答先过 planVoices 三关（角色在表里、音色在本机池里、锁定的不动），
+     结果只放内存；点「采用」才写 inkread.cast.v1。失败也必须留下能读的原因 ——
+     「没配上」和「悄悄没发生」在读者眼里是两回事。 */
+  function castVoiceRoster(cast) {
+    cast = cast || CAST;
+    var langName = { zh: "中文", en: "英文", ja: "日文" };
+    var roster = Object.keys(cast.chars || {}).map(function (n) {
+      var c = cast.chars[n] || {};
+      return "- " + n + " · " + (c.gender === "m" ? "男" : c.gender === "f" ? "女" : "性别未知") +
+        " · 出场 " + (c.count || 0) + " 句" + (c.role ? " · " + c.role : "") +
+        (c.voiceLock ? " · 已锁定（不要写进 plan）" : "");
+    }).join("\n");
+    var pool = castPool().map(function (v) {
+      return "- " + v.k + " · " + v.name + " · " + (langName[v.lang] || v.lang || "中文") +
+        " · " + (v.gender === "m" ? "男" : v.gender === "f" ? "女" : "其他");
+    }).join("\n");
+    return { roster: roster, pool: pool };
+  }
+  /* 只算、不碰界面：A4 的手动入口与 A5 的一趟分配共用同一套池校验与 JSON 解析。 */
+  async function castVoicePlanOf(cast, signal) {
+    cast = cast || CAST;
+    var pool = castPool();
+    if (!pool.length) {
+      return { plan: null, err: "本机没有可用的神经音色：先在「朗读 · 音色」里装一款，再来配声。" };
+    }
+    var r = castVoiceRoster(cast);
+    var sysTxt = API.promptSys("cast.voices", { roster: r.roster, pool: r.pool });
+    var prm = API.promptParams("cast.voices");
+    var txt = "";
+    try {
+      txt = String(await API.llm(sysTxt, "《" + (doc.title || "这本书") + "》· 角色表 " +
+        Object.keys(cast.chars || {}).length + " 位。按系统提示给一套配音方案。",
+        Object.assign({ cfg: prm.cfg, signal: signal || null }, prm.send)) || "");
+    } catch (e) {
+      if (e && (e.aborted || (signal && signal.aborted))) {
+        return { plan: null, err: "配声被停下了：现有音色不变，也没有写入任何设置。" };
+      }
+      return { plan: null, err: "配声没成：" + String((e && e.message) || e).slice(0, 60) +
+        "。现有音色不变，也没有写入任何设置。" };
+    }
+    var arr = null;
+    var mo = txt.match(/\{[\s\S]*\}/);
+    if (mo) {
+      try { var jo = JSON.parse(mo[0]); if (jo && Array.isArray(jo.plan)) arr = jo.plan; } catch (e1) {}
+    }
+    if (!arr) {
+      var ma = txt.match(/\[[\s\S]*\]/);
+      if (ma) { try { var ja = JSON.parse(ma[0]); if (Array.isArray(ja)) arr = ja; } catch (e2) {} }
+    }
+    if (!arr) {
+      return { plan: null, err: "配声没成：模型没给出可用的 JSON（plan 数组）。现有音色不变，也没有写入任何设置。" };
+    }
+    var plan = InkCast.planVoices(cast, arr, pool, window.InkVoice ? InkVoice.current() : "");
+    if (!plan.rows.length) {
+      return { plan: plan, err: "主脑没给出可采用的条目（" + plan.rejected +
+        " 条越界或重复）。现有音色不变，也没有写入任何设置。" };
+    }
+    return { plan: plan, err: "" };
+  }
+  async function castAskVoices() {
+    if (!(window.API && API.hasModel && API.hasModel()) || !API.llm) {
+      toast("要先在「主脑 · 模型配置」里填好模型", "alert-triangle"); return;
+    }
+    if (!Object.keys(CAST.chars || {}).length) { toast("还没有识别到角色，先点「重新识别」", "info"); return; }
+    if (!castPool().length) {
+      castPlan = null;
+      castVoiceMsg = "本机没有可用的神经音色：先在「朗读 · 音色」里装一款，再来配声。";
+      castRender(); toast("本机没有可用的神经音色", "info"); return;
+    }
+    var btn = qs("#castVoiceAsk");
+    if (btn) { btn.disabled = true; btn.textContent = "配声中…"; }
+    castPlan = null;
+    castVoiceMsg = "主脑正在读角色表…（只提建议，采用才写入）";
+    var hint = qs("#castVoiceHint");
+    if (hint) hint.textContent = castVoiceMsg;
+    var r = await castVoicePlanOf(CAST, null);
+    if (!r.plan || !(r.plan.rows || []).length) {
+      castVoiceMsg = r.err || "主脑没给出可采用的配音条目。现有音色不变，也没有写入任何设置。";
+      castRender(); toast(castVoiceMsg, "alert-triangle"); return;
+    }
+    castPlan = r.plan;
+    castVoiceMsg = "";
+    castRender();
+    var tb = ["主脑配了 " + castPlan.rows.length + " 位角色"];
+    if (castPlan.locked) tb.push("锁定的 " + castPlan.locked + " 位未动");
+    if (castPlan.rejected) tb.push("丢弃 " + castPlan.rejected + " 条越界");
+    toast(tb.join(" · ") + "；采用前不会写入", "users");
+    if (window.InkAgent && InkAgent.log) {
+      InkAgent.log("配音建议：" + castPlan.rows.length + " 位，锁定 " + castPlan.locked +
+        "，越界丢弃 " + castPlan.rejected, "cast.voices", "read");
+    }
+  }
+  function castAdoptVoices() {
+    if (!castPlan || !(castPlan.rows || []).length) return;
+    castSnap("采用主脑配音方案");
+    var res = InkCast.applyVoicePlan(CAST, castPlan.rows,
+      castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }),
+      window.InkVoice ? InkVoice.current() : "");
+    if (!res.applied) {
+      castUndo.pop();
+      castVoiceMsg = "这套建议没有可采用的条目（锁定的不动，越界的已丢弃）。现有音色不变。";
+      castRender(); toast("没有可采用的条目；现有音色不变", "info"); return;
+    }
+    castPlan = null; castVoiceMsg = "";
+    castPut(CAST); castApplyUnits(); castRender();
+    toast("已采用主脑配音：" + res.applied + " 位角色" +
+      (res.pitched ? " · " + res.pitched + " 位带音高偏移" : "") + "，可撤销", "users");
+  }
+  function castDropVoices() {
+    castPlan = null;
+    castVoiceMsg = "已不用这套配音建议，现有音色不变。";
+    castRender(); toast("已不用这套配音建议；现有音色不变", "x");
   }
   (function castBind() {
     var box = qs("#ttsCast");
@@ -6149,16 +7209,27 @@
 
   /* 入口 B/C：点击任意段落起读 / 续读（@Voice 式）。
      划词、批注控件、修改模式一律让路；正在朗读时气泡变为「从此处续读」。 */
+  /* R1 规矩换过一次（旧版按纸面坐标分带翻页，把半张版心吞成了翻页区），
+     改了却没人知道等于没改 —— 读者只会以为「翻页坏了」。所以讲一次，只讲一次：
+     他自己点出过气泡（seen）就无需再讲，讲过了（told）也不重复 nag。两值都非空即闭嘴。 */
+  var TAP_HINT_KEY = "inkread.tapHint.v1";
+  function tapHintGet() { try { return localStorage.getItem(TAP_HINT_KEY) || ""; } catch (e) { return ""; } }
+  function tapHintMark(v) { if (!tapHintGet()) { try { localStorage.setItem(TAP_HINT_KEY, v); } catch (e) {} } }
   function showTtsPop(el, bi) {
+    tapHintMark("seen");
     TTS.popBi = bi;
     var playing = TTS.eng && TTS.eng.playing();
     qs("#ttsPopGo").innerHTML = icon("play", 13) + "<span>" + (playing ? "从此处续读" : "从此朗读") + "</span>";
     placePop(qs("#ttsPop"), el);
   }
-  /* 标题的「题字」占位：按行量 Range 的 client rects，比块的整行框窄得多。
-     用来把「点在题目那几个字上」和「点在题目行右侧的空白」分开 —— 后者照旧翻页。 */
-  function headWordHit(el, x, y) {
-    if (!/^H[123]$/.test(el.tagName)) return false;
+  /* 字上 / 空白的分界：按 Range 逐行量 el 的内容 rects，比块的整行框窄得多。
+     v1.4 顶格修复 R1：原来只认 H1/H2/H3（/^H[123]$/），正文段落的字一律不算 ——
+     而翻页带是按**纸面**宽 30% 算的，版心只占纸面 82%，于是 1280 宽实测有 43.9% 的
+     版心横向落在带内：点在正文第一个字上既不出气泡也不翻页（死点击），
+     点在带内另一侧就被翻到下一页。改成认任何块的字，规则变成一句可复述的话：
+     **点在字上一定是「从这里开始读」，翻页与唤醒只认空白。**
+     非可朗读块（!isUnit）在上面就已 return，空白照旧归翻页 —— 否则死点击只是换了个位置。 */
+  function wordHit(el, x, y) {
     var r = document.createRange();
     r.selectNodeContents(el);
     var rects = r.getClientRects();
@@ -6178,16 +7249,17 @@
     var bi = parseInt(el.getAttribute("data-bi"), 10);
     var isUnit = SPEAK_UNITS.some(function (u) { return u.bi === bi; });
     if (!isUnit) return;
-    /* 左右 30% 是翻页区（v2.9 纸面 tap 翻页）——不弹朗读气泡，给翻页让路。
-       例外：标题的题字。pdf/epub 里一节只有一行题目，而题目常常整个落在 30% 里
-       （1280 窗口实测左翻页线在 x=529.6，题字从 362 起）——读者点在题目上表达的是
-       「从这一节读」，所以题字让气泡，题字行右侧的空白照旧归翻页。 */
+    /* v1.4 顶格修复 R1「字归读、白归翻」：落在左右 30% 翻页带里时，
+       先分这一点在不在字上 —— 在字上一律弹朗读气泡（并把事件咽住，不交给祖先 #book 翻页），
+       在空白上照旧让路给翻页。中央 40% 的唤醒/收起一律不改。
+       旧的例外只放行标题题字（pdf/epub 里一节只有一行题目，题字常常整个落在 30% 里），
+       它没解决的是正文段落：1280 宽实测版心有 43.9% 被带子吞掉，
+       读者想「从这里开始读」点在字上，结果要么没反应、要么被翻到下一页。 */
     if (!state.scroll) {
       var bx = bookTapZone(e);
-      if (bx < TAP_ZONE || bx > 1 - TAP_ZONE) {
-        if (!headWordHit(el, e.clientX, e.clientY)) return;
-        e.stopPropagation();   /* 翻页监听挂在祖先 #book 上，晚于这里 */
-      }
+      var inBand = bx < TAP_ZONE || bx > 1 - TAP_ZONE;
+      if (wordHit(el, e.clientX, e.clientY)) { if (inBand) e.stopPropagation(); }
+      else if (inBand) return;
     }
     showTtsPop(el, bi);
   });
@@ -6324,11 +7396,22 @@
   }
   function toggleTasks() { tOpen ? closeTasks() : openTasks(); }
 
+  /* 「原文定位」按可信度分两档，落空就说实话，不猜地方：
+     ① 记录自带锚点 —— 只有 AI 助手写入的那批有，导入的任务一律是 anchor:""
+        （api.js 落库不写这个字段，mergedTasks 铺的底才是空串）；
+     ② 标题在整本书里唯一 —— 任务本来就是从正文某一行抽出来的，文本是它唯一可靠的来路。
+        uniqueAnywhere 的两败（一处没有 / 出现多次）都返回 null，此时不许跳到章首糊弄，
+        那会把「定位失败」伪装成「定位成功」，比不跳更糟。 */
   function locateTask(id) {
     var t = TD_LIST.filter(function (x) { return x.id === id; })[0];
     if (!t) return;
-    gotoAnchor(t.anchor);
-    flashEl(t.anchor);
+    if (t.anchor && gotoAnchor(t.anchor)) return;
+    var title = String(t.title || t.x || "").trim();
+    if (title) {
+      var r = uniqueAnywhere(title);
+      if (r) { gotoBlock(r.bi); flashBi(r.bi); return; }
+    }
+    toast(title ? "这句在正文里找不到，或出现得太多次，不敢猜是哪一处" : "这条任务没有可定位的正文", "search-x");
   }
 
   qs("#tTasks").addEventListener("click", function () { toggleTasks(); InkFX.ripple(qs("#tTasks")); });
@@ -6414,7 +7497,12 @@
     immClearTts();
     repaginate(false);
     immWake();
-    toast("已进入全屏沉浸阅读 · 点击纸面中央呼出控件", "maximize");
+    /* 沉浸态是「点空白翻页」最吃重的动作，也是新规矩最容易被踩到的地方 —— 这一句只在这里说，
+       普通态有可见的翻页钮，不需要教。 */
+    var fresh = !tapHintGet();
+    if (fresh) tapHintMark("told");
+    toast(fresh ? "已进入全屏 · 点文字选朗读起点，点空白翻页"
+                : "已进入全屏沉浸阅读 · 点击纸面中央呼出控件", "maximize");
   }
   function exitImm() {
     if (!imm.on) return;
@@ -7015,7 +8103,8 @@
   var tkOrb = qs("#inkOrb"), tkRoot = qs("#inkWheel");
   var tk = {
     open: false, level: 1, modeKey: "all", sub: null,   /* level 1 = 模式环；2 = 工具外环 */
-    size: "m", cx: 0, cy: 0, hover: null, sizeOpen: false
+    size: "m", cx: 0, cy: 0, hover: null, sizeOpen: false,
+    anchor: null                                          /* 这次轮盘是从哪儿开出来的（球心 / 顶栏钮） */
   };
   var tkOrbPos = { x: 0, y: 0 };
 
@@ -7032,6 +8121,16 @@
      用户拖过就尊重用户（tkOrbUserSet），没拖过则视口一变就重算这个默认位。 */
   function tkOrbPaint() { tkOrb.style.left = tkOrbPos.x + "px"; tkOrb.style.top = tkOrbPos.y + "px"; }
   var tkOrbUserSet = false;
+  /* 球的显隐（v1.4 顶格修复 R3）：库里的 h=1 表示用户关掉球；老数据（ver 1）没这个字段，
+     读出来是 undefined → 一律按「显示」处理 —— 绝不让「存过位置」顺手变成「藏过球」。
+     藏球只藏球：入口还剩沉浸顶栏 #immKit 与 K 键两条，所以关掉不会把人锁在轮盘外。 */
+  var tkOrbShown = true;
+  function tkOrbShownApply(on) {
+    on = !!on;
+    if (tkOrbShown === on) return;
+    tkOrbShown = on;
+    document.body.classList.toggle("tk-orb-off", !on);
+  }
   function tkOrbHome() {
     var raw = tkLs(TK_ORB_KEY, ""), d = null;
     try { d = raw ? JSON.parse(raw) : null; } catch (e) { d = null; }
@@ -7040,9 +8139,19 @@
     tkOrbPos = tkClampOrb({ x: x === null ? window.innerWidth - 18 - TK_ORB_SIZE : x,
                             y: y === null ? window.innerHeight - 84 - TK_ORB_SIZE : y });
     tkOrbPaint();
+    tkOrbShownApply(!(d && d.h === 1));
   }
   /* v2.11 B5：落库即视为「用户自定」，此后视口变化只夹回、不再回默认位 */
-  function tkOrbSave() { tkOrbUserSet = true; tkLsSet(TK_ORB_KEY, JSON.stringify({ x: tkOrbPos.x, y: tkOrbPos.y })); }
+  function tkOrbWrite() { tkLsSet(TK_ORB_KEY, JSON.stringify({ x: tkOrbPos.x, y: tkOrbPos.y, h: tkOrbShown ? 0 : 1 })); }
+  function tkOrbSave() { tkOrbUserSet = true; tkOrbWrite(); }
+  /* 显隐开关只有一个出口：改态 + 落库 + 一句话告诉人下一步怎么办 */
+  function tkOrbToggle() {
+    tkOrbShownApply(!tkOrbShown);
+    tkOrbWrite();
+    toast(tkOrbShown ? "已显示悬浮球（K 键可再收起）"
+      : "已隐藏悬浮球：按 K 唤回，或点沉浸顶栏的工具包钮",
+      tkOrbShown ? "eye" : "eye-off");
+  }
 
   function tkSizeLoad() { var s = tkLs(TK_WHEEL_KEY, "m"); if (s === "s" || s === "m" || s === "l") tk.size = s; }
   function tkSizeSet(s) { tk.size = s; tkLsSet(TK_WHEEL_KEY, s); }
@@ -7056,7 +8165,12 @@
   }
 
   /* ---------- 8.3 几何：环带与扇区（角度吸附，非距离） ---------- */
-  var TK_B = { hub: 0.34, l1i: 0.34, l1o: 0.68, l1m: 0.51, l2i: 0.74, l2o: 1.0, l2m: 0.87 };
+  /* 环带（v1.4 顶格修复 R3）：一级标签盒 27×38，旧 l1o=.68 / l1m=.51 时四角最远 89.6
+     而所属扇区外弧只有 88.4 —— 「学习」「通用」静止态就已探出轮盘 1.2px。
+     外扩到 .72 并把质心推到 .53，内外两侧各留 ≈1.4px；hub 一侧一字不动
+     （--tk-hub=R*0.66 是 v2.18 专门为「中心提示两行装得下」放大的，verify-v218-wheel.js 还在逐条量它）。
+     二级同向外移，两环之间 0.06R 的间隙保持原样。 */
+  var TK_B = { hub: 0.34, l1i: 0.34, l1o: 0.72, l1m: 0.53, l2i: 0.78, l2o: 1.0, l2m: 0.89 };
   function tkPt(r, deg) {
     var t = (deg - 90) * Math.PI / 180;
     return [Math.round(r * Math.cos(t) * 100) / 100, Math.round(r * Math.sin(t) * 100) / 100];
@@ -7072,8 +8186,13 @@
   }
   function tkLab(R, r, i, n, side, inner) {
     var step = 360 / n, p = tkPt(r, i * step + step / 2);
+    /* 只下发极坐标分量，不下发 left/top：位置由 CSS 的 transform 按 --tk-k 算出来。
+       扇区 .tk-g 是 SVG <g>，transform-box:view-box → scale(1.06) 绕**轮盘圆心**；
+       标签是 HTML div，默认 origin 是**自己中心** → 原来写死 left/top + scale 时扇区外推、
+       标签原地不动（中档实测悬停错开 7.34~16.23px，即用户说的「轮盘动而文字不动」）。
+       把同一个 k 同时乘半径与缩放标签，二者就是同一次均匀缩放，错开归零。 */
     return '<div class="tk-lab" data-side="' + side + '" data-i="' + i +
-      '" style="left:calc(50% + ' + p[0] + 'px);top:calc(50% + ' + p[1] + 'px)">' + inner + "</div>";
+      '" style="--tk-x:' + p[0] + ';--tk-y:' + p[1] + '">' + inner + "</div>";
   }
 
   /* ---------- 8.4 渲染 ---------- */
@@ -7116,12 +8235,19 @@
     tkRoot.innerHTML =
       '<div class="tk-wheel" id="tkWheel" style="--tk-d:' + D + "px;--tk-hub:" + Math.round(R * 0.66) +
         "px;--tk-fs:" + Math.round(13 * k) + "px;--tk-hf:" + Math.max(9, Math.round(10 * k)) +
-        "px;left:" + tk.cx + "px;top:" + tk.cy + 'px">' +
+        /* 标签列的缝距也必须跟着盘缩：环带厚 = 0.38R（小档只有 38px），而缝距与行高原先是
+           固定值 —— 图标与字号缩了、缝没缩，小档标签四角就正好顶住内外弧（实测余量 −0.05px）。 */
+        "px;--tk-gap:" + Math.max(2, Math.round(3 * k)) + "px;left:" + tk.cx + "px;top:" + tk.cy + 'px">' +
         '<svg class="tk-svg" viewBox="-' + R + " -" + R + " " + D + " " + D + '">' + svg + "</svg>" +
         labs +
         '<button class="tk-hub" id="tkHub" type="button" aria-label="中心">' + tkHubHTML() + "</button>" +
         '<button class="tk-gear" id="tkGear" type="button" title="轮盘大小（小 / 中 / 大）" aria-label="轮盘大小">' +
           icon("settings", Math.round(15 * k)) + "</button>" +
+        /* 球的显隐就地能关：用户原话是「无法选择是否隐藏」—— 藏球这个动作最自然的发生地
+           就是刚用完球的那一刻。它写在轮盘里而不是浮条里，是因为浮条上已经挤了九枚钮。 */
+        '<button class="tk-gear tk-hide" id="tkHide" type="button" title="' + (tkOrbShown ? "隐藏悬浮球（顶栏工具包钮 · K 键）" : "显示悬浮球（K 键）") +
+          '" aria-label="' + (tkOrbShown ? "隐藏悬浮球" : "显示悬浮球") + '">' +
+          icon(tkOrbShown ? "eye-off" : "eye", Math.round(15 * k)) + "</button>" +
         '<div class="tk-sizes" id="tkSizes"' + (tk.sizeOpen ? "" : " hidden") + ">" +
           ["s", "m", "l"].map(function (s) {
             return '<button class="tk-chip' + (tk.size === s ? " on" : "") + '" type="button" data-tk-size="' + s + '">' +
@@ -7167,7 +8293,10 @@
     if (d < R * TK_B.hub) return { kind: "hub" };                  /* 中心圆钮 */
     var ang = (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;   /* 0 = 正上，顺时针 */
     var subs = tkSubItems();
-    if (subs && d >= R * 0.71) {                                   /* 外环：二级工具 */
+    /* 外环命中起点必须跟着画出来的环带走。原来是写死的 0.71，与 TK_B.l2i（.74，现 .78）
+       本就不是一把尺；换环带以后会差出 0.07R —— 点在两环之间的空白上却命中二级工具。
+       取两环中点：那段间隙本来就不属于任何一环，归给内侧（一级）更符合吸附手感。 */
+    if (subs && d >= R * (TK_B.l1o + TK_B.l2i) / 2) {              /* 外环：二级工具 */
       var n = subs.length;
       return { kind: "l2", idx: Math.min(n - 1, Math.floor(ang / (360 / n))) };
     }
@@ -7181,10 +8310,12 @@
   function tkOpen(cx, cy) {
     if (!tkRoot) return;
     tk.open = true; tk.level = 1; tk.modeKey = "all"; tk.sub = null; tk.hover = null; tk.sizeOpen = false;
+    tk.anchor = { x: cx, y: cy };
     tkCenter(cx, cy);
     tkRender();
     tkRoot.hidden = false;
     document.body.classList.add("tk-open");
+    var kit = qs("#immKit"); if (kit) kit.setAttribute("aria-expanded", "true");
   }
   function tkClose() {
     if (!tkRoot) return;
@@ -7192,6 +8323,7 @@
     tkRoot.hidden = true;
     tkRoot.innerHTML = "";
     document.body.classList.remove("tk-open");
+    var kit = qs("#immKit"); if (kit) kit.setAttribute("aria-expanded", "false");
   }
   function tkGoMode(key) {
     if (tk.level === 2 && tk.modeKey === key && !tk.sub) { tkBack(); return; }
@@ -7309,7 +8441,7 @@
       else tkSetHover(null, -1);
     });
     tkRoot.addEventListener("click", function (e) {
-      if (e.target.closest("#tkGear, #tkSizes")) return;      /* 齿轮与大小签自管 */
+      if (e.target.closest("#tkGear, #tkSizes, #tkHide")) return;   /* 齿轮、大小签、显隐签各自管自己的那一下 */
       /* 轮盘是临时浮层：点它的这一下不再穿透到页面的「点外收起」一类监听
          （否则刚由轮盘触发的翻译浮层会被这一下自己关掉） */
       e.stopPropagation();
@@ -7329,12 +8461,17 @@
         if (box) box.hidden = !tk.sizeOpen;
         return;
       }
+      var hb = e.target.closest("#tkHide");
+      if (hb) { e.stopPropagation(); tkOrbToggle(); tkRender(); return; }
       var c = e.target.closest("[data-tk-size]");
       if (c) {
         e.stopPropagation();
         tkSizeSet(c.dataset.tkSize);
         tk.sizeOpen = false;
-        tkCenter(tkOrbPos.x + TK_ORB_SIZE / 2, tkOrbPos.y + TK_ORB_SIZE / 2);
+        /* 换档后重新定位，用的必须是「这次开轮盘的地方」而不是球的落点：
+           球被藏起来时轮盘是从顶栏 #immKit 开出来的，跟着球心跑会当场跳到看不见的位置。 */
+        var an = tk.anchor || { x: tkOrbPos.x + TK_ORB_SIZE / 2, y: tkOrbPos.y + TK_ORB_SIZE / 2 };
+        tkCenter(an.x, an.y);
         tkRender();
       }
     });
@@ -7366,6 +8503,26 @@
     }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
   }
 
+  /* ---------- 8.9b 悬浮球的第二条入口与显隐开关（v1.4 顶格修复 R3）----------
+     用户原话：「它无法选择是否隐藏 是否关闭 全屏阅读时始终存在不能主动隐藏」。
+     藏球之后必须还有路能开轮盘，否则「允许隐藏」等于「关掉工具包」—— 所以：
+       ① 沉浸顶栏 #immKit 直接从钮位开轮盘，不经过球；
+       ② K 键切球的显隐，切完一句话写明下一步能干什么；
+       ③ 轮盘里那颗显隐签（#tkHide）就地收起，用完即关不必先按 K。 */
+  var immKit = qs("#immKit");
+  if (immKit) {
+    immKit.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (tk.open) { tkClose(); return; }
+      var r = immKit.getBoundingClientRect();
+      tkOpen(r.left + r.width / 2, r.bottom + 8);   /* 圆心由 tkCenter 夹回视口，盘体不会顶出上缘 */
+    });
+  }
+  /* 键盘可达：球藏起来之后，Tab 到不了它，K 就是唯一的唤回路径 —— 所以这条快捷键不是装饰 */
+  if (window.InkKeys) {
+    InkKeys.on("k", function () { tkOrbToggle(); }, { title: "显示 / 隐藏悬浮球", group: "阅读" });
+  }
+
   /* ---------- 8.10 AI 阅读助手（#aiReader · v2.23 W1e）----------
      取代原「AI 速问」。速问的病不在「问」，在问完就断：一句答案留在浮窗里 ——
      引用是死的（点不回原文）、答案落不了地（变不成笔记 / 闪卡 / 任务）、
@@ -7381,7 +8538,15 @@
   var arPreset = qs("#arPreset"), arCft = qs("#arCft"), arUndoBtn = qs("#arUndo");
   var arSendBtn = qs("#arSend"), arStopBtn = qs("#arStop");
   var arToNote = qs("#arToNote"), arToCard = qs("#arToCard"), arToTask = qs("#arToTask");
+  var arSys = qs("#arSys"), arPlan = qs("#arPlan"), arPlanT = qs("#arPlanT");
+  var arPlanList = qs("#arPlanList"), arBudget = qs("#arBudget");
   var arBusy = false, arCtl = null, arSeq = 0, arRefs = [], arLast = null, arPend = null, arNoted = false;
+  /* arSink：这一问的字正往哪一行上画。循环里模型会「先读一轮再答」，每轮各起一行 ——
+     全续写同一行就成了车轱辘话，读者分不清哪句是刚才、哪句是看完之后改的口。 */
+  var arSink = null;
+  /* arRun：这一问跑出来的账 —— 轨迹、轮次、调用数、落了几条、附了多少字原文。
+     「想了什么」那一行与答完的脚注都读它。散成一堆闭包变量记，跑完就对不上数。 */
+  var arRun = null;
 
   var arWin = window.InkWin && ar && InkWin.create(ar, {
     id: "aireader", host: "viewport", claim: "#reader",
@@ -7532,45 +8697,132 @@
 
   /* 为什么不用 Brain.ask：它把 messages 组装包在自己手里，没有往 system 塞
      「带编号的原文 + 引用规则」这个口子。这里要的正是那个口子，所以自己拼、自己发，
-     只把离线那半条路（Brain.offline）借回来 —— 兜底实现不留两份。 */
-  async function arAsk(q, onPiece) {
+     只把离线那半条路（Brain.offline）借回来 —— 兜底实现不留两份。
+     v1.4-S2 起「自己发」的那一半交给 InkLoop：这里只负责把材料一次算清。 */
+  function arPrep(q) {
     var sel = arSel().slice(0, 600);
     var pack = null;
     try { if (window.Brain && Brain.buildContextPack) pack = Brain.buildContextPack({ docId: docId, bi: arBi(), query: q, budget: 5200 }); } catch (e) {}
     arRefs = ((pack && pack.related) || []).map(function (r) {
       return { bi: r.bi, label: (r.chapter || "") + " · 第 " + (r.page || "?") + " 页" };
     });
-    if (!(window.API && API.hasModel && API.hasModel())) {
-      var o1 = await Brain.offline(q, { docId: docId });
-      return { reply: o1.reply, mode: "offline", miss: o1.miss };
-    }
     var pre = "";
     try { if (window.Brain && Brain.preamble) pre = Brain.preamble("chat") || ""; } catch (e) {}
     /* material 就是这一次真发给模型的全部正文：它的长度即「模型读了多少字」，
        答完之后原样报给读者（v1.3 D4）。落点按发问时站着的那一章记，别在收尾时现读 ——
-       流式期间读者可能已经翻了页，那时候再量就答错了来路。 */
+       循环期间读者可能已经翻了页，那时候再量就答错了来路。 */
     var material = arMaterial(pack, sel);
-    var ctxFrom = arBi() >= 0 ? chapterOf(arBi()) : "";
     var sysTxt = API.promptSys("assistant", {
       cite: arRefs.length ? "引到某段时在该句末尾标它的编号，例如「[2]」；只给结论也要标出处。" : "",
       material: material, preamble: pre
     });
-    var prm = API.promptParams("assistant");
-    arCtl = window.AbortController ? new AbortController() : null;
-    var out = "";
-    try {
-      await API.llmMsgs([{ role: "system", content: sysTxt }, { role: "user", content: q }], Object.assign({
-        cfg: prm.cfg, signal: arCtl && arCtl.signal,
-        onDelta: function (p, all) { out = all != null ? all : out + p; onPiece(out); }
-      }, prm.send));
-      return { reply: out, mode: "online", ctxChars: material.length, ctxFrom: ctxFrom };
-    } catch (e) {
-      /* 停止 ≠ 失败：半截话照原样交回去，不去兜离线库（同 brain.js ask 的判据） */
-      if (e && (e.aborted || (arCtl && arCtl.signal && arCtl.signal.aborted))) return { reply: out, mode: "stopped" };
-      var o2 = await Brain.offline(q, { docId: docId });
-      return { reply: o2.reply, mode: "offline", note: "模型请求失败：" + API.netErrPhrase(e) + "，已改用本机库作答。" };
-    } finally { arCtl = null; }
+    return { material: material, ctxFrom: arBi() >= 0 ? chapterOf(arBi()) : "",
+      sysTxt: sysTxt, prm: API.promptParams("assistant") };
   }
+
+  /* 没接模型时的那条退路：常识问答仍能答，但界面上必须写清答它的是本机库不是模型 */
+  async function arOffline(q) {
+    var o = await Brain.offline(q, { docId: docId });
+    return { reply: o.reply, mode: "offline", miss: o.miss, ctxChars: 0 };
+  }
+
+  /* 流式重画进「本轮那一行」。循环里模型会先读一轮再答，每轮各起一行 ——
+     全续写同一行就成了车轱辘话，读者分不清哪句是刚才、哪句是看完之后改的口。
+     判「这是新一轮的第一片」用的是 roundText 从头重来（本轮累计 == 这一片），
+     不数轮号：界面无须知道循环内部跑到第几轮。 */
+  function arStreamInto(delta, roundText) {
+    if (!arSink || !String(delta || "").trim()) return;
+    if (!arSink.first && String(delta) === String(roundText)) {
+      var old = arSink.el;
+      if (old._raf) { cancelAnimationFrame(old._raf); old._raf = null; }
+      old.innerHTML = arRich(old._t || "", arRefs);
+      arSink.el = arRow("bot", "");
+    }
+    arSink.first = false;
+    arTick(arSink.el, roundText);
+  }
+
+  /* 宿主桥：循环把每一步摊给界面看的这一组回调。字进流、轨迹进台账、
+     预算行跟着轮次走、落了地才放行钮复位 —— 四件事各归一处，别在一处包办。
+     my !== arSeq 的那半截要丢掉：读者中途又发了一问，旧循环吐的字不该再往新场面上画。 */
+  function arHost(my) {
+    return {
+      signal: arCtl && arCtl.signal,
+      onText: function (d, rt) { if (my === arSeq) arStreamInto(d, rt); },
+      onPlan: function (p) { if (arRun) { arRun.plan = p; arPlanPaint(); } },
+      onEvent: function (e) { if (arRun) { arRun.rounds = e.rounds; arRun.calls = e.calls; } arPlanPaint(); },
+      onTool: function (d) {
+        if (arRun && d && d.landed) arRun.landed++;
+        /* 点头落地的每一条都要在流里留一张回执：确认卡一收，读者只剩这一行能看出
+           「刚才真写了什么」—— 只报「办完了」是把三件事糊成一件。 */
+        if (d && d.landed && window.InkAgent) {
+          var t = InkAgent.trace(), last = t[t.length - 1];
+          if (last && last.text) arAct(last.text);
+        }
+        arPaintLand();
+      }
+    };
+  }
+
+  /* 接了模型就交 InkLoop 跑自主回合：模型自己决定读哪一段、调哪枚工具，看完再答。
+     v1.3 之前这里是单发一枪 —— 那一趟里模型看不到自己刚读到的东西，
+     「先查再改」这类复合任务根本办不成：缺的不是工具，是回合。 */
+  async function arLoopAsk(q, holder, my) {
+    var pp = arPrep(q);
+    arCtl = window.AbortController ? new AbortController() : null;
+    arSink = { el: holder, first: true };
+    arRun = { plan: [], rounds: 0, calls: 0, landed: 0, via: "native",
+      material: pp.material, ctxFrom: pp.ctxFrom };
+    arPlanReset();
+    var r;
+    try {
+      r = await InkLoop.run({
+        goal: q, stream: true,
+        messages: [{ role: "system", content: pp.sysTxt }, { role: "user", content: q }],
+        host: arHost(my), prm: pp.prm
+      });
+    } catch (e) {
+      r = { status: "error", why: "net", answer: "", partial: "", plan: [], await: [],
+        rounds: 0, calls: 0, landed: 0, note: API.netErrPhrase(e) };
+    }
+    arCtl = null;
+    return arLoopTail(r, q);
+  }
+
+  /* 循环的出口摊成界面认识的那几种收尾。每种各说各的话：
+     答完了 / 读者按停了 / 压根没起跑 / 模型出错本机库接手 —— 不许混成一句「失败了」。 */
+  async function arLoopTail(r, q) {
+    var m = arRun || { material: "", ctxFrom: "" };
+    var base = { awaitList: (r && r.await) || [], via: r && r.via, rounds: r && r.rounds || 0,
+      calls: r && r.calls || 0, landed: r && r.landed || 0, plan: (r && r.plan) || [], note: "" };
+    /* 收尾时以循环自己交出的那份账为准：界面上的轮次/调用/落地数只能取自快照正本，
+       不能取「界面自己听到几次回调算出来的数」—— 回调丢一次，屏上的数就少了。 */
+    if (arRun) { arRun.via = base.via; arRun.rounds = base.rounds; arRun.calls = base.calls;
+      arRun.landed = base.landed; arRun.plan = base.plan; }
+    var st = (r && r.status) || "error";
+    if (st === "answer") return Object.assign(base, { reply: r.answer || "", mode: "online",
+      ctxChars: (m.material || "").length, ctxFrom: m.ctxFrom });
+    if (st === "stopped") return Object.assign(base, { reply: r.partial || "", mode: "stopped",
+      note: r.note || "" });
+    if (st === "budget") return Object.assign(base, { reply: r.answer || "", mode: "budget",
+      note: r.note || "回合用到顶了。", ctxChars: (m.material || "").length, ctxFrom: m.ctxFrom });
+    if (r.why === "no-model" || r.why === "offline") {
+      return Object.assign(base, { reply: "", mode: "blocked", why: r.why, note: r.note || "" });
+    }
+    if (r.why === "correct-stalled") {
+      return Object.assign(base, { reply: "", mode: "error", why: "correct-stalled", note: r.note || "" });
+    }
+    /* 点头续跑那半截（q 为空）出错时不兜本机库：本机库答的是「问书」那句话，
+       这里根本没有那句话 —— 兜出来的是一段答非所问的话，还被记成上一条回答。 */
+    if (!q) return Object.assign(base, { reply: "", mode: "error", why: r.why || "net", note: r.note || "" });
+    /* 模型那一端真出事了（限流 / 5xx / 超时）。半截话不拿去作答：改由本机库接手，
+       但界面上必须同时留下「模型请求失败」这一行 —— 只把兜底答案顶上，读者看到的
+       就成了「它答得挺好」，那正是 v1.3 D4 判掉的撒谎形状。 */
+    var o = await Brain.offline(q, { docId: docId });
+    return Object.assign(base, { reply: o.reply, mode: "offline", miss: o.miss, ctxChars: 0,
+      note: "模型请求失败：" + (r.note || (r.why || "error")) + "，已改用本机库作答。" });
+  }
+
 
   async function arSend(text) {
     var q = String(text || "").trim();
@@ -7585,16 +8837,47 @@
     if (arInput) arInput.value = "";
     var holder = arRow("bot", '<span class="ar-busy">' + icon("loader-circle", 13) + "助手正在翻这本书…</span>");
     var r;
-    try { r = await arAsk(q, function (t) { arTick(holder, t); }); }
-    catch (e) { r = { mode: "error", reply: "", why: API.netErrPhrase(e) }; }
+    try {
+      /* 没配模型时循环根本不起跑（红线二）：这一问直接交给本机库，界面上写清是谁答的 */
+      r = (window.InkLoop && window.API && API.hasModel && API.hasModel())
+        ? await arLoopAsk(q, holder, my)
+        : await arOffline(q);
+    }
+    catch (e) { r = { mode: "error", reply: "", why: API.netErrPhrase(e), awaitList: [] }; }
     if (my !== arSeq) return;                 /* 期间又发了新一轮：这轮的收尾别去踩新的状态 */
+    arFinish(r, holder, q);
+  }
+
+  /* 一轮收尾：系统条 → 那一行定格 → 轨迹与预算 → 确认队列 → 放行。
+     在线那趟与本机库那趟共用这一个收尾，两处各写一份迟早会漏掉一种 mode。 */
+  function arFinish(r, holder, q) {
     if (holder._raf) { cancelAnimationFrame(holder._raf); holder._raf = null; }
-    if (r.note) arRow("sys", esc(r.note));
+    if (r.note && r.mode !== "blocked") arRow("sys", esc(r.note));
+    arTail(r, holder, q);
+    arPlanPaint(); arSysPaint(r);
+    if (r.awaitList && r.awaitList.length) arShowAwait(r.awaitList);
+    /* 按停的那半截话不记成「上一条回答」：拿它去存笔记，存进去的是没说完的话，
+       而读者以为存的是刚才那篇完整的（v2.23 D2c 判的就是这个差额）。
+       点头续跑那半截（q 为空）也不覆盖 —— 它不是对书的回答，是对这批操作的回执，
+       顶掉 arLast 的话，「变成任务」那条就没了标题、「存为笔记」存的也成了回执。 */
+    if (r.mode !== "stopped" && r.reply && q) arLast = { q: q, a: r.reply };
+    arRelease();
+    holder.scrollIntoView({ block: "nearest" });
+  }
+
+  /* 那一行最终怎么写：标签 + 正文 + 「随问附了多少字原文」的脚注 + 需不需要重试。
+     脚注只在该趟真发了正文时出现 —— 没发就说没发，报个 0 字也是撒谎。 */
+  function arTail(r, holder, q) {
     var tag = r.mode === "offline" ? '<span class="ar-tag">本机库</span>'
       : r.mode === "stopped" ? '<span class="ar-tag">已停止</span>'
-      : r.mode === "error" ? '<span class="ar-tag">出错</span>' : "";
+      : r.mode === "blocked" ? '<span class="ar-tag">' + (r.why === "offline" ? "离线" : "未接模型") + "</span>"
+      : r.mode === "error" ? '<span class="ar-tag">出错</span>'
+      : r.mode === "budget" ? '<span class="ar-tag">先停在这儿</span>' : "";
     var body = r.reply || (r.mode === "error" ? "助手暂时答不上来：" + (r.why || "")
-      : r.mode === "stopped" ? "（按下了停止，这句没答完）" : "（没有给出内容）");
+      : r.mode === "stopped" ? "（按下了停止，这句没答完）"
+      : r.mode === "blocked" ? (r.note || "这一步要模型。")
+      : r.mode === "budget" ? "（这一轮先停在这儿：已经办完的留在书里，没往下办的是下面这些。）"
+      : "（没有给出内容）");
     holder.innerHTML = tag + arRich(body, r.mode === "offline" ? [] : arRefs);
     if (r.mode === "online") {
       var src = document.createElement("p");
@@ -7604,20 +8887,84 @@
         " · 取自《" + String(doc.title || "本文") + "》" + (r.ctxFrom ? " · " + r.ctxFrom : "");
       holder.appendChild(src);
     }
-    if (r.mode === "stopped" || r.mode === "error") {
+    if (r.mode === "blocked" && r.why === "no-model") {
+      holder.appendChild(document.createElement("br"));
+      var go = document.createElement("button");
+      go.className = "ar-p"; go.type = "button"; go.textContent = "去主脑页配置模型";
+      go.addEventListener("click", function () { arConfirm("ui.navigate", { to: "ai" }); });
+      holder.appendChild(go);
+    }
+    if (q && (r.mode === "stopped" || r.mode === "error" || r.mode === "budget" || r.mode === "blocked")) {
       var retry = document.createElement("button");
       retry.className = "ar-p"; retry.type = "button"; retry.textContent = "重试这一问";
       retry.addEventListener("click", function () { arSend(q); });
       holder.appendChild(document.createElement("br"));
       holder.appendChild(retry);
     }
-    if (r.mode !== "stopped" && r.reply) arLast = { q: q, a: r.reply };
+  }
+
+  function arRelease() {
+    arSink = null;
     arBusy = false;
     if (arStopBtn) arStopBtn.hidden = true;
     if (arSendBtn) arSendBtn.disabled = false;
     arPaintCtx();
-    holder.scrollIntoView({ block: "nearest" });
   }
+
+  /* ---------------- 轨迹台账与系统说明条（v1.4-S2）----------------
+     「想了什么」默认折着：它不该抢正文的面，但一键就得展得开 —— 读者有权知道
+     这一问跑了几轮、调了哪几枚工具、哪一条没办成。那一行本身同时是预算账。 */
+  var AR_LEDGER = { "(answer)": 1, "(transport)": 1 };  /* 循环自己的两笔流水不是工具，不进台账行 */
+
+  function arPlanReset() {
+    if (arPlanList) { arPlanList.innerHTML = ""; arPlanList.hidden = true; }
+    if (arPlanT) arPlanT.setAttribute("aria-expanded", "false");
+    if (arPlan) arPlan.hidden = true;
+    if (arBudget) arBudget.textContent = "";
+    if (arSys) { arSys.innerHTML = ""; arSys.hidden = true; }
+  }
+  function arPlanPaint() {
+    if (!arPlan || !arPlanList) return;
+    var rows = ((arRun && arRun.plan) || []).filter(function (e) { return e && e.tool && !AR_LEDGER[e.tool]; });
+    if (!rows.length) { arPlan.hidden = true; return; }
+    /* 面板必须显形，那行预算才量得到：#arBudget 长在 #arPlan 里面，藏着读不出字 */
+    arPlan.hidden = false;
+    var B = (window.InkLoop && InkLoop.budget) || { rounds: 6, calls: 24 };
+    if (arBudget) arBudget.textContent = "用了 " + ((arRun && arRun.rounds) || 0) + "/" + B.rounds + " 轮 · " +
+      ((arRun && arRun.calls) || 0) + "/" + B.calls + " 次调用" +
+      ((arRun && arRun.landed) ? " · 落地 " + arRun.landed + " 条" : "");
+    arPlanList.innerHTML = rows.map(function (e) {
+      var t = String(e.text || "");
+      if (t.indexOf(e.tool) === 0) t = t.slice(e.tool.length).replace(/^[\s:：]+/, "");
+      return '<div class="ar-step" role="listitem" data-ok="' + (e.ok ? 1 : 0) + '"' +
+        (e.risk ? ' data-risk="' + esc(e.risk) + '"' : "") + "><b>" + esc(e.tool) + "</b><span>" +
+        esc(t || (e.ok ? "办了" : "没办成")) + "</span><i></i></div>";
+    }).join("");
+  }
+  function arPlanToggle() {
+    if (!arPlanList || !arPlanT) return;
+    var open = arPlanList.hidden;
+    arPlanList.hidden = !open;
+    arPlanT.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  /* 系统条说的是「这一趟怎么跑的」，不是模型答的话：通路降级、预算触顶、被叫停。
+     它绝不能只藏在折叠的台账里 —— 读者若看不出这次走的不是原生工具调用，
+     界面就等于替他做了个不实的假设。 */
+  function arSysPaint(r) {
+    if (!arSys) return;
+    var m = [];
+    if (r.via === "json") m.push(["warn", "这一家不认原生工具调用，已改走结构化 JSON：还是它自己挑工具、自己决定先读哪一段，只是把要办的事写成 JSON 交回来。"]);
+    if (r.mode === "budget") m.push(["warn", "预算用到顶了（" + (r.rounds || 0) + " 轮 / " + (r.calls || 0) + " 次调用）。停在半路的没往下办，已经落地的没有回滚。"]);
+    if (r.mode === "stopped") m.push(["info", "你叫停了。已经落地的动作留在书里，要收回就在下面逐条撤销。"]);
+    if (r.mode === "error" && r.why === "correct-stalled") m.push(["warn", "同一枚工具连改两次参数还是不对，助手先停下来 —— 继续问只会白烧额度。"]);
+    arSys.innerHTML = "";
+    arSys.hidden = !m.length;
+    if (!m.length) return;
+    arSys.dataset.kind = m.some(function (x) { return x[0] === "warn"; }) ? "warn" : "info";
+    arSys.innerHTML = m.map(function (x) { return esc(x[1]); }).join("；");
+  }
+
 
   /* 预置九问：读懂两问、查清两问、落地两问，再加三枚「直接动手」的 ——
      书架、读本段、扫目录。后三枚不由模型生成参数（点它自己就该有结果），
@@ -7771,18 +9118,88 @@
       '<button class="btn btn-ghost btn-sm" id="arCfNo" type="button">先不</button>' +
       '<span class="spacer"></span><span class="card-note">落错了可以在右边撤销</span></div>';
     arCft.hidden = false;
-    qs("#arCfYes", arCft).addEventListener("click", async function () {
+    arCftWire();
+  }
+
+  /* 循环一次可能交出好几条写操作。摊成一张卡、一次点头全落 —— 比一叠弹层少点 N 次；
+     但每一条都单独列出来，读者看得见每一条，点下去的头才算数。
+     两条路（单条 / 批量）共用同一张卡与同样两颗钮，只是点下去办的不是同一件事。 */
+  function arShowAwait(list) {
+    arPend = { loop: true, n: list.length };
+    var li = [];
+    list.forEach(function (a) {
+      var pv = a.preview || {};
+      li.push("<li><b class=\"ar-cf-t\">" + esc(a.tool) + " —— " + esc(pv.title || "确认这一条") + "</b></li>");
+      (pv.lines || []).forEach(function (s) { li.push("<li class=\"ar-cf-sub\">" + esc(s) + "</li>"); });
+    });
+    arCft.innerHTML = "<b>这一轮要落地 " + list.length + " 条" + (list.length > 1 ? "（一次点头全落）" : "") + "：</b>" +
+      "<ul>" + li.join("") + "</ul>" +
+      '<div class="ar-cf-row"><button class="btn btn-accent btn-sm" id="arCfYes" type="button">确认落地</button>' +
+      '<button class="btn btn-ghost btn-sm" id="arCfNo" type="button">先不</button>' +
+      '<span class="spacer"></span><span class="card-note">落错了可以在右边撤销</span></div>';
+    arCft.hidden = false;
+    arCftWire();
+  }
+
+  function arCftWire() {
+    qs("#arCfYes", arCft).addEventListener("click", function () {
       var job = arPend; arPend = null; arCft.hidden = true;
       if (!job) return;
-      var r = await InkAgent.invoke(job.tool, job.args, { confirm: true });
-      arReport(r, job.tool);
+      if (job.loop) arResume({}); else arLand(job);
     });
     qs("#arCfNo", arCft).addEventListener("click", function () {
-      arPend = null; arCft.hidden = true;
+      var job = arPend; arPend = null; arCft.hidden = true;
+      if (!job) return;
+      if (job.loop) { arResume({ refuse: true }); return; }
       arAct("先不落地，什么都没写");
+      arPaintLand();
     });
     qs("#arCfYes", arCft).focus();
   }
+  async function arLand(job) {
+    var r = await InkAgent.invoke(job.tool, job.args, { confirm: true });
+    arReport(r, job.tool);
+  }
+
+  /* 读者点完头，把刚才那一轮接着跑下去。prev 只从 InkLoop.last() 取正本 ——
+     界面自己留一份副本，续跑用的就和用户真正点下去的那一版不是同一份了。
+     不 bump arSeq：这是同一问的后半截；期间读者又发新问时，新问自己会顶掉这里。 */
+  async function arResume(opt) {
+    var prev = window.InkLoop && InkLoop.last();
+    if (!prev || !prev.ctx) { arRow("err", "这一步接不上刚才那轮了，请重新问一次。"); arPaintLand(); return; }
+    if (arBusy) return;
+    arBusy = true;
+    if (arStopBtn) arStopBtn.hidden = false;
+    if (arSendBtn) arSendBtn.disabled = true;
+    var my = arSeq;
+    arCtl = window.AbortController ? new AbortController() : null;
+    var holder = arRow("bot", '<span class="ar-busy">' + icon("loader-circle", 13) +
+      "正在按你点头的这几条办…</span>");
+    arSink = { el: holder, first: true };
+    if (!arRun) arRun = { plan: prev.plan || [], rounds: prev.rounds || 0, calls: prev.calls || 0,
+      landed: 0, material: "", ctxFrom: "", via: prev.via };
+    else { arRun.material = ""; arRun.ctxFrom = ""; }
+    var r;
+    try {
+      r = await InkLoop.resume(prev, Object.assign({ signal: arCtl && arCtl.signal }, opt || {}));
+    } catch (e) {
+      r = { status: "error", why: "net", answer: "", partial: "", plan: prev.plan || [], await: [],
+        rounds: prev.rounds || 0, calls: prev.calls || 0, landed: 0, note: API.netErrPhrase(e) };
+    }
+    arCtl = null;
+    if (my !== arSeq) return;
+    var out = await arLoopTail(r, "");
+    /* 续跑这一趟没有重发原文：脚注上那句「本次随问附上 N 字」不该再报一遍，
+       报了就是把上一问的字数记在这次点头的账上。 */
+    out.mode = "resume";
+    out.ctxChars = 0;
+    if (!out.reply) out.reply = (opt && opt.refuse)
+      ? "好，这一条不落。下面这些已经办完的没有动。"
+      : "按你点头的这几条办完了。";
+    arSink = null;
+    arFinish(out, holder, "");
+  }
+
   var AR_WHY = {
     "unknown-tool": "这条指令不在白名单里", "missing-param": "缺了必要参数", "bad-type": "参数类型不对",
     "no-host": "这一页没有接入该能力", "not-found": "没找到那个位置", "no-doc": "没有当前书籍",
@@ -7792,6 +9209,13 @@
     "frozen-or-empty": "这份目录已被你固化过，或建议已过期", "busy": "上一条还在跑",
     "no-model": "没有配模型：AI 页填好地址与密钥再来", "manual": "目录已固化，模型不能覆盖它",
     "no-cands": "正文里没有一行像标题，交给模型也扫不出东西",
+    /* v1.4 新十四枚带回来的：工具面扩了面，读者看得见的 explanation 也得跟着扩 ——
+       一条挡下的指令只写「failed」，读者就永远不知道是自己少给了参数还是它根本办不到。 */
+    "no-id": "没认出入库的那一条：得先有一条存在的记录才改得动、删得掉",
+    "no-target": "没找到那一条要改的对象", "empty-q": "这句问话是空的，没东西可查",
+    "missing-pair": "术语要成对：源词与译名都得给", "nothing-to-change": "改完之后和原来一模一样，那就不改了",
+    "bad-progress": "进度得是 0 到 1 之间的一个数", "unknown-page": "没有这一页",
+    "rejected": "读者点了「先不」，这条没落地", "none": "没有可交出来的结果",
     "error": "执行时出了错", "failed": "没有成功"
   };
   function arWhy(w) { return AR_WHY[w] || String(w || "failed"); }
@@ -7826,6 +9250,9 @@
   function arOpen() {
     if (!ar) return;
     ar.hidden = false;
+    /* 上一问的台账不留到下一问：读者重开这扇窗时看到的必须是「现在这一趟」的账，
+       留着旧的预算行会把「这次跑了几轮」答成上次那个数。 */
+    arRun = null; arSink = null; arPlanReset();
     qs("#arK").innerHTML = icon("brain", 15) + "AI 助手";
     qs("#arX").innerHTML = icon("x", 14);
     qs("#arDoc").textContent = "《" + (doc.title || "本文") + "》";
@@ -7851,7 +9278,7 @@
     ar.hidden = true;
     if (arWin) arWin.apply(false);
     if (arCtl) { try { arCtl.abort(); } catch (e) {} arCtl = null; }
-    arSeq++; arBusy = false;
+    arSeq++; arBusy = false; arSink = null; arRun = null; arPlanReset();
     if (arStopBtn) arStopBtn.hidden = true;
     if (arSendBtn) arSendBtn.disabled = false;
   }
@@ -7859,6 +9286,7 @@
 
   if (ar) {
     qs("#arX").addEventListener("click", arClose);
+    if (arPlanT) arPlanT.addEventListener("click", arPlanToggle);
     qs("#arForm").addEventListener("submit", function (e) { e.preventDefault(); arSend(arInput && arInput.value); });
     arStopBtn.addEventListener("click", function () { if (arCtl) { try { arCtl.abort(); } catch (e) {} } });
     /* 引用按钮是 arRich 现生成的，监听挂在流容器上按 data-ref 分发 —— 免得每片 delta 重绑一遍 */

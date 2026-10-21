@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "1.3.0";
+window.InkVersion = "1.4.0";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -101,6 +101,12 @@ window.ICONS = {
   "scan-text": '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h8"/><path d="M7 12h10"/><path d="M7 16h6"/>',
   "loader-circle": '<path d="M19 12a7 7 0 1 1-2.05-4.95"/>',
   "grip-vertical": '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
+  /* v1.4 顶格修复 R3 · 工具轮盘（转轮排字盘）：外圈一道环 + **五根**辐条 + 一粒轴心。
+     辐条数 = 轮盘一级扇区数（TK_MODE.length=5），球与顶栏入口共用这一枚图形 ——
+     「按下去转出几格」由图本身说。过去它只住在 reader.html 的手写 <svg> 里（旁路），
+     现在收进主表：旁路那份删除，动画改由 CSS 转整张 svg（环与轴心都是圆心对称，
+     转整张 == 只转辐条），于是「图形有两个住处」这个 K10 要防的病少一处。 */
+  "tool-wheel": '<circle cx="12" cy="12" r="9.5"/><path d="M12 8.4V3.3M15.42 10.89L20.27 9.31M14.12 14.91L17.11 19.04M9.88 14.91L6.89 19.04M8.58 10.89L3.73 9.31"/><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/>',
   "chevron-up": '<path d="m18 15-6-6-6 6"/>',
   "arrow-up": '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
   "arrow-down": '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',

@@ -3,40 +3,80 @@
    听书 v2 · 页面级样式（起点式播放条 / @Voice 式点段起读 / 边听边看）
    只作用于本页，全部走主题 token，不改全局 styles.css。
    ============================================================ */
-/* 播放条：三区布局 —— 走带控制 | 段落预览+进度 | 音色/语速/定时/停止 */
-#ttsBar { align-items: center; gap: var(--space-8); flex-wrap: nowrap; }
-#ttsBar .tts-mid { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-10); }
-/* 窄屏必须折行：全局 .tts-bar 本来就是 wrap（styles.css 那条注释写着「不把进度条挤没」），
-   本页的 nowrap 把它盖掉了 —— 390 实测八个子元的不可收缩宽（44×3 + 音色 + 52×2 + 44 + 7×8 间隙）
-   正好吃掉整行，只有 .tts-mid 允许缩到 0，于是段落预览和进度条整块消失（clientW=0 / scrollW=136），
-   读者正在听第几页完全看不见。热区不能靠缩钮换来，所以把中间区单独放一行、并给它下限。 */
+/* 播放条 v1.4 顶格修复 R2 · 上下两行分区。
+   旧的单行 flex（1280×860 浮窗宽 640 实测）把 554px 全给控件：把手 16 + 走带 34×3 +
+   音色 186 + 语速/定时 52×2 + 收起/停止 34×2 + 间隙，只剩 78px 给 .tts-mid ——
+   「正在念哪一句」那行字被压到看不见，进度条还另占 flex:0 0 76px 的死宽。
+   现在：行一只给正文（预览 + 页码/引擎 + 通栏进度），行二给控件，音色名吃走剩余宽。
+   热区一律不缩：钮仍是 34（胶囊 30），间隙仍是 token 的 8；靠换行腾地方，不靠削钮。 */
+#ttsBar { align-items: center; gap: var(--space-8); flex-wrap: wrap; row-gap: var(--space-6); }
+#ttsBar .tts-mid {
+  order: -1; flex: 1 0 100%; min-width: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: var(--space-10); row-gap: var(--space-6); align-items: center;
+}
+#ttsBar .tts-mid .tts-now  { grid-area: 1 / 1; }
+#ttsBar .tts-mid .tts-frac { grid-area: 1 / 2; }
+#ttsBar .tts-mid .tts-eng  { grid-area: 1 / 3; }
+#ttsBar .bar { grid-area: 2 / 1 / 3 / 4; }
 @media (max-width: 600px) {
-  #ttsBar { flex-wrap: wrap; column-gap: var(--space-6); row-gap: var(--space-8); }
-  #ttsBar .tts-mid { flex: 1 1 168px; min-width: 168px; }
-  /* 行间距收到 6 + 音色名收窄，是为了让 音色/语速/定时/停止 正好落在第二行：
-     三条折行在 844 高的手机上要吃掉 168px，播放器不该比正文还高。 */
+  /* 窄屏三处：① 预览行不再独占整行 —— 390 触屏下钮要 44（下方 coarse 档），
+     预览独占一行会把条子撑成三行 143px，越过 v2.20.1 那条「条高 ≤130」。让预览与
+     走带同排：390 实测行一 = 16+44×3+预览+间隙，预览仍拿 ~190（≥120 的旧账不破），
+     行二 = 音色+语速+定时+收起+停止，两行 106px 收住。
+     ② 音色名宁可省略号也别把行二挤成三行；③ 间距收到 6。 */
+  #ttsBar { column-gap: var(--space-6); }
+  #ttsBar .tts-mid { order: 0; flex: 1 1 128px; min-width: 120px; }
   #ttsBar .tts-voice select { max-width: 120px; }
 }
 #ttsBar .tts-now {
-  flex: 1; min-width: 0; font-size: var(--fs-12_5); color: var(--ink-2); letter-spacing: .02em;
+  min-width: 0; font-size: var(--fs-12_5); color: var(--ink-2); letter-spacing: .02em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-#ttsBar .tts-frac { flex: none; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--ink-3); }
+#ttsBar .tts-frac { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--ink-3); }
 /* 引擎徽标：读者必须看得见「现在是谁在念」——旧版神经合成挂了照样界面走动，
    只是悄悄换成系统机械音，用户完全不知道。降级与静默都用 warn 色标出来。 */
 #ttsBar .tts-eng {
-  flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--fs-10_5); letter-spacing: .04em; color: var(--ink-3);
   border: 1px solid var(--rule); border-radius: var(--radius-999); padding: var(--space-1) var(--space-8);
 }
 #ttsBar .tts-eng.warn { color: var(--amber-ink); border-color: var(--amber); }
-#ttsBar .bar { flex: 0 0 76px; min-width: 0; }
-/* v2.24.1：空进度底槽不显形 —— 播放前它既不可点也不显示状态，只会在界面上留一条谁都看不懂的白条 */
+/* v2.24.1：空进度底槽不显形 —— 播放前它既不可点也不显示状态，只会在界面上留一条谁都看不懂的白条。
+   用 visibility 不用 display：留着这一行，开始朗读时整条不会跳一下高度。 */
 #ttsBar.no-prog .bar { visibility: hidden; }
 #ttsBar .tts-ctl { font-family: var(--font-mono); font-size: var(--fs-11_5); min-width: 52px; }
-/* 播放键：主操作朱砂描边提示「正在听书」 */
-#ttsBar #ttsPlay { border-color: var(--mark); color: var(--mark-ink); border-radius: 50%; width: 34px; padding: 0; }
+/* 播放键：主操作朱砂描边提示「正在听书」。
+   圆钮三条规矩（1280×860 实测，只写 width 会得到 34×32 的蛋形）：
+   ① 宽高成对写；② min-width 归零 —— .tool-btn 的 32px 下限会顶宽那颗 30px 的胶囊钮；
+   ③ 盒居中使用 grid，图标 .ic 的 vertical-align:-3px 只在行内格式上下文里生效，
+      所以必须 display:block 让它退出基线排版，否则字形永远比盒中心低半格。
+   v1.4 顶格修复 R2：这三条不只属于播放键 —— 同一排里 上一段/下一段/收起/停止 四颗
+   实测是 34×32、字形低 1.5px，用户看到的「图标不在正中」是整排的病，不是某一颗。
+   .tts-ctl（语速 / 定时）是 52 宽的文本钮，不吃方盒这条，只把高度对齐到 34。 */
+#ttsBar .tool-btn:not(.tts-ctl) {
+  width: 34px; height: 34px; min-width: 0; padding: 0; display: grid; place-items: center;
+}
+#ttsBar .tool-btn:not(.tts-ctl) .ic { display: block; }
+#ttsBar .tts-ctl { height: 34px; }
+/* 上面那组 34px 方盒是**指针精细**时的尺寸；触屏必须回到全仓的 44 热区。
+   这两条的 ID 特异度压过了 styles.css 的 `@media(pointer:coarse){.tool-btn{...44}}`，
+   所以触屏补丁只能写在这里、且必须在 34px 之后（同特异度靠源码顺序取胜）。
+   390 实测：不补时七枚钮全是 34×34，读者在手机上按得比桌面还小。 */
+@media (pointer: coarse) {
+  #ttsBar .tool-btn:not(.tts-ctl) { width: 44px; height: 44px; }
+  #ttsBar .tts-ctl { height: 44px; }
+}
+#ttsBar #ttsPlay { border-color: var(--mark); color: var(--mark-ink); border-radius: 50%; }
 #ttsBar #ttsPlay.active { background: var(--mark); color: var(--on-mark); }
+/* 音色名吃走行二的剩余宽。全局 .tts-voice select 写死 max-width:148px，而 640 宽的浮窗
+   行二有 ~160px 空着不给谁 —— 于是「晓丹 · 沉稳自然」被切成「晓丹 · 沉…」。
+   放开上限让它长满剩余；不够长时 option 的 title 已带全名＋风格，悬停可见。
+   flex-basis 必须写成**定值**：`1 1 auto` 时换行算法按 max-content（最长那条音色名 ≈272）
+   决定断点，条体一窄到 600 以下，音色整块就被挤成行三、行四；basis 150 让它先按 150 入行，
+   再靠 grow 吃掉剩余（实测 640 宽时仍长到 274），既不裁字也不会自己另起一行。 */
+#ttsBar .tts-voice { flex: 1 1 150px; min-width: 0; }
+#ttsBar .tts-voice select { max-width: none; width: 100%; }
 
 /* ============ v1.3 S3 · 朗读条浮层化（可拖 + 可收起） ============
    #ttsBar 离开文档流交给 InkWin 托管：它写内联 left/top/width，高度归内容（autoH）。
@@ -68,8 +108,10 @@
 }
 .tts-pill #ttsPillPlay {
   flex: none; border-color: var(--mark); color: var(--mark-ink); border-radius: 50%;
-  width: 30px; height: 30px; padding: 0; cursor: pointer;
+  width: 30px; height: 30px; min-width: 0; padding: 0; cursor: pointer;
+  display: grid; place-items: center;
 }
+.tts-pill #ttsPillPlay .ic { display: block; }
 .tts-pill #ttsPillPlay.active { background: var(--mark); color: var(--on-mark); }
 .tts-pill .tp-open {
   flex: none; border: none; background: none; padding: 0 var(--space-8) 0 var(--space-2);
@@ -501,9 +543,9 @@ body[data-page="reader"] .reader-notes .side-body {
 
 /* ---------- ① 悬浮球（#inkOrb）----------
    只在 body.immersive 出现；44px 圆形（触控最小命中区）。
-   图形是「刻度盘」而不是「录音键」：外圈一道浅环 + 四个方位短刻度 + 中心一点朱砂 ——
-   它预览的正是点开后的轮盘（四个方向 = 扇区吸附的方向语义）。
-   位置由 JS 内联下发（left/top），拖动即写 inkread.orb.v1。 */
+   图形 = 主表 ICONS["tool-wheel"]（外环 + 五根辐条 + 轴心），由 IC 表灌 16px 那一枚、
+   这里按 --ic-xl 放大到 28px —— 图形只许有一个住处，过去球与顶栏各手写一份的情况已收编。
+   位置由 JS 内联下发（left/top），拖动即写 inkread.orb.v1；显隐写同一颗键的 h 字段。 */
 #inkOrb {
   position: fixed; z-index: 298; left: 0; top: 0;
   width: 44px; height: 44px; padding: 0; border-radius: 50%;
@@ -517,17 +559,22 @@ body[data-page="reader"] .reader-notes .side-body {
   transition: transform .16s, border-color .16s, color .16s, background .16s, opacity .16s;
 }
 body.immersive #inkOrb { display: flex; }
+/* v1.4 顶格修复 R3：可关。与上一条同特异度，靠源码顺序压过它 —— 藏球只藏球，
+   轮盘入口还剩沉浸顶栏 #immKit 与 K 键两条，所以关掉不会把人锁在工具包外面。 */
+body.tk-orb-off #inkOrb { display: none; }
 body.tk-open #inkOrb { opacity: 0; pointer-events: none; }   /* 轮盘开着时中心由「全部」承担，不重复出现 */
 #inkOrb:hover { border-color: var(--accent); color: var(--accent-ink); }
 #inkOrb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 body.tk-drag #inkOrb { cursor: grabbing; transform: scale(1.06); }
-#inkOrb svg { display: block; }
-/* 悬停时轮盘转过一格（辐条六等分 → 60°）：按下去会转出轮盘 —— 动效说明因果，不是装饰 */
-#inkOrb .tk-orb-tick { transform-box: view-box; transform-origin: 50% 50%;
+#inkOrb .ic { width: var(--ic-xl); height: var(--ic-xl); }
+/* 悬停时轮盘转过一格 = 360°/辐条数 = 360°/一级扇区数 = 72°（旧版六辐转 60°，
+   转的格数与按下去实际转出的格数不是一回事 —— 动效说的因果必须是真因果）。
+   转的是整张 svg：外环与轴心都圆心对称，转它们看不出来，效果与旧版只转辐条组一致。 */
+#inkOrb svg { display: block; transform-origin: 50% 50%;
   transition: transform .24s cubic-bezier(.2, .8, .3, 1); }
-#inkOrb:hover .tk-orb-tick { transform: rotate(60deg); }
-html[data-reduce="on"] #inkOrb, html[data-reduce="on"] #inkOrb .tk-orb-tick { transition: none; }
-@media (prefers-reduced-motion: reduce) { #inkOrb, #inkOrb .tk-orb-tick { transition: none; } }
+#inkOrb:hover svg { transform: rotate(72deg); }
+html[data-reduce="on"] #inkOrb, html[data-reduce="on"] #inkOrb svg { transition: none; }
+@media (prefers-reduced-motion: reduce) { #inkOrb, #inkOrb svg { transition: none; } }
 
 /* ---------- ② 轮盘（#inkWheel）----------
    全屏透明遮罩（点空白关闭 / 退回） + 定位在悬浮球处的圆盘。
@@ -560,13 +607,19 @@ html[data-reduce="on"] .tk-wheel { animation: none; }
 .tk-g.dim.on, .tk-lab.dim.on { opacity: 1; }
 
 .tk-lab {
-  position: absolute; transform: translate(-50%, -50%);
-  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
+  position: absolute; left: 50%; top: 50%; --tk-k: 1;
+  /* 极坐标定位：JS 只下发 --tk-x/--tk-y 两个分量，位置与自身缩放都由 --tk-k 驱动。
+     这样它与 .tk-g.on{transform:scale(1.06)}（SVG <g> 绕轮盘圆心）是同一次均匀缩放 ——
+     悬停时扇区外推多少，标签就跟着外推多少（写死 left/top 的旧版差 7~16px，扇区动了文字不动）。 */
+  transform: translate(calc(-50% + var(--tk-x) * var(--tk-k) * 1px),
+                       calc(-50% + var(--tk-y) * var(--tk-k) * 1px)) scale(var(--tk-k));
+  display: flex; flex-direction: column; align-items: center; gap: var(--tk-gap, var(--space-3));
   color: var(--ink-2); text-align: center; pointer-events: none;
   transition: transform .16s, color .14s, opacity .14s;
 }
-.tk-lab .tk-tx { font-size: var(--tk-fs); letter-spacing: .04em; white-space: nowrap; }
-.tk-lab.on { transform: translate(-50%, -50%) scale(1.06); color: var(--accent-ink); }
+.tk-lab .tk-tx { font-size: var(--tk-fs); line-height: 1.15; letter-spacing: .04em; white-space: nowrap; }
+/* 行高写死 1.15、缝距走 --tk-gap：这两处若不随盘缩，标签盒在 200 档（环带仅 38px）会顶穿内外弧 */
+.tk-lab.on { --tk-k: 1.06; color: var(--accent-ink); }
 
 .tk-hub {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -602,6 +655,11 @@ html[data-reduce="on"] .tk-wheel { animation: none; }
 }
 .tk-gear:hover { color: var(--accent-ink); border-color: var(--accent); transform: rotate(40deg); }
 html[data-reduce="on"] .tk-gear { transition: none; }
+/* 悬浮球显隐签：与齿轮同一副长相，只把位置镜像到右上角（左上管大小、右上管收球）。
+   left 必须显式归零为 auto —— 绝对定位同时给 left/right 且宽度固定时，LTR 下 right 会被忽略。
+   两颗都贴在盒角上（角到圆心 R√2 > R），落在盘体之外，不抢任何扇区的热区。 */
+.tk-hide { left: auto; right: 2%; }
+.tk-hide:hover { transform: rotate(-40deg); }
 
 /* 大小三档：齿轮右侧一排小签（贴着轮盘外缘，不挡扇区） */
 .tk-sizes { position: absolute; left: calc(2% + 36px); top: calc(2% + 2px); display: flex; gap: var(--space-5); }
@@ -718,6 +776,42 @@ html[data-reduce="on"] .tk-gear { transition: none; }
 /* 直连型预置（翻书架 / 读本段 / 扫目录）交回的清单：一物一行，窄栏里不套表格 */
 .ar-list { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-6) 0 0; font-size: var(--fs-11_5); color: var(--ink-2); }
 
+/* ---------- v1.4-S2 多轮回合：系统说明条 + 轨迹台账 ----------
+   .ar-sys 说的是「这一趟怎么跑的」而不是「模型答了什么」：通路降级、预算触顶、被叫停。
+   它必须是常驻可见的一行，不能塞进折叠的台账里 —— 读者若看不出这次走的是降级通路，
+   界面就等于替他做了个不实的假设。 */
+.ar-sys {
+  flex: none; display: flex; align-items: center; gap: var(--space-6);
+  padding: var(--space-5) var(--space-12); font-size: var(--fs-11_5); line-height: 1.6; color: var(--ink-3);
+  border-top: 1px solid var(--line); background: var(--paper-3);
+}
+.ar-sys[data-kind="warn"] { color: var(--accent-ink); border-top-color: var(--accent); }
+
+/* 台账行：默认折着，那一行本身就是预算账 —— 两件事挤在同一颗钮里，
+   是因为「跑了多久」与「跑了什么」是同一个问题的两面。 */
+.ar-plan { flex: none; border-top: 1px solid var(--line); }
+.ar-plan-t {
+  display: flex; align-items: center; gap: var(--space-7); width: 100%;
+  padding: var(--space-6) var(--space-12); font: inherit; font-size: var(--fs-11_5); color: var(--ink-3);
+  background: none; border: 0; cursor: pointer; text-align: left;
+}
+.ar-plan-t:hover { color: var(--ink-2); }
+.ar-plan-k { flex: none; letter-spacing: .04em; }
+.ar-budget { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 折展开的尖角：纯 CSS 画的，不占图标名册（它不是一个「含义图标」，只是个状态指示） */
+.ar-caret { flex: none; width: 7px; height: 7px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: rotate(45deg) translateY(-2px); transition: transform .18s; }
+.ar-plan-t[aria-expanded="true"] .ar-caret { transform: rotate(-135deg) translateY(-2px); }
+html[data-reduce="on"] .ar-caret { transition: none; }
+.ar-steps { max-height: 168px; overflow-y: auto; padding: 0 var(--space-12) var(--space-8); display: flex; flex-direction: column; gap: var(--space-4); }
+.ar-step { display: flex; align-items: baseline; gap: var(--space-6); font-size: var(--fs-11); color: var(--ink-3); line-height: 1.6; }
+/* 工具名是这一行唯一必须认出的东西：等宽 + 不折行，才看得出「这轮调了哪一枚」 */
+.ar-step b { flex: none; font-family: var(--font-mono); font-size: var(--fs-10_5); font-weight: 500; color: var(--ink-2); }
+.ar-step span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-step[data-ok="0"] b { color: var(--accent-ink); }
+.ar-step i { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--line); align-self: center; }
+.ar-step[data-ok="1"] i { background: var(--accent); }
+.ar-step[data-risk="write"] i { border-radius: 0; }
+
 /* 预置问题：首屏就给方向，不把读者丢进一个空输入框 */
 .ar-preset { flex: none; display: flex; flex-wrap: wrap; gap: var(--space-6); padding: var(--space-8) var(--space-12); border-top: 1px solid var(--line); }
 .ar-p {
@@ -742,6 +836,10 @@ html[data-reduce="on"] .ar-p { transition: none; }
 .ar-cft b { display: block; font-size: var(--fs-12); margin-bottom: var(--space-6); }
 .ar-cft ul { margin: 0 0 var(--space-7); padding-left: var(--space-16); font-size: var(--fs-11_5); color: var(--ink-2); line-height: 1.7; max-height: 116px; overflow-y: auto; }
 .ar-cft .ar-cf-bad { color: var(--accent-ink); list-style: none; margin-left: calc(var(--space-16) * -1); }
+/* 循环一次交出好几条写操作：每条工具名一行，它自己的明细缩进跟在下面。
+   工具名用等宽 —— 读者要认出的是「这枚我认不认得」，不是「这行字好不好看」。 */
+.ar-cft .ar-cf-t { font-family: var(--font-mono); font-size: var(--fs-10_5); font-weight: 500; }
+.ar-cft .ar-cf-sub { list-style: none; margin-left: calc(var(--space-16) * -1); color: var(--ink-3); }
 .ar-cft .ar-cf-row { display: flex; align-items: center; gap: var(--space-6); }
 
 .ar-foot { flex: none; display: flex; align-items: center; gap: var(--space-6); padding: var(--space-8) var(--space-10); border-top: 1px solid var(--line); }

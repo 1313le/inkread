@@ -517,3 +517,71 @@ npm run dist     # 产出 dist/InkRead-Setup-2.0.0.exe（NSIS 安装器）
 
 `dist\win-unpacked\resources\app.asar` 会被另一台 AI 工具（`ZCode.exe`，本工程正活在它的 workspace 目录里）以不共享删除的方式独占，electron-builder 每次先清旧输出目录时 `unlink` 必 `EBUSY`。本版改把输出目录指到 workspace 索引面之外再构建，安装包仍复制回 `dist\` 与桌面归档；不改 `package.json` 的 `directories.output`，避免动到 `verify-v11-b1` 的字节线。
 
+---
+
+## 二十五、v1.4 主脑自主多轮 + 主脑分配角色 + 阅读页三题顶格
+
+发布：**1.4.0**（`0be02cfe292e5d186bbf6a069377faa5`，96,746,105 字节）。四个批次共动 10 个产品文件（9 改 + 新增 `ink-reader/ink-loop.js` 515 行）、+3,529 / −243 行。
+
+### 25.1 这一版做了什么
+
+**S2 主脑自主多轮 tool-calling**——主脑第一次能自己把一件事分成几轮做完，而不只是答一句话：
+
+- **先解传输层的硬阻塞**：`api.js` 的非流式支路只取 `message.content`，空即抛「响应为空」，而原生 `tool_calls` 那一发通常正是 `content:null`——旧代码会把一次正确的调用当失败。现在 `o.raw` 返回整个 message，`readStream` 按 `index` 累加 `delta.tool_calls` 分片，`chatMsgs` 带上 `tools`。
+- **循环体单开一个文件**（`ink-loop.js`，不塞进 `ink-agent.js`）：预算 `DEF_BUDGET = { rounds: 6, calls: 24, ms: 180000 }`、每轮进度上屏、「卡住」判定与诚实化收敛都在这一支。触顶**不回滚**已落地的动作。
+- **护栏五条**：预算 / 幂等（规范化 args 去重）/ 取消（`signal`，abort 后不重问）/ 审计（每轮落 `InkAgent.trace`）/ 纠错上限（同枚工具两次）。
+- **铁律不变**：只读工具自动跑，写工具在循环里攒成待确认队列，界面上等读者点「采用」才落账。
+- **工具名册 9 → 23**（实测 `grep -oE 'define\("[a-z]+\.[a-zA-Z]+"'`：14 枚新增、0 枚退役）。方案原文写「9→18」却列了 14 个新名，算术不自洽的是方案不是实现——名册以 grep 为准。
+
+**S3 主脑分配多角色**——小说里「谁说的」这件事，从只有 6 句乒乓外推变成主脑按结构化账本通读全书来派：
+
+- **A1 分块全覆盖**：不再只判前 `CAST_AI_MAX` 句，直接跑在 S2 的循环上（预算 / 取消 / 审计共用一套）。**A2 角色发现与新建**（`by:"model"` + evidence，merge 只当建议不落账）。**A3 证据化**：每派带 `conf / quote / basis`，`conf < 0.5` 不落地、留给人定。**A4 音色方案**走新槽 `cast.voices`，只认本机池内 id，`voiceLock` 不参与重排。
+- **A6 裸对白轮次推断**（长篇里「开头报几个人、之后全靠交替」是多数写法）：句级标记位 `at:"tag|pron|alt|none"` 并把 **anchor 与 chain 分离**（外推出来的 `alt` 绝不回填进锚——旧代码回填了，于是三人轮换第 7 句起必然把丙念成乙、错一句跟着错一片）；对锚序列做周期检测（`p∈{2,3}`），`ALT_MAX=6` 硬顶**不改**但触顶记 `reach` 上屏；外推撞到不符的 `tag` 锚即整段 `hold:true` 不落地——**错要成片承认**。成段改派给两个锚就本地重算（零模型、`by:"user"` + `derivedFrom`），逐句下拉保留。
+- **数据轨**：`inkread.cast.v1` ver 1→2 进 `INK_MIGRATIONS`（`api.js:61` 声明 / `api.js:203` 迁移），**只在读到那一句时补字段**，读取阶段不批量改写磁盘。
+- **三条红线守住**：`lines[].user`、`voiceLock`、带 `derivedFrom` 的派生句，模型一律不许覆盖；播放全程零模型请求；无网络不改表。
+
+**阅读页三题顶格**（R1 点击区 / R2 朗读条 / R3 工具包）——三题根因全是几何的，判据也一律量几何：
+
+- **R1**：翻页带只认侧带里的**非可朗读块**（list/table/note/code…），可朗读单元（p/h1~h3/quote/abstract）的字上弹朗读气泡——两套命中不再重叠，且「死点击不许搬家」（非可朗读块仍翻页）。
+- **R2**：播放三角此前在网格里没落在圆心（上一版只删 `grid/place-items` 消不掉，`.tool-btn` 基础类本身就 inline-flex + center，是双保险）；条盒 `nowrap` 与 `flex-shrink` 是两道兜底，一把刀只能证一头，溢出的牙另立；390 触屏条高 115px（判据 ≤130）、320 细指针 127px，七钮 44×44、语速/定时 52×44。
+- **R3**：悬浮球可藏可开（`body.tk-orb-off` + `inkread.orb.v1` 的 `h`，关掉球**不关掉入口**）；轮盘标签改为跟扇区一起转（旧版轮动文字不动、标签跑出轮外）；轮盘图形收进图标主表 `tool-wheel` 并删掉 `reader.html` 里的旁路 SVG——辐条数 = 一级扇区数 = 5，「按下去转出几格」由图本身说。
+- 两条移动端根因顺带治掉：判窄必须量 `documentElement.clientWidth`（Playwright `isMobile` 首帧 `innerWidth=788` 而 `clientWidth` 已 390，settle 后不再发 resize）；热区补丁要带与 ID 选择器同等专一性，否则 `@media(pointer:coarse)` 被压过。
+
+**任务清单两题**：
+
+- **原文定位**改成三段可交代：有锚点走锚点 → 无锚点则拿标题在全文找**唯一**命中 → 找不到或命中多次就明说「这句在正文里找不到，或出现得太多次，不敢猜是哪一处」，不再静默无反应。
+- **关闭动画**：正文 `margin` 过渡 .17s→**.34s**，必须 ≥ 窗体自身滑入滑出（任务抽屉 .34s），于是所有停靠面板都是「窗体先行、正文随后」，两侧永不交叠；浮窗/最大化态的抽屉退出改**原地淡出**（`transform:none` + opacity .22s），窄屏 `InkWin` 恒强制 maximized，所以手机上退出永远是原地淡出而不是斜着飞走。
+
+### 25.2 怎么验收的
+
+四道批次闸 + 一道重定基线的旧闸，全按逐刀消融配反证（判词口径：咬合 / 消不掉 / 伤及 / 崩闸；探针不计刀数）：
+
+| 闸 | 断言（批跑 PASS 行） | 真刀 | 覆盖账（编号名册） | 伤及 / 崩 | 用时 |
+|---|---|---|---|---|---|
+| `verify-v14-loop` | 102 | 66/66 全咬合 | 70/79 | 0 / 0 | 2,522s |
+| `verify-v14-castai` | 133 | 96/96 全咬合 | 127/133 + 6 条 UNPINNED | 0 / 0 | 3,398s |
+| `verify-v14-reader3` | 87 | 56/56 并集全咬合 | 承重 60/60 | 0 / 0 | 2,752s + 补刀 |
+| `verify-v14-taskdrawer` | 39 | 19/19 全咬合 | 36/36 | 0 / 0 | 458s |
+| `verify-v13-aihonest`（v1.4 复跑） | 78 | 68/68 全咬合 | 72/84 | 0 / 0 | 2,213s |
+
+**两个分母别互相否定**：表里「断言」是批跑的 PASS 行数，「覆盖账」是消融名册的**编号**数，同一道闸两个数天然不等（`v14-loop` 102 行 / 79 个编号）。这一版把它们分栏写清。
+
+三处照实记的账：`reader3` 的并集来自「末次整批 55 刀 + 补刀 93」——刀22 首跑「消不掉」，重声明为压缩语义后才咬（C1/C2/F7），溢出的牙另立刀93；刀93 首下连带把 F6 顶红（未列 `mayRed`，记伤及 1），收窄重下归零。`castai` 的探针刀87「消不掉」、`aihonest` 的探针 2/3 未按声明见血——**消不掉＝这条判据目前没有反证，不等于它没问题**。
+
+全量批跑 `run-regress.sh`（`.work/regress-v14-s3-rel.log`）：**99 闸次 / 3,553 断言 / OK=98 BAD=0 INFO=1**，唯一 INFO 是清空哨兵探针 `verify-r-probe`，不计红。
+
+成品三件套对**装机版**跑（exe `ProductVersion = 1.4.0.0`、包内 `window.InkVersion = 1.4.0`、UA `inkread/1.4.0`）：`verify-packaged` 16/16、`verify-e-shell` 15/15、`verify-pkg-import` 23/23。首跑 `verify-e-shell` 在 6d 之前 CDP 目标消失——起点窗体量到 98×27（正常 1321×901）、同一时刻现场另起一个不带 `--dev` 的正式实例、9222 端口随之释放，原地复跑 15/15 ⇒ 定性为**窗口被外部关掉，不是产品回归**。规矩：**跑三件套期间不要手工开关成品窗口**。
+
+### 25.3 三条必须知道的
+
+- **版面结构仍在导入时冻结**（块切分落库、打开不重算），改解析层不会让书架里的旧书自动获益，要删了重新导入；目录派生不受冻结影响。
+- **角色分配是惰性归一**：旧书的 `cast.v1` ver 1 账不会在打开时被整表重写，只在读到那一句时补 `at/depth/run/via/chain`。所以旧书**读到时**才享受新的轮次推断，但也不必重导入——这一点与上面那条不冲突：冻结的是版面块，归一的是角色账。
+- **多轮预算是硬的**：6 轮 / 24 次 / 180 秒，触顶即停且**不回滚已落地的动作**；要撤回得手工。上游是否支持 `tools` 由 `capGet("toolCalls")` 决定，而它只在** HTTP 400 且响应体提到 tools** 时才翻成 false——401/403/429/超时都不算「不支持」，这条决定了不同网关上的行为差异。
+
+### 25.4 打包侧三条环境事实
+
+24.4 那条（ZCode 独占 asar）仍然成立，本版再添两条：
+
+- **npm 会吃掉 `--config.*`**：`npm run dist --config.directories.output=…` 先打 `npm warn Unknown cli config`，然后把输出照样写进仓库 `dist\`，撞进 ZCode 的独占锁 → `EBUSY ... unlink`。必须直接叫 electron-builder：`NODE_OPTIONS=--use-system-ca npx electron-builder --win nsis --x64 --config.directories.output="C:/Users/Public/inkread-dist-1.4.0"`。
+- **Git Bash 会把 `/S` 改写成 `S:/`**：静默安装得走 `cmd //c start //wait "" "<Setup.exe>" /S`。踩中时的表象是命令不报错、装机版版本号却纹丝不动——NSIS 向导 GUI 被打开了。
+

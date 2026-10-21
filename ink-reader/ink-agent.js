@@ -84,7 +84,10 @@
 
   function define(name, risk, desc, params, run, o) {
     o = o || {};
-    var t = { name: name, risk: risk, desc: desc, params: params || {}, run: run, confirm: o.confirm !== false };
+    /* docs 是「逐个参数的说明」：注册表里 "string?" 只说得了类型与可选，
+       说不清「docId 不填即当前这本」。原生 tool_calls 那份名册要把这句话交上去，
+       否则模型只能猜 —— 猜错的每一条都会被校验挡下，白烧额度。 */
+    var t = { name: name, risk: risk, desc: desc, params: params || {}, run: run, confirm: o.confirm !== false, docs: o.docs || {} };
     for (var i = 0; i < regs.length; i++) if (regs[i].name === name) { regs[i] = t; return t; }
     regs.push(t);
     return t;
@@ -125,7 +128,10 @@
         from: seg.length ? seg[0].bi : -1, chapter: seg.length ? seg[0].chapter : "",
         chars: chars, text: seg.map(function (b) { return String(b.text || ""); }).join("\n").slice(0, 2400)
       };
-    }, { confirm: false });
+    }, { confirm: false, docs: {
+      docId: "读哪本书，不填就是读者当前开着的这本",
+      bi: "从第几块开始读（块号从 0 起），不填就从读者站的位置起",
+      blocks: "一次读几块，1 到 12，不填按 6 块" } });
 
   define("notes.create", "write", "把一条笔记写进这本书（kind=note，不进闪卡池）",
     { docId: "string", text: "string", body: "string?", anchor: "string?", page: "number?" },
@@ -147,7 +153,12 @@
       if (host.refresh) host.refresh();
       trace("写了 1 条笔记" + (id ? " · 《" + (bookTitle(id) || "本文") + "》" : ""), "notes.create", "write");
       return { ok: true, id: nid, stored: r.stored !== false, where: rec.anchor, page: rec.page };
-    });
+    }, { docs: {
+      docId: "写进哪本书，不填就是当前这本",
+      text: "笔记的那一句话，原样写进原文里能查到的句子才会自动定出出处；这条必填、不能空",
+      body: "笔记正文的长文，只想要一条短笔记就不用给",
+      anchor: "挂在原文哪一段的锚点，不给就按上面那句话查到的那段定",
+      page: "落在第几页，不给同样按查到的那段取" } });
 
   define("cards.create", "write", "把原文里的句子做成闪卡（逐条回原文查证，查不到就不成卡）",
     { docId: "string", quotes: "array" },
@@ -175,7 +186,9 @@
       if (host.refresh) host.refresh();
       trace("做成 " + made.length + " 张闪卡" + (missed.length ? "，" + missed.length + " 条原文里查无此句" : ""), "cards.create", "write");
       return { ok: made.length > 0, made: made.length, ids: made, missed: missed, why: made.length ? "" : "not-in-text" };
-    });
+    }, { docs: {
+      docId: "从哪本书里做卡，不填就是当前这本",
+      quotes: "要做成闪卡的原文句子，一条条给原话（最多 20 条）；原文里查不到原句的那条不会成卡，会回在 missed 里" } });
 
   define("tasks.create", "write", "生成待办任务并落进任务页",
     { titles: "array", docId: "string?", today: "boolean?" },
@@ -194,7 +207,10 @@
       }
       trace("建了 " + made.length + " 条任务" + (p.today ? "（含今日）" : ""), "tasks.create", "write");
       return { ok: made.length > 0, made: made.length, ids: made, why: made.length ? "" : "save-failed" };
-    });
+    }, { docs: {
+      titles: "每条任务的标题，一次最多 20 条，标题写成一句话说清要做什么",
+      docId: "挂在哪本书下，不填就是当前这本",
+      today: "true 就同时加进「今日」那一列，不给算 false" } });
 
   define("reader.goto", "ui", "跳到书中的某个位置（块号 / 锚点 / 页码）",
     { bi: "number?", anchor: "string?", page: "number?" },
@@ -209,7 +225,10 @@
       var done = !!host.goto(t);
       if (done) trace("跳回原文：" + (t.bi != null ? "第 " + (t.bi + 1) + " 块" : t.page ? "第 " + t.page + " 页" : "所引的那一段"), "reader.goto", "ui");
       return { ok: done, why: done ? "" : "not-found" };
-    }, { confirm: false });
+    }, { confirm: false, docs: {
+      bi: "跳到第几块（块号从 0 起）；三样里给一样就够，同时给了按块号优先",
+      anchor: "跳到哪个锚点，就是引用回原文时带的那份出处标记",
+      page: "跳到第几页（从 1 起）" } });
 
   define("ui.navigate", "ui", "换到应用的另一个页面",
     { to: "string" },
@@ -224,7 +243,8 @@
       else { try { sessionStorage.setItem("inkread.nav.v1", "1"); } catch (e) {} location.href = href; }
       trace("去了「" + key + "」页", "ui.navigate", "ui");
       return { ok: true, to: href };
-    });
+    }, { docs: {
+      to: "去哪个页：shelf 书架 / reader 阅读 / notes 笔记 / cards 闪卡 / tasks 任务 / ai 主脑 / themes 天幕；名字不在这一列里会被挡下并回列出可选页" } });
 
   /* ---------------- 目录扫描两枚（定案 §三 T6）----------------
      为什么要拆成两枚：scan 是「读」——它问模型、把结果停在阅读页目录面板的建议位上，
@@ -241,8 +261,10 @@
       if (!r) return { ok: false, why: "failed" };
       var n = r.count || 0;
       trace(n ? "扫出 " + n + " 节候选目录（还没落账）" : "扫了一遍目录，没认出可用的节", "toc.scan", "read");
+      /* why 只放状态码，人话留在 err 里：阅读页那套解释表认的是码，
+         把一整句失败原因塞进 why 会让界面只能显示「未知原因」。 */
       return {
-        ok: n > 0, count: n, why: n ? "" : (r.why || r.err || "none"),
+        ok: n > 0, count: n, why: n ? "" : (r.why || "none"),
         note: str(r.note, 80), err: str(r.err, 80), cut: str(r.cut, 60),
         toc: (r.items || []).slice(0, 8).map(function (x) { return { bi: x.bi, lv: x.lv, x: str(x.x, 40) }; })
       };
@@ -262,6 +284,273 @@
       trace("采用 " + n + " 节目录（旧表已存，可收回）", "toc.apply", "write");
       return { ok: true, count: n, undo: true };
     });
+
+  /* ---------------- v1.4-S2 新十四枚：把「查、改、删」这一半补齐 ----------------
+     首刀只有「建」没有「查」，模型连自己上一轮建了什么都不知道，多轮循环就成了空转：
+     它读不到现状，就只能凭想象再建一遍。这十四枚每一条都接真出口 —— 注册了名字
+     而背后没出口，是 v1.3 D5 那类缺陷，闸的 T 组逐枚点名验。 */
+
+  define("notes.list", "read", "列出某本书里已有的笔记与批注（含 id、出处、摘要）",
+    { docId: "string?", kind: "string?" },
+    async function (p) {
+      var id = str(p.docId, 60) || curDocId();
+      var r = await API.fetchNotes(id);
+      var all = (r && r.data) || [];
+      var kind = str(p.kind, 20);
+      var list = kind ? all.filter(function (n) { return n.kind === kind; }) : all;
+      trace("翻了 " + list.length + " 条已有笔记" + (kind ? "（" + kind + "）" : ""), "notes.list", "read");
+      return {
+        ok: true, docId: id, count: list.length, kind: kind || "all",
+        notes: list.slice(0, 30).map(function (n) {
+          return { id: n.id, kind: n.kind || "note", text: str(n.text, 80), page: n.page || 0, anchor: str(n.anchor, 24), at: n.at || "" };
+        })
+      };
+    }, { confirm: false, docs: { docId: "书的 id，不填即读者当前这本", kind: "只要这一类（note / highlight），不填全给" } });
+
+  define("notes.update", "write", "改一条已有笔记的正文或标题（按 id 定位，改前那份可当场收回）",
+    { id: "string", text: "string?", body: "string?" },
+    async function (p) {
+      var nid = str(p.id, 40);
+      var rec = (window.InkStore && InkStore.getNote) ? InkStore.getNote(nid) : null;
+      if (!rec) return { ok: false, why: "not-found", id: nid };
+      /* 存一份改前正本进撤销闭包：upsert 是就地覆盖，改完再想「收回」就找不到旧字了。 */
+      var prev = { text: rec.text, body: rec.body };
+      var text = str(p.text, 400), body = str(p.body, 4000);
+      if (!text && !body) return { ok: false, why: "nothing-to-change", id: nid };
+      var next = Object.assign({}, rec);
+      if (text) next.text = text;
+      if (body) next.body = body;
+      var r = await API.saveNote(next);
+      if (!r || r.code !== 0) return { ok: false, why: "save-failed", id: nid };
+      pushUndo("笔记", nid, function (i2) {
+        return API.saveNote(Object.assign({}, next, { id: i2, text: prev.text, body: prev.body }));
+      });
+      if (host.refresh) host.refresh();
+      trace("改了 1 条笔记（旧文已存，可收回）", "notes.update", "write");
+      return { ok: true, id: nid, stored: r.stored !== false,
+        changed: (text ? "text" : "") + (text && body ? "+" : "") + (body ? "body" : "") };
+    }, { docs: { id: "notes.list 交回来的那条 id", text: "新标题句（不改就别填）", body: "新正文（不改就别填）" } });
+
+  define("notes.delete", "write", "删掉一条笔记或闪卡（按 id；本次会话内还能当场收回）",
+    { id: "string" },
+    async function (p) {
+      var nid = str(p.id, 40);
+      var rec = (window.InkStore && InkStore.getNote) ? InkStore.getNote(nid) : null;
+      if (!rec) return { ok: false, why: "not-found", id: nid };
+      var gone = Object.assign({}, rec);
+      await API.deleteNote(nid);
+      pushUndo(gone.kind === "highlight" ? "闪卡" : "笔记", nid, function (i2) { return API.saveNote(Object.assign({}, gone, { id: i2 })); });
+      if (host.refresh) host.refresh();
+      trace("删了 1 条" + (gone.kind === "highlight" ? "闪卡" : "笔记") + "（本轮内可收回）", "notes.delete", "write");
+      return { ok: true, id: nid, kind: gone.kind || "note", undo: true };
+    }, { docs: { id: "notes.list 交回来的那条 id" } });
+
+  define("cards.list", "read", "列出闪卡池与各自的复习状态（到期 / 暂停 / 重复次数）",
+    { docId: "string?", dueOnly: "boolean?" },
+    async function (p) {
+      var id = str(p.docId, 60);
+      var cardR = await API.fetchCards();
+      var noteR = await API.fetchNotes(id);
+      var cards = cardR && cardR.data || {};
+      var notes = (noteR && noteR.data || []).filter(function (n) { return n.kind === "highlight"; });
+      var today = new Date().toLocaleDateString("sv");
+      var out = notes.map(function (n) {
+        var st = cards[n.id] || {};
+        return { id: n.id, text: str(n.text, 70), due: st.due || "", reps: st.reps || 0, suspended: !!st.suspended, overdue: !!st.due && st.due <= today };
+      });
+      var list = p.dueOnly ? out.filter(function (x) { return x.overdue && !x.suspended; }) : out;
+      trace("点了闪卡池：" + list.length + " 张（到期 " + list.filter(function (x) { return x.overdue; }).length + "）", "cards.list", "read");
+      return { ok: true, count: list.length, total: out.length, dueOnly: !!p.dueOnly, cards: list.slice(0, 30) };
+    }, { confirm: false, docs: { docId: "只看这本书的卡，不填给全部", dueOnly: "true 时只列今天到期的" } });
+
+  define("cards.suspend", "write", "暂停一张闪卡（不再排进复习队列，其余状态原样留着）",
+    { id: "string" },
+    async function (p) { return setSusp(p, true); },
+    { docs: { id: "闪卡的 id（= 它那条批注的 id，cards.list 里有）" } });
+
+  define("cards.resume", "write", "恢复一张被暂停的闪卡，重新排进复习队列",
+    { id: "string" },
+    async function (p) { return setSusp(p, false); },
+    { docs: { id: "闪卡的 id" } });
+
+  /* 暂停标记只是卡上的一位：SM-2 的 ef/ivl/reps 必须原样带走。
+     api.js 的 setCard 是整条覆盖，所以这里先读回旧的那份再合并 ——
+     直接写 {suspended:1} 会把读者攒了几个月的复习进度抹平。 */
+  async function setSusp(p, on) {
+    var nid = str(p.id, 40);
+    if (!nid) return { ok: false, why: "no-id" };
+    var r = await API.fetchCards();
+    var all = (r && r.data) || {};
+    var prev = all[nid];
+    var next = Object.assign({}, prev || {});
+    if (on) next.suspended = true; else delete next.suspended;
+    var s = await API.saveCard(nid, next);
+    if (!s || s.code !== 0) return { ok: false, why: "save-failed", id: nid };
+    /* 旧的那条本来不存在（第一次复习前没有记录）→ 收回等于把这条记录删掉，
+       留一个空壳会让闪卡页多出一张没有状态的卡。 */
+    pushUndo("闪卡状态", nid, function (i) {
+      return prev ? API.saveCard(i, prev) : API.deleteCard(i);
+    });
+    trace((on ? "暂停了 1 张闪卡" : "恢复了 1 张闪卡"), on ? "cards.suspend" : "cards.resume", "write");
+    return { ok: true, id: nid, suspended: !!on, hadRecord: !!prev };
+  }
+
+  define("tasks.list", "read", "列出任务清单（可按书与「今日」过滤），带每条的 id",
+    { docId: "string?", todayOnly: "boolean?" },
+    async function (p) {
+      var all = (API.localTasks && API.localTasks()) || [];
+      var id = str(p.docId, 60);
+      var list = all.filter(function (t) { return (!id || t.docId === id) && (!p.todayOnly || t.today); });
+      trace("看了任务清单：" + list.length + " 条", "tasks.list", "read");
+      return {
+        ok: true, count: list.length, total: all.length,
+        tasks: list.slice(0, 40).map(function (t) {
+          return { id: t.id, title: str(t.title || t.x, 60), today: !!t.today, docId: str(t.docId, 40) };
+        })
+      };
+    }, { confirm: false, docs: { docId: "只看这本书的任务", todayOnly: "true 时只列今天要做的那些" } });
+
+  define("tasks.toggle", "write", "把一条任务加入或移出「今日」（不新建、不删除那条任务）",
+    { id: "string", today: "boolean?" },
+    async function (p) {
+      var tid = str(p.id, 40);
+      var all = (API.localTasks && API.localTasks()) || [];
+      var rec = null;
+      for (var i = 0; i < all.length; i++) if (all[i] && all[i].id === tid) { rec = all[i]; break; }
+      if (!rec) return { ok: false, why: "not-found", id: tid };
+      var was = !!rec.today;
+      var want = typeof p.today === "boolean" ? p.today : !was;
+      var r = await API.setToday(tid, want);
+      if (!r || r.code !== 0) return { ok: false, why: "save-failed", id: tid };
+      pushUndo("今日标记", tid, function (i2) { return API.setToday(i2, was); });
+      trace((want ? "加入今日 1 条" : "移出今日 1 条") + "任务", "tasks.toggle", "write");
+      return { ok: true, id: tid, today: want, was: was };
+    }, { docs: { id: "tasks.list 交回来的那条 id", today: "true 加入今日 / false 移出；不填就是翻转" } });
+
+  define("tasks.delete", "write", "删掉一条独立任务（本机没有回收站，这条删了找不回来）",
+    { id: "string" },
+    async function (p) {
+      var tid = str(p.id, 40);
+      var r = await API.deleteTask(tid);
+      if (!r || r.code !== 0) return { ok: false, why: (r && r.msg) === "not-found" ? "not-found" : "save-failed", id: tid };
+      /* 不放进撤销队列：saveTask 会另发一个 id，「收回」出来的是一条新任务，
+         读者以为复原了、其实清单里多了一条别的 —— 不如当场说清删了就没了。 */
+      trace("删了 1 条任务（本机无回收站，不可恢复）", "tasks.delete", "write");
+      return { ok: true, id: tid, undo: false };
+    }, { docs: { id: "tasks.list 交回来的那条 id" } });
+
+  define("doc.search", "read", "在一本书的原文里逐字找一段话，回命中块及其块号 / 页码 / 锚点",
+    { q: "string", docId: "string?" },
+    async function (p) {
+      var want = str(p.q, 200);
+      if (!want) return { ok: false, why: "empty-q" };
+      var id = str(p.docId, 60) || curDocId();
+      if (!window.Brain || !id) return { ok: false, why: id ? "no-brain" : "no-doc" };
+      var list = Brain.corpus(id) || [];
+      var flat = function (s) { return String(s).replace(/\s+/g, ""); };
+      var needle = flat(want), hits = [];
+      for (var i = 0; i < list.length && hits.length < 12; i++) {
+        var t = String(list[i].text || "");
+        if (t.indexOf(want) >= 0 || (needle.length >= 4 && flat(t).indexOf(needle) >= 0)) {
+          var at = Math.max(0, flat(t).indexOf(needle));
+          hits.push({ bi: list[i].bi, page: list[i].page || 0, anchor: list[i].anchor || "", chapter: list[i].chapter || "",
+            excerpt: t.slice(Math.max(0, at - 20), at + needle.length + 40) });
+        }
+      }
+      trace("在原文里找「" + want.slice(0, 16) + "」：" + hits.length + " 处命中", "doc.search", "read");
+      /* 0 处命中也是「查完了」，不是「查失败」：ok 表达这次查做成了，
+         有没有找到由 count 说 —— 否则模型会把「没有」当成工具坏了，重试到烧完额度。 */
+      return { ok: true, docId: id, q: want, count: hits.length, hits: hits };
+    }, { confirm: false, docs: { q: "要逐字找的那段话", docId: "在哪本书里找，不填即当前这本" } });
+
+  define("toc.list", "read", "读出一本书当前的目录（层级、标题、指向的块号）",
+    { docId: "string?" },
+    async function (p) {
+      var id = str(p.docId, 60) || curDocId();
+      if (!id) return { ok: false, why: "no-doc" };
+      /* tocOf 交回的是一整份记录 {nodes, links}，不是数组：直接当列表用会得到
+         items.length === undefined，「这本书有没有目录」就永远说不准。 */
+      var rec = API.tocOf ? API.tocOf(id) : null;
+      var items = (rec && rec.nodes) || [];
+      trace("读了目录：" + items.length + " 节", "toc.list", "read");
+      return {
+        ok: true, docId: id, count: items.length,
+        note: items.length ? "" : "这本书还没有目录（可以用 toc.scan 让模型扫一遍候选）",
+        items: items.slice(0, 40).map(function (x) { return { lv: x.lv || 1, x: str(x.x, 50), bi: x.bi, anchor: str(x.anchor, 24) }; })
+      };
+    }, { confirm: false, docs: { docId: "哪本书的目录，不填即当前这本" } });
+
+  define("progress.set", "write", "把这本书的阅读进度设成某个比例（0~1），书架上的读数跟着变",
+    { docId: "string", progress: "number" },
+    async function (p) {
+      var id = str(p.docId, 60) || curDocId();
+      var d = window.InkStore && InkStore.getDoc ? InkStore.getDoc(id) : null;
+      if (!d) return { ok: false, why: "not-found", docId: id };
+      var v = Number(p.progress);
+      if (!isFinite(v)) return { ok: false, why: "bad-progress", got: String(p.progress) };
+      v = Math.max(0, Math.min(1, v));
+      var was = d.progress || 0;
+      /* 走书架这条账，不走 progress.v1：后者是「读到哪一页」的本机游标，不进七个账本键、
+         也不参与同步 —— 模型说「把这本书标成读完」，落点该是读者在书架上看到的那个数。 */
+      var hit = InkStore.updateDoc(id, { progress: v });
+      if (!hit) return { ok: false, why: "save-failed", docId: id };
+      pushUndo("进度", id, function (i) { return Promise.resolve(InkStore.updateDoc(i, { progress: was })); });
+      trace("把《" + (d.title || "本文") + "》进度设为 " + Math.round(v * 100) + "%", "progress.set", "write");
+      return { ok: true, docId: id, progress: v, was: was, title: str(d.title, 40) };
+    }, { docs: { docId: "哪本书", progress: "0 到 1 的比例（0.5 = 读到一半）" } });
+
+  define("glossary.add", "write", "往术语表加一条「原词 → 译名」（同名以这条覆盖，内置表不动）",
+    { src: "string", dst: "string", pos: "string?" },
+    async function (p) {
+      var src = str(p.src, 40), dst = str(p.dst, 60);
+      if (!src || !dst) return { ok: false, why: "missing-pair" };
+      var before = await API.fetchGlossary();
+      var user = (before && before.data && before.data.user) || [];
+      var had = user.some(function (t) { return t.src === src; });
+      var r = await API.importGlossary([{ src: src, dst: dst, pos: str(p.pos, 12) }], "over");
+      var d = (r && r.data) || {};
+      if (!r || r.code !== 0 || !(d.added || d.over)) return { ok: false, why: "save-failed" };
+      var rest = user.filter(function (t) { return t.src !== src; });
+      pushUndo("术语", src, function () { return API.saveGlossary(rest); });
+      trace("加了术语「" + src + " → " + dst + "」", "glossary.add", "write");
+      return { ok: true, src: src, dst: dst, added: d.added || 0, over: d.over || 0, replaced: had };
+    }, { docs: { src: "原文里的那个词", dst: "读者想看到的译名", pos: "词性（可选，n./v./adj.）" } });
+
+  define("shelf.remove", "write", "从书架上移除一本书（笔记与闪卡不跟着删；EPUB 书仓的正文会一并清掉）",
+    { docId: "string" },
+    async function (p) {
+      var id = str(p.docId, 60);
+      var d = window.InkStore && InkStore.getDoc ? InkStore.getDoc(id) : null;
+      if (!d) return { ok: false, why: "not-found", docId: id };
+      var rec = Object.assign({}, d);
+      pushUndo("书架条目", id, function (i) {
+        return Promise.resolve(InkStore.setShelf([rec].concat(InkStore.getShelf().filter(function (x) { return x.id !== i; }))));
+      });
+      InkStore.removeDocs([id]);
+      trace("从书架移除了《" + (rec.title || "本文") + "》", "shelf.remove", "write");
+      return { ok: true, docId: id, title: str(rec.title, 40), disk: rec.src === "disk", notesKept: true };
+    }, { docs: { docId: "要移除的那本书的 id（shelf.list 里有）" } });
+
+  /* ---------------- JSON Schema 投影（原生 tool_calls 的那份名册） ----------------
+     注册表里的 "string?" 是我们的方言，上游认的是 JSON Schema：
+     带 ? 的落不进 required —— 漏了这一条，模型每轮都会被「缺必填参数」挡掉，
+     看着像它不会用工具，其实是我们没告诉它哪些可以不给。 */
+  var JSON_T = { string: "string", number: "number", boolean: "boolean", array: "array", object: "object" };
+  function toolsPayload() {
+    return regs.map(function (t) {
+      var props = {}, req = [];
+      Object.keys(t.params).forEach(function (k) {
+        var spec = String(t.params[k] || "string");
+        var opt = spec.indexOf("?") >= 0;
+        var ty = JSON_T[spec.replace(/\?/g, "")] || "string";
+        var one = (t.docs && t.docs[k]) || (opt ? "可填可不填" : "必须给");
+        props[k] = { type: ty, description: one };
+        if (!opt) req.push(k);
+      });
+      return { type: "function", function: { name: t.name, description: String(t.desc || t.name),
+        parameters: { type: "object", properties: props, required: req } } };
+    });
+  }
 
   /* ---------------- 白名单校验与执行 ---------------- */
 
@@ -317,6 +606,44 @@
       out.lines.push(a.page ? "出处 第 " + a.page + " 页"
         : (a.anchor ? "出处 " + str(a.anchor, 24) : "不带出处 · 存下后回不去原文"));
       out.count = 1; out.title = "将写 1 条笔记";
+    } else if (name === "notes.update") {
+      out.lines = [str(a.body, 90) || str(a.text, 90)];
+      out.count = 1;
+      out.title = "将改 1 条笔记 · 改前那一份当场可以收回";
+    } else if (name === "notes.delete") {
+      /* 确认卡上必须写清「收不收得回」：读者点下去之后能不能反悔，是他唯一还需要的信息。
+         笔记这条能收回（本轮内），任务与书目那条不能 —— 措辞不能共用一句。 */
+      var dn = (window.InkStore && InkStore.getNote) ? InkStore.getNote(str(a.id, 40)) : null;
+      out.lines = [dn ? str(dn.text, 90) : "（找不到这条：" + str(a.id, 40) + "）"];
+      out.count = 1;
+      out.title = "将删 1 条" + (dn && dn.kind === "highlight" ? "闪卡" : "笔记") + " · 本轮内可以收回";
+    } else if (name === "tasks.delete") {
+      var dt = ((window.API && API.localTasks && API.localTasks()) || []).filter(function (t) { return t.id === str(a.id, 40); })[0];
+      out.lines = [dt ? str(dt.title || dt.x, 90) : "（找不到这条：" + str(a.id, 40) + "）",
+        "本机没有回收站 · 这条删了不可恢复"];
+      out.count = 1;
+      out.title = "将删 1 条任务 · 删了收不回";
+    } else if (name === "shelf.remove") {
+      var dr = (window.InkStore && InkStore.getDoc) ? InkStore.getDoc(str(a.docId, 60)) : null;
+      out.lines = [dr ? str(dr.title, 60) : str(a.docId, 40),
+        "只移书目 · 笔记与闪卡不跟着删（本轮内可收回这条书目）",
+        dr && dr.src === "disk" ? "EPUB 正文会一并从本机清掉 · 要重读得重新导入" : ""];
+      out.count = 1;
+      out.title = "将从书架移除 1 本书 · 笔记与闪卡原样留着";
+    } else if (name === "cards.suspend" || name === "cards.resume") {
+      out.lines = [str(a.id, 40)]; out.count = 1;
+      out.title = name === "cards.suspend"
+        ? "将暂停 1 张闪卡 · 复习进度原样留着，可收回"
+        : "将恢复 1 张闪卡 · 重新排进复习队列，可收回";
+    } else if (name === "tasks.toggle") {
+      out.lines = [str(a.id, 40)]; out.count = 1;
+      out.title = "将把 1 条任务" + (a.today === false ? "移出" : a.today === true ? "加入" : "翻转") + "今日 · 改得回来";
+    } else if (name === "progress.set") {
+      out.lines = ["进度 " + Math.round(Math.max(0, Math.min(1, Number(a.progress) || 0)) * 100) + "%"];
+      out.count = 1; out.title = "将改这本书的阅读进度 · 改前那个数可以收回";
+    } else if (name === "glossary.add") {
+      out.lines = [str(a.src, 40) + " → " + str(a.dst, 60)];
+      out.count = 1; out.title = "将加 1 条术语 · 同名以这条覆盖，可收回";
     } else if (name === "toc.apply") {
       var sug = (host.tocSuggest && host.tocSuggest()) || [];
       out.lines = sug.slice(0, 8).map(function (r) { return "第 " + (r.lv || 1) + " 级 · " + str(r.x, 40); });
@@ -376,6 +703,11 @@
     validate: validate,
     needConfirm: needConfirm,
     preview: previewOf,
+    /* 原生 tool_calls 那份名册（JSON Schema 投影）：交给 api.js 塞进请求的 tools 字段 */
+    toolsPayload: toolsPayload,
+    /* 循环编排器（ink-loop.js）把它的台账同时记一份到这里：助手面板显示的
+       「它到底干了什么」读的是这份流水，两处各记一份迟早对不上。 */
+    log: function (text, tool, risk) { return trace(text, tool, risk); },
     invoke: invoke,
     /* 一批指令（模型的结构化结果映射成工具调用）：先全部校验，有一条不认就不执行整批 ——
        半批落地比一条不落更难解释，也更难撤销。 */
