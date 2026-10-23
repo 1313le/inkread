@@ -5,7 +5,7 @@
 
 /* ---------- 图标：Lucide 路径内联，离线可用，统一 1.8 描边 ---------- */
 /* 版本号：本机数据面板页脚与备份文件署名共用 */
-window.InkVersion = "1.5.0";
+window.InkVersion = "1.5.1";
 
 window.ICONS = {
   library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
@@ -678,14 +678,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
   /* v2.17 · 换页转场：新页首帧已带着纸（<head> 内联脚本挂的 html.nav-in），动画跑完就把类摘掉，
      别让两个 fixed 伪元素长期占着合成层。
-     v2.19.4 · 680ms → 220ms：与揭纸、印章同一条 200ms 收尾，转场结束后不该再有动作。
+     v2.19.4 · 680ms → 220ms：与揭纸同一条 200ms 收尾，转场结束后不该再有动作。
      摘 nav-in 的同时必须钉住 nav-landed —— 只靠 nav-in 压 .device 的 appIn 的话，
      类一摘 appIn 就重新上膛，已经落地的页面自己淡到 0.264 再往下坠 5px
      （探针 probe-devicereplay.js 实测到的「切换后顿一下」就是它）。 */
   if (document.documentElement.classList.contains("nav-in")) {
-    /* v2.25.1 · 印章回主路径（#92）：这枚印的元素由各页 <head> 内联脚本注入 —— 那是最早执行点，
-       早于新文档首帧快照（实测：body 末尾的 app.js 赶到时 VT 已捕获完新页，元素进不了快照组）。
-       主路径盖印动画见 styles.css 的 ::view-transition-new(ink-seal)；降级路径仍走 body::after。 */
+    /* v1.5.1-A · 印章整条退役：转场里只剩「纸让开」一个动作，画面中心不再落任何东西。
+       下方 220ms 摘类这条逻辑本身不动 —— 它是降级路径幕布的下界（< 时长会让半张纸瞬间消失）。 */
     setTimeout(function () {
       var de = document.documentElement;
       de.classList.add("nav-landed");

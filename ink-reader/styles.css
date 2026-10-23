@@ -2456,12 +2456,17 @@ html.boot-skip .device { animation-delay: 0s; animation-duration: .3s; }
 ::view-transition-old(ink-page) {
   z-index: 1;
   background-color: var(--paper); background-image: var(--grain);
-  animation: vtSheetDown .2s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: vtSheetDown .2s cubic-bezier(.05, .7, .1, 1) both;
 }
-/* 缓动换成 Material standard（.4,0,.2,1）。原来那版用的是 emphasized-in（.3,0,.8,.15），
-   冻帧实测：45% 时间点只走了 11.8% 的距离（89/754px），前 90ms 屏幕几乎不动，最后 60ms
-   才甩出去 —— 「先僵后窜」正是用户说的卡顿感。standard 在 20% 时间点已走 ~14%、
-   45% 时间点 ~70%，起步即动、收尾让位。 */
+/* v1.5.1-A（#346）· 缓动与降级路径对齐成同一条强调减速曲线（.05,.7,.1,1）。
+   上一版用 Material standard（.4,0,.2,1），A/B 实测（probe-v151-smooth，两跳各 3 趟取中位）：
+   click→画面起跑 112/117ms → 101/70ms，click→纸走完 285/294ms → 290/263ms，
+   转场窗口内 ≥50ms 长帧 0~1 条 → 0 条（任务腿）。同一趟里加时长反而更差：
+   260ms 把落地拖到 402/360ms、300ms 拖到 405/409ms，起跑一点都不改善 ——
+   所以「更顺滑」的落点是曲线不是时长，时长保持 200ms。
+   再往前的 emphasized-in（.3,0,.8,.15）是「先僵后窜」那一版，冻帧实测 45% 时间点只走 11.8%。
+   ⚠ 时长若要上调，app.js 摘 nav-in 的 220ms 必须跟着上调：降级路径的幕布靠
+   html.nav-in:not(.vt) 才生成，类一摘半张纸会瞬间消失（220 ≥ 200 是这条的下界）。 */
 @keyframes vtSheetDown { from { transform: none; } to { transform: translateY(100%); } }
 
 /* 降级路径：幕布只在浏览器不认 at-rule 时铺（app.js 探测后给 html 挂 .vt，认了就一条都不画）。
@@ -2478,53 +2483,17 @@ html.nav-in:not(.vt) body::before {
 }
 @keyframes navSheetOut { from { transform: translateY(0); } to { transform: translateY(100%); } }
 
-/* 印章收进揭纸窗口内同步收干，不再晚于纸让开 —— v2.19.3 放在 +180ms/.42s，
-   于是「转场结束了画面还在动」，正是本次要消灭的那类二次动作。
-   只在 nav-in + 降级（:not(.vt)）一条上生成：两条共用是旧版「盖两次」的根因，
-   ::after 只要 content 生成了又没有动画接管，就会以 opacity:1 常驻在纸上。
-   fill 必须是 both 不能是 backwards —— 实测过：backwards 在动画跑完后把 opacity 还给
-   基础样式，而基础样式没写 opacity，于是默认 1，印章在摘类之前整枚复现闪一下。
-   ⚠ 主路径（认了 @view-transition 的浏览器）不落印：快照层挂在 top layer
-   （z-index 2147483647），新文档里任何 position:fixed 的实时装饰在转场期间都被它整个
-   盖住 —— 冻帧截图里正文区中心根本没有印章。要让它被看见只能推迟到纸让开之后
-   （delay ≥200ms），那正是刚消灭的那类二次动作。主路径因此只剩一个动作：整张旧页向下掀走。 */
-html.nav-in:not(.vt) body::after {
-  content: "墨"; position: fixed; left: 50%; top: 50%; z-index: 941; pointer-events: none;
-  display: grid; place-items: center; width: 46px; height: 46px; margin: -23px 0 0 -23px;
-  background: var(--accent); color: var(--on-accent); border-radius: var(--radius-8);
-  font-family: var(--font-kai); font-size: var(--fs-26); line-height: 1;
-  animation: navSeal .2s cubic-bezier(.2, 0, 0, 1) both;
-}
-/* 起手偏 6°、落地压回 .95 再回正 —— 手盖的印不会摆正；墨迹随后收干。
-   时长与揭纸同取 200ms：印干的那一刻就是纸让完的那一刻，转场之后画面不再有动作。 */
-@keyframes navSeal {
-  0%   { opacity: 0; transform: scale(1.42) rotate(-6deg); }
-  34%  { opacity: 1; transform: scale(.95) rotate(-1.2deg); }
-  62%  { opacity: 1; transform: scale(1) rotate(0deg); }
-  100% { opacity: 0; transform: scale(1) rotate(0deg); }
-}
-/* v2.25.1 · 印章回主路径（#92）：快照层盖住一切 live 的 fixed 装饰（v2.19.4 实测定论），
-   解法不是推迟动画，而是让这枚印成为「快照的一部分」：新文档放一枚
-   view-transition-name: ink-seal 的元素（app.js 在 nav 到达时注入），浏览器为它单开一个
-   快照组，::view-transition-new(ink-seal) 在 top layer 里播盖印 —— 不再被旧页快照盖压。
-   时间账：live 元素 0–200ms 恒为全印（快照图源必须是完整一枚印），落地收干；
-   快照组自 t=0 盖印、200ms 末帧收干 —— 两者在同一收尾窗口交接，之后不再有动作。
-   降级路径不注入此元素，印仍由上面的 body::after 盖；减少动效下不注入（无 at-rule 路径）。 */
-.nav-seal-live {
-  position: fixed; left: 50%; top: 50%; margin: -23px 0 0 -23px;
-  width: 46px; height: 46px; display: grid; place-items: center;
-  background: var(--accent); color: var(--on-accent); border-radius: var(--radius-8);
-  font-family: var(--font-kai); font-size: var(--fs-26); line-height: 1; font-style: normal;
-  pointer-events: none; opacity: 0; z-index: 942;
-}
-html.nav-in .nav-seal-live {
-  view-transition-name: ink-seal;
-  opacity: 1;
-  /* 收干对到快照组末帧（200ms）：80ms 内落定，不给转场留二次动作 */
-  animation: sealDry .08s linear .2s both;
-}
-@keyframes sealDry { from { opacity: 1; } to { opacity: 0; } }
-::view-transition-new(ink-seal) { z-index: 3; animation: navSeal .2s cubic-bezier(.2, 0, 0, 1) both; }
+/* v1.5.1-A（#346）· 转场里的印章整条退役。
+   用户反馈「过渡动画过快导致图标看起来像 bug」—— 那枚 46px 的「墨」印在 200ms 里做完
+   scale 1.42→0.95→1、rotate −6°→0、淡出，而整场转场也只有 200ms：满不透明度只存在
+   111→166ms（55ms，60Hz 下约 3~4 帧），帧数不足以读成「盖章」，只够读成「闪了一下」。
+   冻帧与逐帧读数在 .work/v151-nav/probe.log、probe2b.log。
+   删掉的是四条：降级路径的 html.nav-in:not(.vt) body::after + @keyframes navSeal、
+   主路径的 .nav-seal-live / html.nav-in .nav-seal-live（view-transition-name: ink-seal）
+   + @keyframes sealDry + ::view-transition-new(ink-seal)，以及七页 <head> 内联脚本里
+   注入 <i class="nav-seal-live"> 那一段。转场自此只剩一个动作：整张旧页向下掀走。
+   不属于转场、因此保留的印章：开屏 .boot-seal（「应用启动」这件事，见上方 bootSeal）
+   与天幕 .sc-seal。 */
 
 /* 新页不做入场淡入：它的「到达」由揭纸（或快照层的掀走）负责。
    nav-landed 是 v2.19.4 补的钉子 —— app.js 在 260ms 摘掉 nav-in，只靠 nav-in 压制的话，
@@ -2532,14 +2501,15 @@ html.nav-in .nav-seal-live {
    写在 html.boot-skip .device 之后：两条特异性相同，靠源序取胜。 */
 html.nav-in .device, html.nav-landed .device { animation: none; }
 
-/* 减少动效：不铺纸、不落印、不开屏淡入（app.js 侧同步跳过拦截，直接走原生跳转）。
+/* 减少动效：不铺纸、不开屏淡入（app.js 侧同步跳过拦截，直接走原生跳转）。
    伪元素用 display:none 而不是 animation:none —— content 只在带 nav-in 时存在，
    停了动画它反而会以满不透明度常驻盖住整屏，脚本一慢就是一片下不去的纸。
-   .device 那条是补 #61 的无障碍缺口：v2.19.3 只挡了幕布，开屏 appIn 漏挡。 */
-html[data-reduce="on"].nav-in body::before, html[data-reduce="on"].nav-in body::after { display: none; }
+   .device 那条是补 #61 的无障碍缺口：v2.19.3 只挡了幕布，开屏 appIn 漏挡。
+   v1.5.1-A 起这里只剩 body::before 一条：印章整族已随 #346 退役，::after 不再由 nav-in 生成。 */
+html[data-reduce="on"].nav-in body::before { display: none; }
 html[data-reduce="on"] .device { animation: none; }
 @media (prefers-reduced-motion: reduce) {
-  html.nav-in body::before, html.nav-in body::after { display: none; }
+  html.nav-in body::before { display: none; }
   .device { animation: none; }
 }
 
