@@ -1,8 +1,8 @@
 /* ============================================================
    ink-agent.js —— 主脑工具层（v2.23 W1d′ 首刀）
    ------------------------------------------------------------
-   做的事：把「主脑能碰应用」这件事收成一个面 —— 九枚工具、一份白名单、
-   一套确认与撤销。工具本体不猜模型想要什么：调用方（阅读助手）交来指令，
+   做的事：把「主脑能碰应用」这件事收成一个面 —— 一张工具名册、一套确认与撤销。
+   工具本体不猜模型想要什么：调用方（阅读助手）交来指令，
    这里逐条对着注册表校验，认不出的名字、缺必填参数、参数类型不对，一律不执行。
 
    为什么写操作必须有确认与撤销：模型说「给这本书建 5 张卡」时，它并不知道自己
@@ -97,7 +97,7 @@
      批量建 5 张卡时所有闭包会共用最后一个 id，撤销五条只删得掉最后一条。 */
   function pushUndo(kind, id, fn) { undoQ.push({ kind: kind, id: id, at: Date.now(), fn: fn }); }
 
-  /* ---------------- 工具名册：首刀七枚 + v1.3 目录两枚 ---------------- */
+  /* ---------------- 工具名册：首刀九枚 + v1.4 补十四枚 + v1.5 产物三枚 ---------------- */
 
   define("shelf.list", "read", "列出书架上的书（书名 / 类别 / 进度）", {}, function () {
     var shelf = (window.InkStore && InkStore.getShelf()) || [];
@@ -531,6 +531,167 @@
       return { ok: true, docId: id, title: str(rec.title, 40), disk: rec.src === "disk", notesKept: true };
     }, { docs: { docId: "要移除的那本书的 id（shelf.list 里有）" } });
 
+  /* ---------------- v1.5-S4 E2：产物三枚（写要点头，读自动） ----------------
+     两道本地校验各归一处，不许在这里再量一遍长度：
+     · 容量闸归账本（api.js 的 setArt 一处，超预算退成索引行），这里只把「这份没存下正文」
+       如实读回来上屏 —— 两处各量一次，超没超就变成两个答案。
+     · 引用完整性只有工具层判得了：它才知道架上真有哪些书、那本书里真有哪几页。
+       对不上出处的依据剔掉，而不是让它跟着产物落进读者本机、下次同步到另一台设备。
+     校验口径是「这本书里查得到」，不是方案原文那句「命中本轮 retrieve() 的 passage」：
+     两个宿主都没把本轮 passages 递进 InkLoop.run（brain.js loopAsk / reader-app 助手），
+     resumeTools 更是显式递 passages: []，按检索命中判会在点头落地那一趟恒判不出。
+     本轮真捞了几段仍然如实记账（source.passages），只是不当剔除的依据。 */
+  var CITE_BOOK = /《([^》]{1,40})》/g;
+  var CITE_PAGE = /第\s*([0-9]{1,4})\s*页/g;
+  var CITE_ANCHOR = /#[A-Za-z0-9][A-Za-z0-9_.:-]{1,59}/g;
+  var ART_READ_MAX = 40000;   /* 读回来的正文进上下文：一份 70 万字的产物整份喂回去，下一轮必被上游拒 */
+  function citeFlat(s) { return String(s == null ? "" : s).replace(/\s+/g, ""); }
+  function citeCut(s) { return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, 80); }
+
+  /* 一本书可对证的事实：它本机真有哪些页码、哪些锚点。没解析过正文的书没有事实可查。 */
+  function citeFacts(d) {
+    var list = (window.Brain && Brain.corpus) ? (Brain.corpus(d.id) || []) : [];
+    var f = { title: citeCut(d.title) || "这本书", has: list.length > 0, pages: {}, anchors: {} };
+    list.forEach(function (b) {
+      if (b.page) f.pages[b.page] = 1;
+      if (b.anchor) f.anchors[citeFlat(b.anchor)] = 1;
+    });
+    return f;
+  }
+
+  /* 逐行判：一行里出现《书名》才算一条出处声明（裸的「第 12 页」不知归谁，不算声明也不挑错）。
+     查得出的留在正文里；查不出的整行剔掉并说清为什么 —— 半行半句地改正文会把模型的话截断。 */
+  function citeCheck(md) {
+    var src = String(md == null ? "" : md);
+    var marks = src.match(CITE_BOOK) || [];
+    var shelf = (window.InkStore && InkStore.getShelf) ? (InkStore.getShelf() || []) : [];
+    var idx = {};
+    shelf.forEach(function (d) {
+      if (!d || !d.id || !d.title) return;
+      var k = citeFlat(d.title);
+      if (k && !idx[k]) idx[k] = d;
+    });
+    /* 架上空空：一句都无从对证。判它「全查不出」会把「先写一份再导入书」这条路堵死，
+       所以这里叫「查不了」而不叫「查无」—— 正文原样留着，一条都不剔。 */
+    if (!Object.keys(idx).length) {
+      return { md: src, dropped: [], cites: marks.length, unchecked: marks.length };
+    }
+    var cache = {}, keep = [], out = { md: src, dropped: [], cites: 0, unchecked: 0 };
+    src.split("\n").forEach(function (line) {
+      var named = line.match(CITE_BOOK) || [];
+      if (!named.length) { keep.push(line); return; }
+      out.cites++;
+      var bad = "", known = [];
+      named.forEach(function (mk) {
+        if (bad) return;
+        var k = citeFlat(mk.slice(1, -1));
+        if (!k) return;
+        if (!idx[k]) { bad = "架上没有" + mk + "这本书"; return; }
+        if (known.indexOf(k) < 0) known.push(k);
+      });
+      if (!bad) {
+        if (known.length !== 1) out.unchecked++;   /* 同一行两本书：那句页码不知归谁，不判 */
+        else {
+          var f = cache[known[0]] || (cache[known[0]] = citeFacts(idx[known[0]]));
+          if (!f.has) out.unchecked++;             /* 书在架上但本机没正文：无从对证 */
+          else {
+            (line.match(CITE_PAGE) || []).forEach(function (mk) {
+              if (bad) return;
+              var n = parseInt(String(mk).replace(/[^0-9]/g, ""), 10) || 0;
+              if (!f.pages[n]) bad = "《" + f.title + "》没有第 " + n + " 页";
+            });
+            (line.match(CITE_ANCHOR) || []).forEach(function (mk) {
+              if (bad) return;
+              if (!f.anchors[citeFlat(mk.slice(1))]) bad = "《" + f.title + "》里找不到锚点 " + mk;
+            });
+          }
+        }
+      }
+      if (bad) out.dropped.push({ line: citeCut(line), why: bad });
+      else keep.push(line);
+    });
+    if (out.dropped.length) out.md = keep.join("\n");
+    return out;
+  }
+
+  /* 这一份产物是谁写出来的：只有从 InkLoop 的续跑通路落下来的，才算 loop。
+     写操作一律要点头，而点头后落地的唯一通路就是 InkLoop.resume —— 它在办这一批之前
+     先把正本改写成 status:"await"（循环本身早已改成 queue-and-continue，不再停在 await 上）。
+     助手自己攒的那批（没起循环）落到这里 LAST 为空或已收尾，判 manual。 */
+  function artRound() {
+    var last = (window.InkLoop && InkLoop.last) ? InkLoop.last() : null;
+    return last && last.status === "await" ? last : null;
+  }
+
+  define("artifact.write", "write", "把这一轮的结论写成一份产物（报告 / 大纲 / 数据表）存进本机产物账，可以反复读、可以下载、可以接着改",
+    { title: "string", markdown: "string", kind: "string?", id: "string?", docId: "string?" },
+    async function (p) {
+      var title = str(p.title, 120), md = String(p.markdown == null ? "" : p.markdown);
+      if (!title) return { ok: false, why: "no-title" };
+      if (!md.trim()) return { ok: false, why: "no-body" };
+      var c = citeCheck(md);
+      if (c.dropped.length && !c.md.trim()) return { ok: false, why: "all-citations-dropped", dropped: c.dropped.slice(0, 3) };
+      var id = str(p.id, 40), was = id ? API.artGet(id) : null;
+      var restore = !was || !!String(was.md || "").trim();   /* 改前那版只剩索引时没正文可还原，不谎称收得回 */
+      var round = artRound();
+      var rec = { id: id, title: title, md: c.md,
+        source: { docId: str(p.docId, 60) || curDocId() || "",
+          passages: window.Brain && Brain.roundPassages ? Brain.roundPassages().length : 0,
+          via: round ? "loop" : "manual" },
+        audit: { rounds: round ? (round.rounds || 0) : 0, calls: round ? (round.calls || 0) : 0, rejected: c.dropped.length } };
+      var kind = str(p.kind, 20).toLowerCase();
+      if (kind) rec.kind = kind;
+      var r = API.artWrite(rec);
+      if (!r || !r.ok) return { ok: false, why: "write-failed", note: str(r && r.why, 80) };
+      var a = r.art || {};
+      if (restore) pushUndo("产物", a.id, function (aid) {
+        return Promise.resolve(was ? API.artWrite(was) : API.artDelete(aid));
+      });
+      trace("写下产物《" + title + "》· " + a.size + " 字" +
+        (c.dropped.length ? " · 剔了 " + c.dropped.length + " 条查无出处的依据" : ""), "artifact.write", "write");
+      if (host.refresh) host.refresh();
+      return { ok: true, id: a.id, title: str(title, 60), kind: a.kind, size: a.size,
+        indexOnly: a.indexOnly === true, cites: c.cites, unchecked: c.unchecked,
+        rejected: c.dropped.length, dropped: c.dropped.slice(0, 3), canUndo: restore,
+        note: a.indexOnly === true
+          ? "这份正文 " + a.size + " 字，超过本机单份 80 万字的预算，账上只留下索引与摘要：正文没存下来。要留全文就写短一些。"
+          : "" };
+    }, { docs: { title: "产物标题，写在产物卡上", markdown: "正文（Markdown）", kind: "档位：report 报告 / outline 大纲 / dataset 数据表，不填按 report",
+      id: "要改写已有那一份就给它现在的 id（artifact.list 里有）；不给就是新写一份", docId: "这份是关于哪本书的，不填即当前这本" } });
+
+  define("artifact.list", "read", "列出本机产物账里都有什么（id、标题、档位、字数、还留没留正文）",
+    { kind: "string?", limit: "number?" },
+    async function (p) {
+      var all = API.artList() || [];
+      var kind = str(p.kind, 20).toLowerCase();
+      var n = Math.max(1, Math.min(30, Number(p.limit) || 10));
+      var list = kind ? all.filter(function (a) { return String(a.kind).toLowerCase() === kind; }) : all;
+      trace("翻了产物账：" + list.length + " 份", "artifact.list", "read");
+      return { ok: true, count: list.length, total: all.length,
+        artifacts: list.slice(0, n).map(function (a) {
+          return { id: a.id, title: str(a.title, 60), kind: a.kind, size: a.size,
+            indexOnly: a.indexOnly === true, rejected: (a.audit || {}).rejected || 0, excerpt: str(a.excerpt, 70) };
+        }) };
+    }, { confirm: false, docs: { kind: "只看某一档（report / outline / dataset），不填即全列", limit: "最多列几份（默认 10，上限 30）" } });
+
+  define("artifact.read", "read", "读回本机某一份产物的正文 —— 接着改它就靠这一枚",
+    { id: "string" },
+    async function (p) {
+      var id = str(p.id, 40), a = API.artGet(id);
+      if (!a) return { ok: false, why: "not-found", id: id };
+      var body = String(a.md || "");
+      trace("读回了产物《" + str(a.title, 40) + "》", "artifact.read", "read");
+      if (!body.trim()) {
+        return { ok: true, id: a.id, kind: a.kind, title: str(a.title, 60), markdown: "",
+          size: a.size, indexOnly: true, excerpt: str(a.excerpt, 200),
+          note: "这一份当初超了本机预算，账上只留下索引与摘要，正文读不回来" };
+      }
+      var cut = body.length > ART_READ_MAX ? body.slice(0, ART_READ_MAX) : body;
+      return { ok: true, id: a.id, kind: a.kind, title: str(a.title, 60), markdown: cut,
+        size: a.size, indexOnly: false, truncated: cut.length !== body.length,
+        rejected: (a.audit || {}).rejected || 0, updatedAt: a.updatedAt };
+    }, { confirm: false, docs: { id: "要读的那一份的 id（artifact.list 里有）" } });
+
   /* ---------------- JSON Schema 投影（原生 tool_calls 的那份名册） ----------------
      注册表里的 "string?" 是我们的方言，上游认的是 JSON Schema：
      带 ? 的落不进 required —— 漏了这一条，模型每轮都会被「缺必填参数」挡掉，
@@ -644,6 +805,16 @@
     } else if (name === "glossary.add") {
       out.lines = [str(a.src, 40) + " → " + str(a.dst, 60)];
       out.count = 1; out.title = "将加 1 条术语 · 同名以这条覆盖，可收回";
+    } else if (name === "artifact.write") {
+      /* 确认卡上就把「有几条依据会被剔掉」说清：落库之后再报，读者已经点过头了 ——
+         剔行这件事必须在点头之前看得见，否则「按你说的办」办掉的是被改过的东西。 */
+      var ac = citeCheck(String(a.markdown == null ? "" : a.markdown));
+      out.lines = [str(a.title, 60) + " · " + (str(a.kind, 20).toLowerCase() || "report") + " · " + ac.md.length + " 字"];
+      if (ac.dropped.length) out.lines.push("将剔除 " + ac.dropped.length + " 条查无出处的依据（" +
+        ac.dropped.slice(0, 2).map(function (d) { return d.why; }).join("；") + "）");
+      if (ac.unchecked) out.lines.push("另有 " + ac.unchecked + " 条出处本机对不上证，原样留着");
+      if (str(a.id, 40)) out.lines.push("这是改写已有那一份 · 改前那一版可以收回");
+      out.count = 1; out.title = "将写 1 份产物进本机产物账";
     } else if (name === "toc.apply") {
       var sug = (host.tocSuggest && host.tocSuggest()) || [];
       out.lines = sug.slice(0, 8).map(function (r) { return "第 " + (r.lv || 1) + " 级 · " + str(r.x, 40); });

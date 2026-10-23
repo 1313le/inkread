@@ -1338,6 +1338,56 @@
   var history = [];      /* [{role, content}] 最近 8 条，页面内保留 */
   var MAX_TURNS = 8;
 
+  /* v1.5-S4 E4 —— 图只在「这一轮」活着。
+     base64 一旦进 history / localStorage，4MB 的同步上限与 localStorage 配额会被一起炸开，
+     所以这里把三件事定死：最多几张、多大才收、history 只留 [图 × n] 占位。 */
+  var MAX_IMG_N = 3;
+  var MAX_IMG_BYTES = 200 * 1024;
+  var IMG_RE = /^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
+
+  function imgBytes(url) {
+    var s = String(url || ""), i = s.indexOf(",");
+    return i < 0 ? 0 : Math.floor((s.length - i - 1) * 3 / 4);
+  }
+
+  /* 只收 canvas 重画过的那一种形状（data:image + base64）。原文件不直传：
+     手机书页动辄几 MB，压缩是界面的活，这里是最后一道验收。 */
+  function cleanImages(list) {
+    var out = [], dropped = 0;
+    (Array.isArray(list) ? list : []).forEach(function (it) {
+      var url = typeof it === "string" ? it : String((it && (it.url || it.dataUrl)) || "");
+      if (out.length >= MAX_IMG_N || !IMG_RE.test(url) || imgBytes(url) > MAX_IMG_BYTES) { dropped++; return; }
+      out.push({ url: url, bytes: imgBytes(url), name: String((it && it.name) || "图").slice(0, 60) });
+    });
+    return { imgs: out, dropped: dropped };
+  }
+
+  /* 纯文本轮的 content 必须是字符串（有些兼容层对数组 content 更挑）；
+     只有本轮真有图才升成数组。 */
+  function userContent(q, imgs) {
+    if (!imgs || !imgs.length) return q;
+    var parts = [{ type: "text", text: q || "请看这张图，说说你看到了什么。" }];
+    imgs.forEach(function (im) { parts.push({ type: "image_url", image_url: { url: im.url } }); });
+    return parts;
+  }
+
+  /* history 只落占位：图本身绝不进这一格（同步与配额红线）。 */
+  function histText(q, n) {
+    var s = String(q || "");
+    return n ? (s ? s + "\n" : "") + "[图 × " + n + "]" : s;
+  }
+
+  /* 「这家不认图」的证据：只有 400 且响应体点到图 / 视觉才认。
+     401 / 403 / 429 / 超时一律不翻 —— 松一次就会把「密钥写错」静默记成「模型不认图」。 */
+  function visionRejected(e) {
+    var s = Number(e && e.status) || 0;
+    var b = String((e && e.body) || "");
+    if (s !== 400 || !b) return false;
+    return /image|vision|multimodal|图片|图像|视觉/i.test(b);
+  }
+
+  var VISION_NOTE = "这家不认图，改用文字描述。";
+
   /* 人设文本搬到 M2 提示词注册表（featureKey brain.chat）—— 这里只交「怎么称呼这位读者」。 */
   function persona() {
     var name = window.InkProfile ? InkProfile.name() : "读者";
@@ -1354,7 +1404,7 @@
     });
   }
 
-  function buildMessages(q, mems, passages, docId) {
+  function buildMessages(q, mems, passages, docId, imgs) {
     var parts = [persona()];
     var pre = preamble("chat");
     if (pre) parts.push("", pre);
@@ -1364,38 +1414,84 @@
     }
     var msgs = [{ role: "system", content: parts.join("\n") }];
     history.slice(-MAX_TURNS).forEach(function (h) { msgs.push(h); });
-    msgs.push({ role: "user", content: q });
+    msgs.push({ role: "user", content: userContent(q, imgs) });
     return msgs;
   }
+
+  /* 本轮 retrieve() 真捞上来的那几段原文。产物工具写 source.passages 读的就是这一格：
+     「这一份是带着几段原文写出来的」是产物卡要说得出的一句实话。
+     换问即清（ask 开头），捞到即存（ask 单轮 / loopAsk）；resumeTools 不清 ——
+     读者点完确认才落的那条产物，出处属于上一问，不是这一次点击。 */
+  var ROUND_PASSAGES = [];
 
   async function ask(text, opts) {
     var o = opts || {};
     var q = String(text || "").trim();
-    if (!q) return { reply: "", refs: [], mode: "none" };
+    var ci = cleanImages(o.images);
+    var imgs = ci.imgs;
+    var attN = imgs.length;            /* 读者真附上的张数：history 占位与回执都按它 */
+    if (!q && !attN) return { reply: "", refs: [], mode: "none" };
     /* v2.2：记忆指令优先于一切（记住 / 忘掉 / 你记得我什么）—— 命中即办，不走模型 */
-    var mc = memIntent(q);
+    var mc = q ? memIntent(q) : null;
     if (mc) { observe("chat", {}); return mc; }
     var docId = o.docId || CUR_DOC;
     var mems = pickMems(q, 4);
+    /* 换问就清账：上一问捞的原文不算这一问的出处（产物工具写 source.passages 读这一格） */
+    ROUND_PASSAGES = [];
+
+    /* 该不该带图在进模型之前定下来：能力位已经翻 false 就不再撞一次 400；
+       太大 / 格式不对的也不发 —— 理由要能说出口，不能悄悄丢。 */
+    var imgNote = ci.dropped ? ("有 " + ci.dropped + " 张图太大或不是可发的图片格式，没有发出去。") : "";
+    if (imgs.length && !API.capGet("vision")) { imgs = []; imgNote = VISION_NOTE; }
+    if (!q && !imgs.length) {
+      return { reply: "", refs: [], mode: "none", imgs: attN, note: imgNote || VISION_NOTE };
+    }
 
     if (window.API && API.hasModel && API.hasModel()) {
+      /* v1.5-S4 E1：宿主点名要工具回合就交 InkLoop —— 模型自己决定读哪一段、调哪枚工具，
+         看完再答。不进这一支时下面这条单轮路径一个字没动（今天的形态）。
+         带图这一轮不走工具循环：图的形状只该出现在「最后一问」上，循环会把消息带进多轮账，
+         而图不进 history / 不进存储是本期红线。 */
+      if (o.useTools && !attN && window.InkLoop) return await loopAsk(q, o, docId, mems);
       /* 在线才需要先捞正文候选喂给模型；离线时 offline() 自己会捞，不必捞两遍 */
       var passages = await retrieve(q, docId, 6);
-      var msgs = buildMessages(q, mems, passages, docId);
+      ROUND_PASSAGES = passages;
       /* 随问附上的原文量就是 passageLines 拼出去的那一份 —— 脚注报的数必须与发出去的一致（v1.3 D4） */
       var ctxChars = passages.length ? passageLines(passages, docId).join("\n").length : 0;
       var pr = API.promptParams("brain.chat");
       var st = { net: 0 };
-      var out = "";
-      try {
-        await API.llmMsgs(msgs, Object.assign({
+      /* 一发 request：图上不上按 list 定 —— 只有本轮真有图时 user content 才是数组。
+         每发各自累计文本，失败重发时不会把上一发的半句带进正文；
+         seen 是越出这一发的「已流出的最后一句」—— 读者按停止时 fire 会抛，
+         out 还没被赋值，只有它能把半句原样交回去（S1b）。 */
+      var seen = "";
+      async function fire(list) {
+        var acc = "";
+        seen = "";
+        await API.llmMsgs(buildMessages(q, mems, passages, docId, list), Object.assign({
           cfg: pr.cfg, signal: o.signal || null, stats: st,
           onDelta: function (piece, all) {
-            out = all != null ? all : out + piece;
-            if (o.onDelta) o.onDelta(piece, out);
+            acc = all != null ? all : acc + piece;
+            seen = acc;
+            if (o.onDelta) o.onDelta(piece, acc);
           }
         }, pr.send));
-        history.push({ role: "user", content: q });
+        return acc;
+      }
+      var out = "", fallNote = "";
+      try {
+        try {
+          out = await fire(imgs);
+        } catch (e0) {
+          /* 只有「400 且点到图」才翻能力位；这一轮当场退回纯文本重发一次，
+             读者不必自己删图重问。别的错照旧走下面的兜底。 */
+          if (!imgs.length || !visionRejected(e0)) throw e0;
+          API.capSet("vision", false);
+          fallNote = VISION_NOTE;
+          imgs = [];
+          out = await fire(null);
+        }
+        history.push({ role: "user", content: histText(q, attN) });
         history.push({ role: "assistant", content: out });
         if (history.length > MAX_TURNS * 2) history = history.slice(-MAX_TURNS * 2);
         observe("chat", {});
@@ -1403,29 +1499,271 @@
           reply: out, refs: mems.map(function (m) { return m.id; }),
           mode: "online", model: (API.modelCfg() || {}).model,
           passages: passages.length, hits: passages,
-          ctxChars: ctxChars, ctxItems: passages.length, net: st.net
+          ctxChars: ctxChars, ctxItems: passages.length, net: st.net,
+          imgs: attN, note: [imgNote, fallNote].filter(Boolean).join(" ") || undefined
         };
       } catch (e) {
         /* 读者按了停止：半句照原样交回去，不去兜离线库。
            「我叫停的」被显示成「模型答不上来」，会让读者怀疑刚接好的模型坏了；
            已流出的内容也不写进 history —— 半截话进上下文，下一轮就顺着半截编。 */
         if (e && (e.aborted || (o.signal && o.signal.aborted))) {
-          return { reply: out, refs: [], mode: "stopped", aborted: true, passages: passages.length, hits: passages };
+          return { reply: out || seen, refs: [], mode: "stopped", aborted: true, passages: passages.length, hits: passages, imgs: attN };
         }
         var off = await offline(q, { docId: docId });
         /* 重问过几次要说得出（v1.3 D3）：只报「失败」会把「等了两次才没戏」说成「一次都没通」 */
         off.note = "模型请求失败：" + API.netErrPhrase(e) +
-          API.retryTail(e && e.netRetried) + "，已改用离线库作答。";
+          API.retryTail(e && e.netRetried) + "，已改用离线库作答。" +
+          ([imgNote, fallNote].filter(Boolean).length ? " " + [imgNote, fallNote].filter(Boolean).join(" ") : "");
         off.refs = off.refs || mems.map(function (m) { return m.id; });
+        off.imgs = attN;
         return off;
       }
     }
     observe("chat", {});
+    if (attN) {
+      return { reply: "", refs: [], mode: "offline", imgs: attN,
+        note: "现在还没接模型，看不了图 —— 先到「模型配置」接一家认图的服务，接好后把图再发一次。" };
+    }
     var r = await offline(q, { docId: docId });
     return r;
   }
 
+  /* ============================================================
+     v1.5-S4 E1 —— 主脑页的自主多轮回路
+     ------------------------------------------------------------
+     为什么这一段非不可：S2 把回合编排器建好了，却只长在阅读页助手上。主脑页既没载
+     ink-agent/ink-loop，ask() 也没把工具名册递出去 —— 模型「只能聊天」不是上游不给力，
+     是我们没把工具交给它。这一节只加通路不改语义：单轮那条路（上面那段）原样留着，
+     不接 useTools 就压根不进这里，能力位被翻成不认原生 tool_calls 时循环自己降级。
+
+     账目只认 InkLoop.snap() 那一份正本（rounds/calls/landed/net/ms），这里不自造计数器。
+     ============================================================ */
+
+  /* 宿主桥：有回调才挂，别把 undefined 传下去让循环去猜。
+     onText 的两个参数是「这一截」与「本轮这一截」，不是全局累计 —— 界面按轮各起一段流，
+     喂全局会把第 1 轮的话在第 2 轮重打一遍。 */
+  function loopHost(o) {
+    var h = {};
+    if (o.signal) h.signal = o.signal;
+    ["onPlan", "onEvent", "onTool", "onAwait"].forEach(function (k) { if (o[k]) h[k] = o[k]; });
+    if (o.onDelta) h.onText = function (piece, roundText) {
+      try { o.onDelta(piece, roundText); } catch (e) {}
+    };
+    return h;
+  }
+
+  async function loopAsk(q, o, docId, mems) {
+    var passages = await retrieve(q, docId, 6);
+    ROUND_PASSAGES = passages;
+    var msgs = buildMessages(q, mems, passages, docId);
+    /* 随问附上的字数就是 passageLines 真发出去的那一份（v1.3 D4 同一条判据） */
+    var ctxChars = passages.length ? passageLines(passages, docId).join("\n").length : 0;
+    var pr = API.promptParams("brain.chat");
+    var r;
+    try {
+      r = await InkLoop.run({ goal: q, stream: true, messages: msgs, prm: pr, host: loopHost(o) });
+    } catch (e) {
+      r = { status: "error", why: "net", answer: "", partial: "", plan: [], await: [],
+        rounds: 0, calls: 0, landed: 0, net: 0, note: API.netErrPhrase(e) };
+    }
+    return await loopTail(r, q, { docId: docId, mems: mems, passages: passages, ctxChars: ctxChars });
+  }
+
+  /* 读者点完「确认落地 / 先不」之后接着跑。prev 只从 InkLoop.last() 取正本，
+     界面不留副本 —— 留了就会有两份「刚才那一轮」，撤销与账对不上号。 */
+  async function resumeTools(o) {
+    o = o || {};
+    var prev = window.InkLoop && InkLoop.last();
+    if (!prev || !prev.ctx) {
+      return { reply: "", mode: "error", why: "no-ctx", note: "这一步接不上刚才那轮了，请重新问一次。",
+        plan: [], awaitList: [], rounds: 0, calls: 0, landed: 0, ctxChars: 0 };
+    }
+    var r;
+    try {
+      r = await InkLoop.resume(prev, { signal: o.signal || null, refuse: !!o.refuse,
+        finishOnly: !!o.finishOnly });
+    } catch (e) {
+      r = { status: "error", why: "net", answer: "", partial: "", plan: prev.plan || [], await: [],
+        rounds: prev.rounds || 0, calls: prev.calls || 0, landed: prev.landed || 0,
+        note: API.netErrPhrase(e) };
+    }
+    var out = await loopTail(r, "", { docId: o.docId || CUR_DOC, mems: [], passages: [], ctxChars: 0 });
+    /* 续跑这一趟没重发原文：脚注那句「随问附上 N 字」不该再报一遍，
+       报了就是把上一问的字数记在这次点头的账上。 */
+    out.ctxChars = 0; out.ctxItems = 0; out.continued = true;
+    if (!out.reply) out.reply = o.refuse ? "好，这一条不落。已经办完的那些没动。" : "按你点头的这几条办完了。";
+    return out;
+  }
+
+  /* 循环的出口摊成界面认识的那几种收尾，每种各说各的话：
+     答完了 / 被叫停 / 触顶 / 压根没起跑 / 模型出错本机库接手 —— 不许混成一句「失败了」。 */
+  async function loopTail(r, q, m) {
+    var base = {
+      awaitList: (r && r.await) || [], via: r && r.via,
+      rounds: (r && r.rounds) || 0, calls: (r && r.calls) || 0, landed: (r && r.landed) || 0,
+      plan: (r && r.plan) || [], net: (r && r.net) || 0, ms: (r && r.ms) || 0, note: "",
+      refs: (m.mems || []).map(function (x) { return x.id; }),
+      passages: (m.passages || []).length, hits: m.passages || [],
+      ctxChars: m.ctxChars || 0, ctxItems: (m.passages || []).length
+    };
+    var st = (r && r.status) || "error";
+    var out;
+    if (st === "answer") out = Object.assign(base, { reply: r.answer || "", mode: "online",
+      model: (API.modelCfg() || {}).model });
+    else if (st === "stopped") out = Object.assign(base, { reply: r.partial || "", mode: "stopped",
+      aborted: true, note: r.note || "" });
+    else if (st === "budget") out = Object.assign(base, { reply: r.answer || "", mode: "budget",
+      note: r.note || "回合用到顶了。" });
+    else if (r.why === "no-model" || r.why === "offline")
+      out = Object.assign(base, { reply: "", mode: "blocked", why: r.why, note: r.note || "" });
+    else if (r.why === "correct-stalled")
+      out = Object.assign(base, { reply: "", mode: "error", why: "correct-stalled", note: r.note || "" });
+    /* 点头续跑那半截（q 为空）出错时不兜离线库：本机库答的是「上一问」那句话，
+       这里根本没有那句话 —— 兜出来的是答非所问，还会被记成上一条回答。 */
+    else if (!q) out = Object.assign(base, { reply: "", mode: "error", why: r.why || "net", note: r.note || "" });
+    else {
+      var off = await offline(q, { docId: m.docId });
+      off.refs = off.refs || base.refs;
+      out = Object.assign(base, { reply: off.reply, mode: "offline", miss: off.miss, ctxChars: 0,
+        note: "模型请求失败：" + (r.note || (r.why || "error")) + API.retryTail(base.net) + "，已改用离线库作答。" });
+    }
+    /* 只有真答完的那两种进上下文：叫停留下的半截话会让下一轮顺着没说完的话编；
+       兜底答案与今天单轮那条路一样也不写进 history。 */
+    if (q && (out.mode === "online" || out.mode === "budget") && out.reply) {
+      history.push({ role: "user", content: q });
+      history.push({ role: "assistant", content: out.reply });
+      if (history.length > MAX_TURNS * 2) history = history.slice(-MAX_TURNS * 2);
+    }
+    if (out.mode === "online" || out.mode === "budget") observe("chat", {});
+    return out;
+  }
+
   function reset() { history = []; }
+
+  /* ============================================================
+     v1.5-S4 E3 · 报告（brain.report）
+     ------------------------------------------------------------
+     与 E2 的 artifact.write 分工：那一枚是模型在自主回合里自己写的，出处只能按
+     「这本书里查得到」对（宿主没把本轮 passages 递进 InkLoop）；这一条是读者点名
+     要一份报告 —— 宿主先检索，把这一轮的原文按段号递进去，所以「依据 i」能按
+     **本轮真捞到的段号**逐条核对。查不到的依据整条剔掉（不改正文其他行），
+     产物卡上明写剔了几条；依据全被剔光则整份拒收（与 E2 的 F5 同一条红线：
+     一份说不出出处的结论就是编的），结论为空也整份拒收，绝不把空报告交进产物区。
+     ============================================================ */
+  function reportFlat(s) { return String(s == null ? "" : s).replace(/\s+/g, ""); }
+  function reportLines(passages, docId) {
+    return passages.map(function (p, i) {
+      return "[" + (i + 1) + "] 《" + (p.docTitle || docTitle(docId) || "本书") + "》" +
+        (p.chapter || "") + " · 第 " + (p.page || "?") + " 页：" + String(p.text || "").slice(0, 200);
+    });
+  }
+  function artBriefLines(n) {
+    var list = (window.API && API.artList) ? (API.artList() || []) : [];
+    return list.slice(0, n || 8).map(function (a) {
+      return "- " + a.id + "｜《" + String(a.title || "未命名") + "》｜" + String(a.kind || "report") +
+        "｜" + (Number(a.size) || 0) + " 字" + (a.indexOnly ? "（只留索引）" : "");
+    });
+  }
+  /* 依据条目的书名 / 章节 / 页码一律从真段落里写，不用模型回的那一份 ——
+     它给错页码也无从冒充，这是「绝不编造出处」的另一半。 */
+  function reportMd(title, conclusion, good, risk, nexts, docId) {
+    var lines = ["# " + title, "", "## 结论", "", conclusion, "", "## 依据", ""];
+    good.forEach(function (e, i) {
+      lines.push((i + 1) + ". 《" + (e.p.docTitle || docTitle(docId) || "本书") + "》" +
+        (e.p.chapter || "") + " · 第 " + (e.p.page || "?") + " 页：" + e.quote +
+        (e.why ? "（" + e.why + "）" : ""));
+    });
+    lines.push("", "## 反证与不确定", "", risk || "（这一轮模型没给出反证与不确定。）", "");
+    lines.push("## 下一步", "");
+    if (nexts.length) nexts.forEach(function (x) { lines.push("- " + x); });
+    else lines.push("（这一轮模型没给出下一步。）");
+    return lines.join("\n");
+  }
+
+  async function report(goal, opts) {
+    var o = opts || {};
+    var q = String(goal || "").trim();
+    if (!q) return { ok: false, why: "no-goal", note: "先说一句这份报告要回答什么。" };
+    if (!(window.API && API.hasModel && API.hasModel())) {
+      return { ok: false, why: "no-model", note: "还没接模型：到右侧「模型配置」填上接口与密钥，再写报告。" };
+    }
+    var docId = o.docId || CUR_DOC;
+    var passages = await retrieve(q, docId, 6);
+    ROUND_PASSAGES = passages;
+    if (!passages.length) {
+      return { ok: false, why: "no-passages",
+        note: "这本书里没检索到与「" + q.slice(0, 30) + "」相关的原文，报告落不了依据。" };
+    }
+    var arts = artBriefLines(6);
+    var usr = "【报告目标】\n" + q +
+      "\n\n【原文 · 本轮检索结果（i 就是段号）】\n" + reportLines(passages, docId).join("\n") +
+      (arts.length ? "\n\n【本机已有的产物】\n" + arts.join("\n") : "");
+    var out;
+    try { out = await API.run("brain.report", usr); }
+    catch (e) {
+      if (e && (e.aborted || (o.signal && o.signal.aborted))) {
+        return { ok: false, why: "stopped", note: "这份报告停在半路，什么都没写。" };
+      }
+      if (e && e.name === "UnstructuredError") {
+        return { ok: false, why: "unstructured", note: "模型没按格式交出报告，这一份没写。" };
+      }
+      return { ok: false, why: "net",
+        note: "模型请求失败：" + API.netErrPhrase(e) + API.retryTail(e && e.netRetried) + "。报告没写。" };
+    }
+    var j = (out && out.j) || {};
+    var conclusion = String(j.conclusion == null ? "" : j.conclusion).trim();
+    if (!conclusion) {
+      var why = String(j.reason == null ? "" : j.reason).trim();
+      return { ok: false, why: "empty-conclusion",
+        note: "这轮没判出可用结论" + (why ? "，原因：" + why : "") + "。报告没有写进产物区。" };
+    }
+    var evs = Array.isArray(j.evidence) ? j.evidence : [];
+    var good = [], dropped = [];
+    evs.forEach(function (e) {
+      var i = Number(e && e.i);
+      var p = (i >= 1 && i <= passages.length && i === Math.floor(i)) ? passages[i - 1] : null;
+      if (!p) {
+        var raw = (e && e.i != null) ? e.i : "?";
+        dropped.push({ i: raw, why: "第 " + raw + " 段原文不在本轮检索结果里" });
+        return;
+      }
+      var text = String(p.text || "");
+      var quote = String((e && e.quote) || "").replace(/\s+/g, " ").trim().slice(0, 160);
+      /* 引文对不上原文就退回真段落的第一句：宁可少一句漂亮话，也不让屏上的
+         「原话」是模型自己编的。 */
+      if (!quote || reportFlat(text).indexOf(reportFlat(quote)) < 0) {
+        quote = text.slice(0, 120) + (text.length > 120 ? "…" : "");
+      }
+      good.push({ i: i, p: p, quote: quote, why: String((e && e.why) || "").trim().slice(0, 60) });
+    });
+    /* 依据一条都没站住 = 这份结论在本轮原文里没有立足点。与 E2 的 F5 同一条红线：
+       宁可整份不落，也不交一份「屏上写着出处、账上一条都对不上」的报告。 */
+    if (!good.length) {
+      return { ok: false, why: "no-evidence",
+        note: evs.length
+          ? "这轮报告的 " + evs.length + " 条依据全都查不到本轮原文（已剔除）。报告没有写进产物区。"
+          : "这轮报告没给出一条能对上的依据。报告没有写进产物区。" };
+    }
+    var nexts = (Array.isArray(j.next) ? j.next : []).map(function (x) { return String(x || "").trim(); })
+      .filter(Boolean).slice(0, 5);
+    var title = String(j.title == null ? "" : j.title).trim().slice(0, 60) || ("报告 · " + q.slice(0, 24));
+    var md = reportMd(title, conclusion, good, String(j.risk == null ? "" : j.risk).trim(), nexts, docId);
+    var w = API.artWrite({ title: title, kind: "report", md: md,
+      source: { docId: docId || "", passages: passages.length, via: "report" },
+      audit: { rounds: 0, calls: 1, rejected: dropped.length } });
+    if (!w || !w.ok) {
+      return { ok: false, why: "write-failed", note: "本机没能存下这一份：" + ((w && w.why) || "存储满") + "。" };
+    }
+    var a = w.art || {};
+    return { ok: true, id: a.id, title: a.title, kind: a.kind, size: a.size,
+      indexOnly: a.indexOnly === true, cites: evs.length, unchecked: 0,
+      rejected: dropped.length, dropped: dropped.slice(0, 3),
+      note: a.indexOnly === true
+        ? "这份正文 " + a.size + " 字，超过本机单份 80 万字的预算，账上只留下索引与摘要：正文没存下来。"
+        : "",
+      reply: "报告已写好：《" + title + "》" +
+        (dropped.length ? "；其中 " + dropped.length + " 条依据查无出处，已剔除。" : "。") };
+  }
 
   /* ============================================================
      v2.7 · Brain.cheer —— 里程碑鼓励文案（展示层在 ink:milestone 事件后调用）
@@ -1600,6 +1938,12 @@
 
     /* 对话 */
     ask: ask,
+    /* v1.5-S4 E3：读者点名要一份报告 —— 宿主先检索、按段号核依据，再落产物账 */
+    report: report,
+    /* v1.5-S4 E1：确认卡上「确认落地 / 先不」走这里接着跑上一轮（prev 只认 InkLoop.last()） */
+    resumeTools: resumeTools,
+    /* v1.5-S4 E2：本轮真捞上来的原文段落（产物工具据此写 source.passages） */
+    roundPassages: function () { return ROUND_PASSAGES.slice(); },
     cheer: cheer,          /* v2.7 里程碑鼓励文案：在线真模型 / 离线模板池，返回纯文本 */
     reset: reset,
     history: function () { return history.slice(); },

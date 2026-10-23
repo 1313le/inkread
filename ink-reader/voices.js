@@ -317,6 +317,24 @@
   function allVoices() { return VOICES; }
 
   /* ------------------------------------------------------------
+     本地音色（v1.5-S5c）：用户自机 TTS 服务，清单在 voices-local.js。
+     不进 VOICES / MAP —— 它们既不是 Edge 也不是云款，音色商城的「启用 / 设为朗读」
+     对它们不成立；只有朗读引擎、多角色面板与试听按需取用。
+     meta() 必须认得它们：引擎拿 meta(voiceK) 判「这款是不是本地」（api.js localMeta）。
+     ------------------------------------------------------------ */
+  function localVoices() {
+    try { return (window.InkVoiceLocal && window.InkVoiceLocal.list) ? window.InkVoiceLocal.list() : []; }
+    catch (e) { return []; }
+  }
+  function localMeta(k) {
+    var ks = String(k || "");
+    if (ks.indexOf("local:") !== 0) return null;
+    var all = localVoices();
+    for (var i = 0; i < all.length; i++) if (all[i].k === ks) return all[i];
+    return null;
+  }
+
+  /* ------------------------------------------------------------
      2. 主题 × 音色配对（预装 8 款，按 id 点名 —— 目录换代也不散）
      ------------------------------------------------------------ */
   var ALIAS = {
@@ -411,7 +429,7 @@
         installed: on.indexOf(v.k) >= 0 || PRELOAD.indexOf(v.k) >= 0 };
     });
   }
-  function meta(k) { return MAP[k] || null; }
+  function meta(k) { return MAP[k] || localMeta(k); }
   function pairFor(themeK) { return PAIR[themeK] || PAIR.paper || ""; }
   function pairName(themeK) {
     var k = pairFor(themeK);
@@ -440,7 +458,7 @@
     VOICES: VOICES, MAP: MAP, PAIR: PAIR, PRELOAD: PRELOAD, DEMO: DEMO,
     installed: installed, isOn: isOn, install: install, uninstall: uninstall,
     current: current, setCurrent: setCurrent,
-    list: list, meta: meta, all: allVoices,
+    list: list, meta: meta, all: allVoices, local: localVoices,
     pairFor: pairFor, pairName: pairName, usedBy: usedBy,
     /* 声线挑选：api.js 与试听共用 */
     langOf: langOf, pickSys: pickSys, candidates: candidates, sexOf: sexOf, canSpeak: canSpeak,

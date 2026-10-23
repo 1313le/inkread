@@ -583,5 +583,72 @@ npm run dist     # 产出 dist/InkRead-Setup-2.0.0.exe（NSIS 安装器）
 24.4 那条（ZCode 独占 asar）仍然成立，本版再添两条：
 
 - **npm 会吃掉 `--config.*`**：`npm run dist --config.directories.output=…` 先打 `npm warn Unknown cli config`，然后把输出照样写进仓库 `dist\`，撞进 ZCode 的独占锁 → `EBUSY ... unlink`。必须直接叫 electron-builder：`NODE_OPTIONS=--use-system-ca npx electron-builder --win nsis --x64 --config.directories.output="C:/Users/Public/inkread-dist-1.4.0"`。
-- **Git Bash 会把 `/S` 改写成 `S:/`**：静默安装得走 `cmd //c start //wait "" "<Setup.exe>" /S`。踩中时的表象是命令不报错、装机版版本号却纹丝不动——NSIS 向导 GUI 被打开了。
+- **Git Bash 会把 `/S` 改写成 `S:/`**：静默安装得走 `cmd //c start //wait "" "<Setup.exe>" /S`。踩中时的表象是命令不报错、装机版版本号却纹丝不动——NSIS 向导 GUI 被打开了。（**这一条在 1.5.0 被实测推翻**，更正的写法见 §26.4。）
+
+## 二十六、v1.5 主脑出得了产物 + 朗读换掉变调
+
+发布：**1.5.0**（`28c0a2779833c05483b49616b7c06c17`，96,787,478 字节）。动 19 个产品文件（18 改 + 新增 `ink-reader/voices-local.js` 200 行）、+2,840 / −158 行。
+
+### 26.1 这一版做了什么
+
+**S4 主脑产物化与多模态**——用户 2026-10-20 的原话是「主脑对话框只能对话、不能生成报告文件、没有多模态，接了旗舰模型反而显得累赘」。调研结论比抱怨更靠前一步：**主脑页连工具名册都没发出去**（`ink-agent.js` / `ink-loop.js` 只在 `reader.html` 装载，`Brain.ask()` 调 `API.llmMsgs` 时压根不传 `tools`）。五刀：
+
+- **E1 接线是两处同改，不是一行 script**：ai.html 补载两件 + `brain.js` 的调用点带上 `tools`——只补 `<script>` 会做出「接了还是不会用」的假绿灯。`capGet("toolCalls") === false` 退回原来的单轮路径，**E1 是加法，今天形态不动**。
+- **E2 产物层**：新键 `inkread.artifacts.v1`（`sync:true`）+ 三颗公开口 `artList / artGet / artWrite`；**唯一写入口 `upsertArt` 且时间戳自打**（外部递来的时刻一律不认）；三道容量闸只收在 `setArt` 一处（正文 800K / 总量 1.6M / 200 行 / 摘录 200，单位一律 UTF-16 `.length`），超预算只留索引且 **413 必须上屏**。
+- **E2 三枚工具**（名册 23 → 26）：`artifact.write` 要点头、`artifact.list` / `artifact.read` 自动——**「能读到自己上轮写的」才是 agent 感的来源**。产物卡四钮 `artCopy / artDl / artPdf / artDrop`，`.md` 直接下盘。
+- **E3 报告骨架**：新提示词槽 `brain.report`，四段「结论 / 依据（带出处）/ 反证与不确定 / 下一步」；**每条依据必须命中本轮 `retrieve()` 的真实 passage**，不中就剔出正文并计 `rejected`，结论空则整份拒收。出处真数据源是 `brain.js` 里新加的那格 `ROUND_PASSAGES`——`brain.js` 中一个 `artifact` 字样都没有。
+- **E4 图片进消息（三条护栏，次序有讲究）**：① 只带图那一轮发数组 content；② **图不进 history、不进 store**，base64 当轮发一次、history 只存 `[图 × n]` 占位——这条必须**先于**①有闸，否则 4MB 同步上限与 localStorage 配额一起炸；③ 本地图压缩 ≤1024px / JPEG ≤200KB。新能力位 `vision` **只有 HTTP 400 且响应体提到 image 才翻**，401/403/429/超时都不算「不支持」（S2 纪律原样延续）。
+- **产物出纸**：「存为文档」复用主进程 `ink:pdf`——读者选位置只有 `dialog.showSaveDialog` 一条路，三个写盘端点（`/api/store` / `/api/book` / `/api/export`）都把路径握在自己手里，这是勘查确认过的事实，**不是绕路**。`print.html` 新增第二内容源 `?art=`。三条红线：一份东西只有一个正本（art 与 doc 互斥、排产物不碰书架、全程只走 `artGet`）／降级不许静默（三种空态各说各话且不产文件）／卡与纸只报同一份账（卡上「出处核上 N 条」是现算的临时账，纸上不许印）。
+- **人设改到最后一刀**：`brain.chat` 那句「别向读者宣称你能在这里替他们做完那些事」在能力全部落地后才撤——能力没落地前让模型改口宣称，只会制造新的「说了做不到」。
+- 顺带的两处 `ink-loop.js` 修复不是装饰：网关记账不移进 `finally`，「已自动重问 N 次」这句实话永远是 0；`queue-and-continue` 后不补 `snap(ctx,"await")`，点头落地的每条产物只能记成 `manual / 0 轮`，E2 建的审计字段全是摆设。
+
+**朗读音色四件**——起因是用户 2026-10-22 的一句「改变音调的做法很蠢体验感也不好」。定性：移调不是参数问题，是「可选真声太少 + 分配次序有逻辑缺陷」逼出来的补救，所以补的是声线和次序，不是Hz。
+
+- **移调全链路退役**：`PITCH_STEPS` 从 `cast.js` / `reader-app.js` / `api.js` 删除，`composePitch` 只留音色自带的 `ep`；任何新断言判「pitch **恒为 0**」而不是「默认 0」（退成默认 0，判据就失去牙）。物理证据：晓晓同一句原样 / ±30 / ±60Hz 的字节数 39,312、时长 13.1s 全不动，md5 却互不相同——只搬基频＝同人捏嗓子。
+- **池子扩容换生力军**：内置目录 32 → **39 款**（台湾腔 / 粤语 / 澳音共 7 款新声，`er/ep` 一律留 0）。原因很直白：大陆普通话去掉旁白只剩 5 款，12 位角色当场见底，旧版于是拿 ±Hz 充数。可朗读书池 = `canSpeak(本书语言)` 的神经声线全集 − 旁白 = **18 款**（女 9 男 9）。
+- **分配次序**：同性别让档 → 跨性别让档 → 才共用真声；共用时面板明说「与××同声线」并给一键换人；退回系统声时 `sysSegment` 上屏说明，不许静默降级。**超 18 位宁可共用也不移调**，也不留手动开关（关掉 tier1 即退回 12 款池，不用改代码）。
+- **S5b 画像配声**（纯本地、零联网、不改数据形状）：`ageGuess(name, role)` → 少年 / 青年 / 中年 / 判不出留空（role 优先、名字兜底）；`voiceRank` 字典序四把尺 = **年龄档距离 → 出身档 tier → 角色描述命中标签数 → 是否含「小说」场景**，同分取 `hashName(name) % order.length` 顺时针最近；性别仍是硬约束（两趟：同性别 → 放宽）。面板只在 `gap === 2`（三档下的最远档）亮「画像 少年→中年」徽标。
+- **S5c 本地音色导入槽**：读者自己起 GPT-SoVITS / ChatTTS / CosyVoice，产品只做接线。新件 `ink-reader/voices-local.js` + 服务端 `/api/localtss` 两形状适配（openai 形状 `POST <endpoint>/v1/audio/speech`、gsv 形状 `POST <endpoint>/`）。**由服务端代取**是因为这些服务不发 CORS 头，且「端点只许回环」必须有一道不依赖前端自律的守卫。边界与 `/api/llm` 同款：只接本机回环、Key 不落盘、上游状态码与字节原样回吐、路由零本地状态（不进快照 / 不进同步 / 不进日志）；params 只收扁平标量（≤12 键，嵌套与数组一律拒收，原型污染三键写成数组）。无状态原则：不用 `change_refer`，每句带全量参数，避免多角色交替时参考音频串音。键 `inkread.voices.local.v1` 是 `sync:false`——endpoint 与参考音频路径都是**这台机器的私域配置**，换机搬过去只会指向不存在的服务。
+- **#335 幽灵角色**：「王五在旁边插嘴道：“……”」曾被认成角色「五在旁边」，而「王五说道」正常。两处根因：定长名字窗口把首字切掉 + 「在旁边」不在状语尾巴剥离表。补 `EXTRA_TAIL`（动向词尾剥离表）后三句夹具都出「王五」。
+
+耳朵账（反事实实测，真函数不经浏览器）：红楼 8→8 种、三体 6→6、战和 12→12，撞款／性别不符／念不出／偏移全 0；22 人压测 → 18 种、8 位共用、性别不符 3、仍 0 移调。**≤18 位零妥协。**
+
+### 26.2 怎么验收的
+
+四道新闸 + 三张老闸改写，全按逐刀消融配反证（判词口径：咬合 / 消不掉 / 伤及 / 崩闸；探针不计刀数）：
+
+| 闸 | 断言 | 真刀 | 覆盖账（编号名册） | 伤及 / 崩 | 用时 |
+|---|---|---|---|---|---|
+| `verify-v14-brainx` | 130 | 150/150 全咬合 | 122/130 + 8 条 UNPINNED | 0 / 0 | 6,626s |
+| `verify-v14-artpdf` | 57 | 45/45 全咬合 | 53/57 + 4 条 UNPINNED | 0 / 0 | 1,123s |
+| `verify-v15-castvoice` | 61 | 36/36 全咬合 | 46/61 + 15 条豁免 | 0 / 0 | 首轮 827s + 增量 198s |
+| `verify-v16-voicelocal` | 32 | 25/25 全咬合 | 27/32 + 5 条 UNPINNED | 0 / 0 | 分批跑，未计总 |
+
+配套的三张老闸因产品契约同步改写后仍全绿：`verify-v226-cast` 53/53、`verify-v227-cast-ui` 24/24、`verify-v14-castai` 98/98（消融真刀全咬合、伤及 0、崩 0，覆盖账 128/134）。
+
+**两个分母别互相否定**（沿用 §25.2 的口径）：表里「断言」是闸自己的 PASS 数，「真刀」是消融驱动器里的刀数，「覆盖账」是名册**编号**中被某把刀点名红过的条数——三个数天然不等，UNPINNED／豁免是「结构性反证不出来」并已写明理由的那些，不算漏。
+
+照实记的账：`brainx` 首轮全量 150/150 却**伤及 6**，六条全是新增 V 判据与旧刀共用同一颗产品函数（`capSet`／图片进请求的另几个读数面），补 `mayRed` 与「同语义升 `mustRed`」分家后由**整批**复现消掉，不是靠单刀；`castvoice` 的刀4（`voiceK` 全清）连带 V10h 属合法失去主语。两条探针（brainx 刀58 `NM1`、castvoice 的两条）按声明「消不掉」——**消不掉＝这条判据目前没有反证，不等于它没问题**。
+
+全量批跑 `run-regress.sh`：第一趟 **OK=96 BAD=7 INFO=1**，七条红逐条定性后（量具死基线三条／产品侧 CSS 违规两条／量具被宿主掐死两条），**确认轮 `.work/v14-batch-315-full.out`＝104 闸次 / 3,872 断言 / OK=103 BAD=0 INFO=1**，唯一 INFO 是清空哨兵探针 `verify-r-probe`，不计红。七条红没有一条是靠放宽判据消掉的：三条改量具死基线（`b1` 第十七次重定线 638,000 / 733,000 / 743,000、`b2` 三页脚本序列 + themes head 各登记一件 `voices-local.js`、`v12-schema` 表 62→63 颗且 sync:false 八→九颗），两条改**产品样式**（ai.html 裸 `6px` → `var(--space-6)`；删 `.chat-att[hidden]` 那条 hide 侧补丁，`styles.css:16` 的全局 `[hidden]` 已收口），两条改量具的生存环境（剥 `ELECTRON_RUN_AS_NODE`）。
+
+E4 视觉链路六张成对留影落地 `C:/Users/Public/inkread-verify/.work/v14-e4-shots/png/`（托盘 1 张／托盘 3 张／400KB 拒收 toast／400 退回纯文字／写工具确认卡／产物卡四钮 + 引用行 + 台账脚注），逐张目视：无空白、无溢出、无错位。数据初始化 `node scripts/reset-test-data.js` 清 2 项（sync-store.json、tts-cache）。
+
+成品三件套对**装机版**跑（exe `ProductVersion = 1.5.0.0`、包内 `window.InkVersion = 1.5.0`）：`verify-packaged` 16/16、`verify-pkg-import` 23/23、`verify-e-shell` 15/15。
+
+### 26.3 五条必须知道的
+
+- **版面结构仍在导入时冻结**（块切分落库、打开不重算），改解析层不会让书架里的旧书自动获益，要删了重新导入；目录派生不受冻结影响。
+- **图不进 history，也不进 store**：跨轮追问「刚才那张图」时，第二轮之后只带 `[图 × n]` 占位，不会把原图重发一遍。要让它再看一次得重新贴。这条与 4MB 同步上限、localStorage 配额是同一笔账，不是省流量的修辞。
+- **产物同步、本地音色不同步**：`inkread.artifacts.v1` 走 `sync:true`（换机看得到，单份 >800KB 只留索引）；`inkread.voices.local.v1` 与端点、参考音频路径绑死这台机器，不上行也不被对端覆盖。
+- **多角色池上限是 18 款**：超 18 位角色宁可共用真声也**不移调**；退回系统兜底一定上屏说明，不再有「听着像但说不清哪里变了」的静默降级。
+- **本地 TTS 只接回环**：`/api/localtss` 拒非 `127.0.0.1` / `::1`、拒 URL 里带 userinfo、拒嵌套参数。把自机服务暴露到局域网不是本产品的功能面——要那么干请在自己的服务前面套壳。
+
+### 26.4 打包侧环境事实（含一条对 §25.4 的更正）
+
+24.4 / 25.4 那两条（ZCode 独占 `app.asar`、npm 会吃掉 `--config.*`）仍然成立，本版把第三条改过来并添两条：
+
+- **更正 §25.4 第 2 条**：`cmd //c start //wait "" "<Setup.exe>" /S` **这一版仍然中招**——MSYS 改写不只咬 Git Bash 的裸命令，也咬 `cmd //c` 里那条 `/S`（表象是 `start //wait` 挂住不放、NSIS 向导 GUI 起来了，超时转后台时容易误判成「已经装完」）。稳的写法是把命令行写进一个 `.cmd` 文件再叫它：`cmd //c "C:\...\install.cmd"`，文件内容 `start /wait "" "<Setup.exe>" /S`，实测 `INSTALLER_EXIT=0`。
+- **`ELECTRON_RUN_AS_NODE=1` 会咬手工起的成品**：本机宿主（Qoder 桌面）本身就是 Electron，这个变量一路传进子进程。咬量具时表象是 `TypeError: Cannot read properties of undefined (reading 'whenReady')`，咬成品时表象是 `InkRead.exe: bad option: --dev`——两个都长得像产品崩，实际是 `electron.exe` 退化成纯 node。起任何量具或成品之前先 `unset ELECTRON_RUN_AS_NODE`（`run-regress.sh` 顶部已加了这一行）。
+- **`verify-packaged` 的阅读页探针取「当前书架第一本」**，并要求 `!nodoc && chars > 120`：开发态 profile（`%APPDATA%\inkread-dev`）里残留的上轮导入夹具（82 字）会让四枚构件一起假红，读数就写着 `{"nodoc":false,"chars":82}`。清 dev profile → 重起实例即 16/16；真实数据 `%APPDATA%\inkread` 全程未动。规矩与 §25.2 那条并列：**跑三件套期间不要手工开关成品窗口，且跑前先确认 dev profile 里没有夹具书**。
 

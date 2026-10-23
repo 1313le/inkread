@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="styles.css">
 <script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
+<script src="voices-local.js"></script>
 <script src="voices-data.js"></script>
 <script src="voices.js"></script>
 <script src="theme.js"></script>
@@ -442,6 +443,29 @@
     "</article>";
   }
 
+  /* 本地音色（自机 TTS）：导入入口不挂在多角色面板里 —— 未配置时面板整块不渲染，
+     总得有一处能「第一次导入」。这里常显，来源与许可随清单原文上屏。 */
+  function localVoicesHTML() {
+    var lv = (window.InkVoiceLocal && InkVoiceLocal.list) ? InkVoiceLocal.list() : [];
+    var head = '<div class="lv-h"><b>本地音色</b><span class="chip th-st">' +
+      (lv.length ? "已接入 " + lv.length + " 款" : "未接入") + "</span></div>";
+    var desc = lv.length
+      ? esc((InkVoiceLocal.provider() || "") + " · " + (InkVoiceLocal.endpoint() || "")) +
+        " · 清单里的来源与许可原样上屏"
+      : "把你自己机器上的 TTS 服务（GPT-SoVITS / ChatTTS 等）接进来。只收 127.0.0.1 或 [::1]；清单里每条都要写清来源与许可。";
+    var acts = '<button class="btn btn-accent btn-sm" data-lv="import">' +
+      (lv.length ? "重新导入…" : "导入音色清单…") + "</button>" +
+      (lv.length ? '<button class="btn btn-ghost btn-sm" data-lv="clear">移除</button>' : "");
+    var rows = lv.map(function (v) {
+      return '<div class="lv-row"><span class="lv-nm">' + esc(v.name) + '</span>' +
+        '<span class="lv-lic">' + esc(v.license || "") + "</span></div>";
+    }).join("");
+    return '<section class="lv-strip" id="thLocalVoices">' + head +
+      '<p class="lv-d">' + desc + "</p>" +
+      (rows ? '<div class="lv-list">' + rows + "</div>" : "") +
+      '<div class="th-acts">' + acts + "</div></section>";
+  }
+
   function renderVoices() {
     if (!window.InkVoice) return;
     var all = InkVoice.list();
@@ -450,6 +474,7 @@
     var mine = all.filter(function (v) { return v.installed && hit(v); });
     var store = all.filter(function (v) { return !v.installed && hit(v); });
     var list = state.vtab === "mine" ? mine : store;
+    var localStrip = localVoicesHTML();
 
     qs("#thGroups").innerHTML =
       '<button class="chip chip-btn' + (state.vtab === "mine" ? " on" : "") + '" data-vtab="mine" aria-pressed="' + (state.vtab === "mine" ? "true" : "false") + '">我的音色 ' + mine.length + "</button>" +
@@ -463,10 +488,10 @@
         '<a class="btn btn-ghost btn-sm" href="ai.html" style="margin-top:12px">去 AI 页配置' + icon("arrow-right", 13) + "</a></div>"
       : "";
     if (!list.length) {
-      body.innerHTML = cloudGuide + '<div class="empty">' + icon("audio-lines", 30) + "<p>" +
+      body.innerHTML = localStrip + cloudGuide + '<div class="empty">' + icon("audio-lines", 30) + "<p>" +
         (state.vtab === "store" ? "音色商城里的音色都已启用 —— 去「我的音色」看看" : "没有匹配的音色，换个关键词试试") + "</p></div>";
     } else {
-      body.innerHTML = cloudGuide + '<div class="th-grid th-grid-voice">' + list.map(function (v) {
+      body.innerHTML = localStrip + cloudGuide + '<div class="th-grid th-grid-voice">' + list.map(function (v) {
         return voiceCardHTML(v, state.vtab === "store" ? "store" : "mine");
       }).join("") + "</div>";
     }
@@ -909,6 +934,31 @@
 
   /* ---------- 事件 ---------- */
   qs("#thBody").addEventListener("click", function (e) {
+    /* 本地音色条（v1.5-S5c）：导入 / 移除。清单只写本机键，不动云音色与主题 */
+    var lb = e.target.closest("[data-lv]");
+    if (lb) {
+      if (!window.InkVoiceLocal) { toast("本地音色模块未加载", "alert-triangle"); return; }
+      if (lb.dataset.lv === "import") {
+        InkVoiceLocal.importFile(function (r) {
+          if (!r || !r.ok) { toast("导入失败：" + ((r && r.why) || "清单无效"), "alert-triangle"); return; }
+          var n = (r.data && r.data.items || []).length;
+          var notes = [];
+          if (r.dropped) notes.push("跳过 " + r.dropped + " 条重复/无效");
+          if (r.capped) notes.push("超出上限，只收前 " + n + " 条");
+          toast("已导入 " + n + " 款本地音色" + (notes.length ? " · " + notes.join(" · ") : ""), "download");
+          renderVoices();
+        });
+        return;
+      }
+      if (lb.dataset.lv === "clear") {
+        if (!window.confirm("移除本机导入的本地音色清单？阅读页里用它们配音的角色会按内置池重新分配。")) return;
+        InkVoiceLocal.clear();
+        toast("已移除本地音色清单", "trash-2");
+        renderVoices();
+        return;
+      }
+      return;
+    }
     /* 音色卡：启用 / 设为朗读 / 试听 / 停用 */
     var vb = e.target.closest("[data-va]");
     if (vb) {

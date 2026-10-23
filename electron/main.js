@@ -134,7 +134,12 @@ const CANCEL_STUB = String(process.env.INKREAD_EXPORT_CANCEL || "").trim() === "
 const PAPER_SIZES = ["A4", "A5", "B5", "LETTER", "LEGAL"];
 function printUrl(o) {
   const q = new URLSearchParams();
-  q.set("doc", String((o && o.doc) || ""));
+  /* 排的是哪一份东西，只有一个话事人（v1.5-S4 #310）：点名了产物账上的那一条就只写 art，
+     不顺手补一个空 doc —— 两个寻址键并排在地址栏里，纸面视图就得再猜一次谁说了算，
+     而空 doc 在那一页的规矩里恰恰是「没点名」（退到书架第一本）。产物出纸绝不能冒出另一本书。 */
+  const art = String((o && o.art) || "").trim();
+  if (art) q.set("art", art);
+  else q.set("doc", String((o && o.doc) || ""));
   const p = String((o && o.paper) || "").trim().toUpperCase();
   if (PAPER_SIZES.includes(p)) q.set("paper", p);
   if (o && o.land !== undefined && o.land !== null) q.set("land", o.land ? "1" : "0");
@@ -249,14 +254,16 @@ function bindExportIPC() {
       pw = await openPrintPage(opts, false);
       /* 纸上没有正文就先停住：空态那一块是 .no-print，printToPDF 会出一个「文件名像模像样、
          内容整页全白」的 PDF —— 用户看到的是导出成功，打开是一张白纸，比直接报错更糟。
-         拒绝时把纸面视图自己写的实话带回去（正文没落库 / 本机没这本书，补救不一样）。 */
+         两句实话都由那张纸自己写（v1.5-S4 #310）：它才知道当下排的是书架上的一本还是产物账里的一份，
+         主进程替它写死「这本书…」会在产物出纸失败时报出牛头不对马嘴的话。 */
       const bare = await pw.webContents.executeJavaScript(
         "(function(){var b=document.body;if(!b||b.dataset.blank!=='1')return null;" +
-        "return ((document.getElementById('blankWhy')||{}).textContent||'').trim();})()", true
+        "return [((document.getElementById('blankWhy')||{}).textContent||'').trim()," +
+        "(b.dataset.blankLead||'').trim()];})()", true
       ).catch(() => null);
       if (bare !== null) {
         pw.destroy(); pw = null;
-        return { ok: false, error: "这本书在本机没有正文，印出来只会是一张白纸。" + bare };
+        return { ok: false, error: bare[1] + bare[0] };
       }
       /* 标题取页面自己算出来的那一份：正文自带书名时它和书架条目名并不相同（E7），
          落盘文件名与页脚要跟着纸上印的字走，而不是跟着导出目录里的文件名走。 */

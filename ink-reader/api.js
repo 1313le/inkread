@@ -50,6 +50,9 @@ window.INK_SCHEMA = {
   "inkread.ai.cap.v1": { ver: 1, kind: "pref", store: "local", sync: true, label: "模型能力位" },
   "inkread.ai.model.v1": { ver: 1, kind: "private", store: "local", sync: false },
   "inkread.ai.prompts.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "AI 提示词" },
+  /* v1.4-S4 E2：主脑办出来的「一份文件」，与笔记同类（读者的成果，换机要跟着走）。
+     三道容量闸在 setArt 里，单位与同步那两把尺对齐 —— 见下方产物账的注释。 */
+  "inkread.artifacts.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "主脑产物" },
   "inkread.autoread.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.brain.seeded.v1": { ver: 1, kind: "derived", store: "local", sync: true },
   "inkread.cards.gone.v1": { ver: 1, kind: "ledger", store: "local", sync: true },
@@ -57,8 +60,10 @@ window.INK_SCHEMA = {
   "inkread.cards.ui.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.cards.v1": { ver: 2, kind: "ledger", store: "local", sync: true, label: "闪卡" },
   /* v1.4-S3：角色表多写句级标记（at/via/depth/run/hold/reach）与分配账（assign/merges），
-     见 INK_MIGRATIONS 下方那条 ver 1 → 2。 */
-  "inkread.cast.v1": { ver: 2, kind: "pref", store: "local", sync: true, label: "多角色角色表" },
+     见 INK_MIGRATIONS 下方那条 ver 1 → 2。
+     v1.5：移调退役 —— pitch 字段仍写但恒为 0（旧账的 ±Hz 由 normalizeCast 读取时归零），
+     见 ver 2 → 3。 */
+  "inkread.cast.v1": { ver: 3, kind: "pref", store: "local", sync: true, label: "多角色角色表" },
   "inkread.checkins.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "打卡" },
   "inkread.contents.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "导入正文" },
   "inkread.covers.v1": { ver: 1, kind: "ledger", store: "local", sync: true, label: "封面" },
@@ -111,6 +116,10 @@ window.INK_SCHEMA = {
   "inkread.ttspos.v1": { ver: 1, kind: "private", store: "local", sync: false },
   "inkread.voice.v1": { ver: 1, kind: "pref", store: "local", sync: true },
   "inkread.voices.cloud.v1": { ver: 1, kind: "pref", store: "local", sync: true },
+  /* v1.5-S5c：本地 TTS 音色清单。endpoint 指向用户本机服务，换一台机器就没有意义；
+     里面还带参考音频路径 —— 语义是**这台机器的私域配置**，不进同步、不进远端快照。
+     与 inkread.tts.v1 同列 private：备份导出是用户自己动手，同步是产品自动做的，两件事。 */
+  "inkread.voices.local.v1": { ver: 1, kind: "private", store: "local", sync: false },
   "inkread.voices.on.v1": { ver: 1, kind: "pref", store: "local", sync: true },
   "inkread.wheel.v1": { ver: 1, kind: "ui", store: "local", sync: true },
   "inkread.win.v1": { ver: 1, kind: "ui", store: "local", sync: true },
@@ -202,6 +211,14 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
      ------------------------------------------------------------ */
   window.INK_MIGRATIONS["inkread.cast.v1"] = {
     1: function (old) {
+      if (!old || typeof old !== "object" || Array.isArray(old)) return;
+      return old;
+    },
+    /* ver 2 → 3（v1.5 移调退役）：角色上的 pitch 不再被播放层读取，旧账里的 ±Hz
+       由 normalizeCast 在读取侧归零；字段本身保留（写回时恒 0），结构没改。
+       同样「原样收下」—— 存在的意义是让恢复路径查得到迁移函数，别把整份角色表
+       当版本不合跳过。 */
+    2: function (old) {
       if (!old || typeof old !== "object" || Array.isArray(old)) return;
       return old;
     }
@@ -491,6 +508,101 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
   }
 
   /* ------------------------------------------------------------
+     本地 TTS 音色（v1.5-S5c）：用户在自机起的 GPT-SoVITS / ChatTTS 等。
+     —— 一律经 /api/localtss 本机代理转发：这些服务不发 CORS 头，页面跨端口
+        直连读不回响应；「端点只许回环」也必须在服务端再守一道（见 serve.js）。
+     —— 音频统一落成 blob: 播放，audio.src 永不出现用户端点（Q12）。
+     —— 失败返回原因而不是抛：上层要据此上屏专属文案，不能静默换机械音。
+     ------------------------------------------------------------ */
+  function localMeta(v) {
+    return !!(v && v.local && v.params && typeof v.params === "object" &&
+      (v.provider === "openai" || v.provider === "gsv") && v.endpoint);
+  }
+  /* 本机服务可能卡死（模型加载 / 端口有人接但不回话）：读到一半静默等两分钟
+     和「朗读坏了」没有区别。60s 还没回正文就判超时，上层据此回退旁白音色。 */
+  var LOCAL_TTS_TIMEOUT = 60000;
+  async function fetchLocalClip(v, text, speed) {
+    if (!localMeta(v)) return { err: "不是本地音色" };
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, LOCAL_TTS_TIMEOUT) : 0;
+    try {
+      var rp = await fetch("/api/localtss", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint: v.endpoint, provider: v.provider, params: v.params,
+          text: text, speed: speed, lang: v.lang || ""
+        }),
+        signal: ctl ? ctl.signal : undefined
+      });
+      var ct = String(rp.headers.get("content-type") || "");
+      if (!rp.ok || ct.indexOf("audio/") !== 0) {
+        var msg = "";
+        try { var j = await rp.json(); msg = (j && j.message) || ""; } catch (e) {}
+        return { err: msg || ("本机 TTS 返回 " + rp.status) };
+      }
+      var b = await rp.blob();
+      if (!b || b.size < 256) return { err: "本机 TTS 返回空音频" };
+      return { src: URL.createObjectURL(b) };
+    } catch (e) {
+      return { err: (e && e.name === "AbortError") ? "本机 TTS 60 秒没响应（超时）" : "本机 TTS 服务没响应" };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  function revokeLocal(got) {
+    try { if (got && got.src) URL.revokeObjectURL(got.src); } catch (e) {}
+  }
+  async function localSpeak(body, v, onTick) {
+    if (!localMeta(v)) return null;
+    var chunks = neuralChunks(body);
+    stopNeural();
+    var my = _neuralGen;
+    var first = await fetchLocalClip(v, chunks[0], 1);
+    if (!first || !first.src) return null;
+    var next = chunks.length > 1 ? fetchLocalClip(v, chunks[1], 1) : Promise.resolve(null);
+    for (var i = 0; i < chunks.length; i++) {
+      var got = (i === 0) ? first : await next;
+      if (my !== _neuralGen) { revokeLocal(got); return { code: 0, data: { mode: "local", voice: v.name } }; }
+      next = (i + 2 < chunks.length) ? fetchLocalClip(v, chunks[i + 2], 1) : Promise.resolve(null);
+      if (!got || !got.src) { onTick((i + 1) / chunks.length); continue; }
+      await playClip(got.src);
+      onTick((i + 1) / chunks.length);
+      if (my !== _neuralGen) break;
+    }
+    return { code: 0, data: { mode: "local", voice: v.name } };
+  }
+  /* 试听本地音色：独立 Audio，不碰朗读队列；失败把原因原样交回调用方（不静默降级）。
+     本机 CPU 合成可能比云端慢得多（GPT-SoVITS 首次要加载模型），窗口给到 20s。 */
+  var _localAud = null;
+  function playLocalAudition(text, v) {
+    if (!localMeta(v)) return Promise.resolve({ ok: false, why: "不是本地音色" });
+    return fetchLocalClip(v, String(text || ""), 1).then(function (got) {
+      if (!got || !got.src) return { ok: false, why: (got && got.err) || "拉不到音频" };
+      return new Promise(function (resolve) {
+        if (_localAud) { try { _localAud.pause(); } catch (e) {} _localAud = null; }
+        var a = new Audio(got.src);
+        _localAud = a;
+        var done = false;
+        var fin = function (ok, why) {
+          if (done) return;
+          done = true;
+          try { a.pause(); } catch (e) {}
+          if (_localAud === a) _localAud = null;
+          revokeLocal(got);
+          resolve(ok ? { ok: true } : { ok: false, why: why });
+        };
+        a.onended = function () { fin(true); };
+        a.onerror = function () { fin(false, "音频播放失败"); };
+        setTimeout(function () {
+          if (!done && a.paused) fin(false, "20 秒没出声（本机 TTS 可能在加载模型）");
+        }, 20000);
+        try { a.play().catch(function () { fin(false, "浏览器拦了自动播放，再点一次"); }); }
+        catch (e) { fin(false, "本机播放失败"); }
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------
      听书引擎（v2 · 段落队列）—— reader.html 听书面板的底层。
      调研对齐：起点读书（0.5~3× 语速 / 换音色 / 定时）、@Voice（点击任意段落起读）、
      华为阅读（边听边看：朗读进度驱动阅读页）。引擎只管「按段落播」，视图归页面。
@@ -505,16 +617,10 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
     r = Math.max(-50, Math.min(100, r));
     return (r >= 0 ? "+" : "") + r + "%";
   }
-  /* 音高合成：音色自带基准 ep（如 "+6Hz"）+ 角色共用人偏移，服务端按 ±NHz 接受。
-     v1.1-S5a A4：cast.js 早就承诺「池子不够用时共用一款、共用者换音高」，但播放层发的
-     一直是音色自带的 ep —— 承诺没兑现，两个角色听起来就是同一个人。Edge 的 pitch
-     有效区间到 ±100Hz，钳在这里（偏移给歪了会整段 400，退化成没有声）。 */
-  function composePitch(epHz, hz) {
-    var n = parseInt(String(epHz || "0Hz").replace(/[^\d+-]/g, ""), 10) || 0;
-    var p = Math.round(n + (Number(hz) || 0));
-    p = Math.max(-100, Math.min(100, p));
-    return (p >= 0 ? "+" : "") + p + "Hz";
-  }
+  /* v1.5 移调退役：这里原来有一枚 composePitch(epHz, hz)，把「共用同一款声线的角色」
+     按 ±30/60/90Hz 捏嗓子区分。那是假声线 —— 同一个人换音调，读者一听就知道，
+     而且面板写的声线名与实际听到的不是同一款。现在播放层只发音色自带的 ep，
+     区别全部由 voiceK（一位角色一款真声）承担；池子见底时面板明说「与××同声线」。 */
   /* 断网兜底开关（默认关）：神经合成拿不到声时，是否允许退到本机系统声线。
      默认关 —— 用户要的是「要么神经语音、要么说清为什么没有」，不是悄悄换个机械音。
      真离线（飞机上 / 静态托管没有 /api/tts 路由）时，打开它就能继续听。 */
@@ -540,7 +646,7 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
     /* gen = 代际令牌：start / seekIdx / 换速换嗓都会令旧队列的全部 pending
        恢复后 halt(id) 为真而自行退出，杜绝新旧两条队列并行抢声卡的竞态。 */
     var st = { units: [], i: 0, speed: 1, voice: "", dead: true, paused: false, gen: 0,
-               stopAt: 0, stopBi: null, sysLock: null, neuralWhy: "" };
+               stopAt: 0, stopBi: null, sysLock: null, neuralWhy: "", localDown: {} };
     var ev = { onSegment: null, onTick: null, onState: null, onMode: null };
     function emit(name, a, b) { try { if (ev[name]) ev[name](a, b); } catch (e) {} }
     function curVoice() {
@@ -563,13 +669,17 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
          带着原因发给上层显示，不能让用户以为「在朗读」而屏幕前一片安静。 */
       emit("onMode", { mode: note ? "none" : "sim", voice: "", note: note || "" });
     }
-    async function sysSegment(text, id) {
+    async function sysSegment(text, id, u) {
       var synth = window.speechSynthesis, U = window.SpeechSynthesisUtterance;
       if (!synth || typeof U !== "function") { await simSegment(text, id, "本机没有语音合成接口"); return; }
       var voices = await waitVoices(synth, 1200);
       if (halt(id)) return;
       if (!voices.length) { await simSegment(text, id, "本机未列出任何声线"); return; }
       var v = curVoice();
+      /* 走到这条路 = 神经合成没拿到声、退到本机声线。这条路只用「用户选的那一款」，
+         角色表上的 voiceK 在这里是丢的 —— 以前这一下静默发生：开着多角色朗读、
+         退到系统音时全场一个声，屏幕上一个字也没说。现在照实在徽标写明。 */
+      var castNote = (u && u.cast) ? "系统语音不支持分角色，本场为单人朗读" : "";
       /* 语速叠加到系统声线上（神经链路走 rate 参数，这里走 utterance.rate） */
       var vv = v ? Object.assign({}, v, { rate: Math.max(0.5, Math.min(3, ((v.rate) || 1) * st.speed)) }) : { rate: st.speed };
       var cands = st.sysLock ? [st.sysLock]
@@ -586,7 +696,8 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         if (r.ok || r.started) {
           if (r.ok) rememberSysVoice(cands[c]);
           st.sysLock = cands[c];           /* 一条声线播成功就锁定，换段不再重新挑（避免中途变声） */
-          emit("onMode", { mode: "speech", voice: cands[c].name || "", note: st.neuralWhy });
+          emit("onMode", { mode: "speech", voice: cands[c].name || "",
+            note: [st.neuralWhy, castNote].filter(Boolean).join(" · ") });
           return;
         }
       }
@@ -612,7 +723,9 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         v = alt;
       }
       var chunks = neuralChunks(text);
-      var pHz = composePitch(v.ep, u && u.pitch);
+      /* 只发音色自带的基线音高。u.pitch 这个字段仍在单元里（旧账 / normalizeCast 归零），
+         但播放层不再读它 —— 移调退役后，声线区别全部来自 voiceK。 */
+      var pHz = v.ep || "0Hz";
       var url = function (t) {
         return "/api/tts?voice=" + encodeURIComponent(v.id) +
           "&rate=" + encodeURIComponent(composeRate(v.er, st.speed)) +
@@ -644,26 +757,82 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         emit("onTick", (st.i + (i + 1) / chunks.length) / st.units.length);
         if (halt(id)) return true;
       }
+      var bits = [];
+      if (swappedFrom) bits.push("该段语言与所选音色不同 · 已自动换声（原音色：" + swappedFrom + "）");
+      if (u && u.fallbackNote) bits.push("本地音色没出声 · 已回退旁白音色：" + u.fallbackNote);
       emit("onMode", { mode: "neural", voice: v.name, cast: (u && u.cast) || "",
-        note: swappedFrom ? "该段语言与所选音色不同 · 已自动换声（原音色：" + swappedFrom + "）" : "" });
+        note: bits.join(" · ") });
+      return true;
+    }
+    /* 本地音色（用户自机服务）：与神经链路同一套「首段取声 → 边播边预取」结构，
+       区别只在取声方式（POST 本机代理）与失败原因要留给人看。 */
+    async function localSegment(text, id, u) {
+      var v = (u && u.voiceK && window.InkVoice && InkVoice.meta(u.voiceK)) || curVoice();
+      if (!localMeta(v)) return false;
+      var chunks = neuralChunks(text);
+      var first = await fetchLocalClip(v, chunks[0], st.speed);
+      if (halt(id)) { revokeLocal(first); return true; }
+      /* 只记原因本身：上屏时各调用点自带「本地音色没出声」的前缀，
+         这里再包一层会叠成「本地音色没出声 · 已回退（本地音色没出声（…））」 */
+      if (!first || !first.src) {
+        st.neuralWhy = (first && first.err) || "没出声";
+        return false;
+      }
+      var next = chunks.length > 1 ? fetchLocalClip(v, chunks[1], st.speed) : Promise.resolve(null);
+      var missed = 0;
+      for (var i = 0; i < chunks.length; i++) {
+        var got = i === 0 ? first : await next;
+        if (halt(id)) { revokeLocal(got); return true; }
+        next = i + 2 < chunks.length ? fetchLocalClip(v, chunks[i + 2], st.speed) : Promise.resolve(null);
+        if (!got || !got.src) { missed++; emit("onTick", (st.i + (i + 1) / chunks.length) / st.units.length); continue; }
+        await playClip(got.src);
+        emit("onTick", (st.i + (i + 1) / chunks.length) / st.units.length);
+        if (halt(id)) return true;
+      }
+      /* 中途某句没取到：这句只能跳过，但不能静默 —— 徽标上要留下「少读了几句」的账 */
+      emit("onMode", { mode: "local", voice: v.name, cast: (u && u.cast) || "",
+        note: missed ? "有 " + missed + " 句本机 TTS 没出声 · 已跳过" : "" });
       return true;
     }
     async function playSegment(u, id) {
       var text = String((u && u.text) || "");
-      var okNeural = await neuralSegment(text, id, u);
+      var lv = (u && u.voiceK && window.InkVoice && InkVoice.meta(u.voiceK)) || curVoice();
+      var okNeural = false;
+      var localWhy = "";
+      if (localMeta(lv)) {
+        /* 同一轮朗读里这款本地音色已经失败过：后续段落直接走旁白，
+           不再逐段等 502 / 60s 超时（服务没起时逐段重试会把整本书拖成幻灯片）。 */
+        localWhy = st.localDown[lv.k] || "";
+        if (!localWhy) {
+          okNeural = await localSegment(text, id, u);
+          if (halt(id)) return;
+          if (okNeural) return;
+          localWhy = st.neuralWhy || "没出声";
+          st.localDown[lv.k] = localWhy;
+        }
+        /* 回退**旁白那款真声**：清掉单元里的角色声线，neuralSegment 就会用 st.voice。
+           原因随 onMode 上屏，朗读接着走，不静默退机械音。 */
+        okNeural = await neuralSegment(text, id,
+          { cast: (u && u.cast) || "", voiceK: "", fallbackNote: localWhy });
+      } else {
+        okNeural = await neuralSegment(text, id, u);
+      }
       if (halt(id)) return;
       if (okNeural) return;
-      /* 神经链路没拿到声：默认就此停住并把原因说清。
+      /* 神经链路也没拿到声：默认就此停住并把原因说清。
          悄悄换成系统机械音顶替，是「名字不同听着一样、全是冰冷机器音」的病根，
          读者甚至察觉不到自己在听降级音，只会觉得「这个软件音色就是这么差」。
          只有用户显式打开「本机声线兜底」才走系统声线（离线 / 静态托管时的活路）。 */
-      if (sysFallbackOn()) { await sysSegment(text, id); return; }
+      var why = localWhy
+        ? "本地音色没出声：" + localWhy + " · 旁白音色也没出声" + (st.neuralWhy ? "：" + st.neuralWhy : "")
+        : (st.neuralWhy || "神经合成未响应");
+      if (sysFallbackOn()) { await sysSegment(text, id, u); return; }
       /* 与音色有关的停机：**不关朗读条**。条子一关，换音色的下拉跟着消失，
          用户只能重按朗读、拿同一款念不出的音色再错一次（实测复现过）。
          改发 halted：徽标留下原因、播放键拨回 ▶，换一款音色再点 ▶ 即续读。 */
       st.dead = true; st.paused = false;
-      emit("onMode", { mode: "none", note: st.neuralWhy || "神经合成未响应" });
-      emit("onState", "halted", (st.neuralWhy || "神经合成未响应") + " · 换一款音色再点播放");
+      emit("onMode", { mode: "none", note: why });
+      emit("onState", "halted", why + " · 换一款音色再点播放");
     }
     async function run(id) {
       while (st.i < st.units.length) {
@@ -689,6 +858,9 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         st.i = Math.max(0, Math.min(st.units.length - 1, fromIdx || 0));
         st.dead = false; st.paused = false; st.stopAt = 0; st.stopBi = null;
         st.sysLock = null;
+        /* 每一轮开读都重新给本地音色一次机会：服务刚起好、模型刚加载完，
+           用户再点一次播放就该能出声，不能把上一轮的失败记一辈子。 */
+        st.localDown = {};
         if (!st.voice && window.InkVoice) st.voice = window.InkVoice.current();
         _ttsAbort = false;
         emit("onState", "playing");
@@ -1917,7 +2089,8 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
 
     /* POST /api/tts —— 朗读（真声）
        入参：text；opts{voice:音色 k, onTick(0..1)}
-       链路：① Edge 神经语音（本地 /api/tts，音质最好、朗读与试听同源）
+       链路：⓪ 本地音色（用户自机 TTS 服务，v1.5-S5c）
+            ① Edge 神经语音（本地 /api/tts，音质最好、朗读与试听同源）
             ② 自配 Moss 云音色（有密钥时）
             ③ 本机系统声线（离线兜底，逐候选试、哑火就换）
             ④ 计时模拟（无头 / 无声线环境，界面行为一致）
@@ -1928,6 +2101,13 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       var onTick = typeof o.onTick === "function" ? o.onTick : function () {};
       var v = (window.InkVoice && window.InkVoice.meta(o.voice || window.InkVoice.current())) || null;
       if (!body) return { code: 0, data: { mode: "sim", voice: "" } };
+
+      /* ⓪ 本地音色：用户自机服务（GPT-SoVITS / ChatTTS 等），先于其余链路 ——
+         这类款没有 edge id，不先走就必然落到「神经未响应」。 */
+      if (localMeta(v)) {
+        var local = await localSpeak(body, v, onTick);
+        if (local) return local;
+      }
 
       /* ① Edge 神经语音：默认链路，任意文本都自然有起伏 */
       var neural = await neuralSpeak(body, v, onTick);
@@ -2011,6 +2191,12 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
       var tc = ttsCfg();
       if (!tc.key || !tc.baseUrl || !voice) return Promise.resolve(null);
       return cloudSpeak(String(text || ""), voice, null, tc);
+    },
+
+    /* 试听本地音色（自机 TTS）：resolve {ok, why?}；不碰朗读队列 */
+    localAudition(text, voice) {
+      var v = (window.InkVoice && InkVoice.meta(voice)) || voice || null;
+      return playLocalAudition(String(text || ""), v);
     },
 
     /* GET /api/tts/cloud-voices —— 拉取 Moss 账号可用音色，并入音色目录
@@ -2232,6 +2418,14 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
     /* 同步读写：学习引擎（brain.js）每轮都要读旧表、写新表，不该被 await 拖住。 */
     memList() { return getMem(); },
     memWrite(list) { return setMem(list); },
+    /* 产物账（v1.4-S4 E2）：主脑页与工具层唯一的读写口，容量闸与归一都在这一层收口。
+       artWrite 返回 {ok,why,art} —— 没落库必须带着原因回来，界面不许报「存好了」。 */
+    artList() { return getArt(); },
+    artGet(id) { var hit = null; getArt().forEach(function (a) { if (a.id === String(id)) hit = a; }); return hit; },
+    artWrite(rec) { return upsertArt(rec); },
+    /* 收回一份产物：按 id 摘掉那一行。落盘仍只走 setArt（唯一真正写字节的那一处），
+       这里只负责「剔除后把余下的原样写回」——upsertArt 只会加和盖，减不了。 */
+    artDelete(id) { return dropArt(id); },
     /* 术语表同步快照（内置 + 用户自建，用户优先）—— 离线库检索要用 */
     fetchGlossarySync() { return allTerms(); },
 
@@ -2515,7 +2709,7 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         "\n" +
         "【你的职责 · 边界照实说】\n" +
         "这里是对话入口：你读读者给的书与段落，负责答问、总结与提炼。你具备所接入模型应有的全部能力 —— 写作、编程、数学、翻译、常识、推理、创意，任何通用问题都直接、完整、认真地回答，不要因为「这是阅读器」就拒绝或敷衍与文档无关的问题。\n" +
-        "其余用到模型的地方不在你这条对话里发生：翻译、溯源、解析、检索、内容模式识别、目录扫描、排版归一、朗读角色归属，各自在阅读页对应的面板里独立调用同一个模型，由那个面板负责把结果交给读者 —— 凡要改动读者东西的（改目录、重排正文、落地任务与闪卡），都必须读者点头才动手。别向读者宣称你能在这里替他们做完那些事。\n" +
+        "在这个页面里，你带着一组工具工作：读目录与正文、检索段落、查笔记 / 闪卡 / 任务、写产物（报告、提纲、数据集）。读的操作你直接办；凡是会改动读者东西的（写产物、改目录、重排正文、落地任务与闪卡、删笔记），都先把方案摆出来，等读者点头再动手 —— 点头之前一个字都不落盘。能做的事当场做完，别推给读者去别处点；做不到的事（读不到的格式、超出本轮预算、没接上的模型）照实说清，别硬撑。其余用到模型的地方在阅读页各自的入口里也有对应面板：翻译、溯源、解析、检索、内容模式识别、目录扫描、排版归一、朗读角色归属 —— 同一个模型，由那个页面负责把结果交给读者；读者在这里问起时你照常回答，不要拿「这是阅读器」当推辞。\n" +
         "\n" +
         "【作答要求】\n" +
         "1. 先直接给答案，再补理由；不要用「作为 AI」之类的空话开场。\n" +
@@ -2523,6 +2717,22 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
         "3. 拿不准就说不确定，绝不编造出处、数据或引文。\n" +
         "4. 用中文回答（读者用其他语言提问时跟随其语言）。\n" +
         "5. 篇幅按问题需要，不为了显得详细而灌水。" },
+
+    { k: "brain.report", n: "主脑 · 报告撰写", g: "主脑", json: 1, temp: 0.2, maxTokens: 2000, timeout: 60000,
+      fields: ["title", "conclusion", "evidence", "risk", "next", "reason"],
+      ph: {},
+      t: "你是「墨读」主脑里的报告撰写者。读者给你一个目标与一组从书里检索出来的原文，" +
+        "你只依据这些原文写一份结构化报告，不许引入原文之外的事实。\n" +
+        "报告固定四段：结论 / 依据 / 反证与不确定 / 下一步。\n" +
+        "· 结论：一段话说清这轮判出了什么；判不出就留空 —— 空结论会被本地拒收，这轮报告不会落地。\n" +
+        "· 依据：逐条给 {i 原文段号, quote 原文里的一句原话（逐字照抄，不改写）, why 它为什么支持结论}；" +
+        "i 必须是【原文】里真实存在的段号，查不到的会被本地剔除并记在产物卡上。\n" +
+        "· 反证与不确定：与结论相左的线索、证据不足之处，照实写。\n" +
+        "· 下一步：1-3 条读者可以接着做的事，动词开头。\n" +
+        "只输出 JSON，不要 markdown 围栏，不要任何多余解释：\n" +
+        "{\"title\":\"报告标题，24字内\",\"conclusion\":\"结论正文\",\"evidence\":[{\"i\":1,\"quote\":\"原文原话\",\"why\":\"不超过40字\"}]," +
+        "\"risk\":\"反证与不确定\",\"next\":[\"下一步\"],\"reason\":\"仅当结论为空时说明为什么这轮判不出结论\"}\n" +
+        "宁可说「这一轮判不出」，也不要编一条原文里没有的依据。" },
 
     { k: "brain.cheer", n: "主脑 · 里程碑鼓励", g: "主脑", json: 0, temp: 0.85, maxTokens: 260, timeout: 20000,
       ph: { persona: "主脑人设（brain.chat 渲染结果）", memory: "读者记忆块（无则留空）", stat: "这一次达到的里程碑数据" },
@@ -3515,6 +3725,129 @@ window.INK_SENTINEL_KEYS = ["inkread-cleared.v1", "lsprobe.v0"];
     var clean = (Array.isArray(list) ? list : []).filter(function (m) { return m && m.id && m.text; });
     try { localStorage.setItem(K_MEM, JSON.stringify(clean)); } catch (e) {}
     return clean;
+  }
+
+  /* ------------------------------------------------------------
+     产物（inkread.artifacts.v1）· v1.4-S4 E2 的地基
+     ------------------------------------------------------------
+     主脑这一趟办出来的东西要当「一份文件」活着，不是聊天里滚过去的一段代码：
+       {id,kind,title,md,excerpt,size,indexOnly,createdAt,updatedAt,status,source,audit}
+     · kind 三档名册（report / outline / dataset）只管**写入**：名册外一律拒收，
+       不拿未知结构硬写。读取侧原样收下（截到 20 字）—— 对端机器或以后版本写来的
+       陌生档位不是脏数据，那是读者的成果，界面照样能显示，不该被偷偷改判成报告。
+     · audit 是「这一份是怎么来的」的账（跑了几轮 / 调了几次工具 / 剔了几条查无出处的依据），
+       产物卡要如实报，模型下一轮读它也拿得到。
+
+     三道容量闸都在 setArt 一处（一道闸只写一遍，写两遍就互相掩盖，消融时切不掉）：
+       ① 单份正文 > ART_BODY_MAX（800K）→ 只留索引与摘要，md 清空、indexOnly 置真；
+       ② 整本账内联正文 > ART_TOTAL_MAX（1.6M）→ 从最旧的开始降级成索引行，行数一条不少；
+       ③ 行数 > ART_ROWS（200）→ 丢最旧的行（索引行也会长大，不封顶迟早顶穿配额）。
+     单位统一用 .length（UTF-16 字符数），和 app.js 的 MAX_KEY 3M、serve.js 的 SYNC_MAX 4M
+     是同一把尺 —— 同步那边剔键也按字符数算，这里换成 UTF-8 字节就会以为还有余量。
+     ------------------------------------------------------------ */
+  var K_ART = "inkread.artifacts.v1";
+  var ART_KINDS = ["report", "outline", "dataset"];
+  var ART_STATUS = ["draft", "kept"];
+  var ART_BODY_MAX = 800 * 1024;
+  var ART_TOTAL_MAX = 1600 * 1024;
+  var ART_ROWS = 200;
+  var ART_EXCERPT = 200;
+
+  function artInt(v, d) { var n = Number(v); return isFinite(n) && n >= 0 ? Math.floor(n) : d; }
+  function artCut(s) { return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, ART_EXCERPT); }
+  /* 读取侧惰性归一：缺哪半补哪半，不批量改写磁盘（与 S3 的 normalizeCast 同一做法）。
+     indexOnly 只认账上写死的那一位，不由 size 反推 —— 反推等于给同一条规矩装两道闸。 */
+  function normArt(a) {
+    if (!a || typeof a !== "object" || Array.isArray(a)) return null;
+    var id = String(a.id == null ? "" : a.id).trim().slice(0, 40);
+    var title = String(a.title == null ? "" : a.title).trim().slice(0, 120);
+    var md = typeof a.md === "string" ? a.md : "";
+    var src = a.source && typeof a.source === "object" ? a.source : {};
+    var au = a.audit && typeof a.audit === "object" ? a.audit : {};
+    if (!id || !title) return null;
+    return {
+      id: id,
+      kind: String(a.kind == null ? "" : a.kind).trim().slice(0, 20) || "report",
+      title: title,
+      md: md,
+      excerpt: a.excerpt ? String(a.excerpt).slice(0, ART_EXCERPT) : artCut(md),
+      size: artInt(a.size, md.length),
+      indexOnly: a.indexOnly === true,
+      createdAt: artInt(a.createdAt, 0),
+      updatedAt: artInt(a.updatedAt, 0),
+      status: ART_STATUS.indexOf(a.status) >= 0 ? a.status : "draft",
+      source: { docId: String(src.docId == null ? "" : src.docId).slice(0, 60),
+        passages: artInt(src.passages, 0), via: String(src.via == null ? "" : src.via).slice(0, 12) || "loop" },
+      audit: { rounds: artInt(au.rounds, 0), calls: artInt(au.calls, 0), rejected: artInt(au.rejected, 0) }
+    };
+  }
+  function getArt() {
+    try {
+      var v = JSON.parse(localStorage.getItem(K_ART));
+      return Array.isArray(v) ? v.map(normArt).filter(Boolean) : [];
+    } catch (e) { return []; }
+  }
+  /* 入参按「新→旧」排（upsertArt 负责把刚写的那条放到最前），预算从前往后扣，
+     所以超预算被降级的是**最旧**的那几份；行数封顶丢的也是最旧一行。 */
+  function setArt(rows) {
+    var total = 0, out = [];
+    (Array.isArray(rows) ? rows : []).forEach(function (raw) {
+      var r = normArt(raw);
+      if (!r) return;
+      if (!r.indexOnly && r.md.length <= ART_BODY_MAX && total + r.md.length <= ART_TOTAL_MAX) {
+        total += r.md.length;
+      } else {
+        if (!r.excerpt) r.excerpt = artCut(r.md);
+        r.md = "";
+        r.indexOnly = true;
+      }
+      out.push(r);
+    });
+    if (out.length > ART_ROWS) out = out.slice(0, ART_ROWS);
+    try { localStorage.setItem(K_ART, JSON.stringify(out)); }
+    catch (e) {
+      window.InkLog && InkLog.add("store", "产物账写不进本机（" + out.length + " 条）：这一份没保存",
+        "删掉几份旧产物再试；本机存储满了，同步不会替把它补回来");
+      return null;
+    }
+    return out;
+  }
+  function artStamp() { return "art-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e6).toString(36); }
+  /* 写入的唯一入口：要么按契约落库，要么如实说为什么没落。返回 {ok,why,art}。 */
+  function upsertArt(rec) {
+    if (!rec || typeof rec !== "object" || Array.isArray(rec)) return { ok: false, why: "形状不合" };
+    if (rec.kind != null && ART_KINDS.indexOf(String(rec.kind).trim()) < 0) {
+      return { ok: false, why: "kind 只认三档（report / outline / dataset），收到的是「" + String(rec.kind).slice(0, 20) + "」" };
+    }
+    var md = typeof rec.md === "string" ? rec.md : "";
+    var title = String(rec.title == null ? "" : rec.title).trim();
+    if (!title) return { ok: false, why: "没有标题" };
+    if (!md.trim()) return { ok: false, why: "正文是空的" };
+    var now = Date.now(), list = getArt(), old = null;
+    list.forEach(function (a) { if (rec.id && a.id === String(rec.id).trim()) old = a; });
+    var a = normArt(Object.assign({}, old || {}, rec, {
+      id: old ? old.id : (String(rec.id == null ? "" : rec.id).trim() || artStamp()),
+      kind: rec.kind != null ? String(rec.kind).trim() : (old ? old.kind : "report"),
+      title: title, md: md, excerpt: artCut(md), size: md.length, indexOnly: false,
+      createdAt: old ? old.createdAt : now, updatedAt: now
+    }));
+    if (!a) return { ok: false, why: "形状不合" };
+    var stored = setArt([a].concat(list.filter(function (x) { return x.id !== a.id; })));
+    if (!stored) return { ok: false, why: "本机写不进（存储满）" };
+    var landed = null;
+    stored.forEach(function (x) { if (x.id === a.id) landed = x; });
+    return { ok: true, why: "", art: landed, rows: stored.length };
+  }
+  /* 摘掉一行：先读回归一后的整本账，剔掉目标行再写回。为什么不删空就 removeItem ——
+     留着 "[]" 比多开一条不经过 setArt 的写口好，两道写口迟早对不上容量账。 */
+  function dropArt(id) {
+    var key = String(id == null ? "" : id).trim();
+    if (!key) return { ok: false, why: "没有要删的那一份" };
+    var list = getArt(), rest = list.filter(function (x) { return x.id !== key; });
+    if (rest.length === list.length) return { ok: false, why: "账上没有这一份" };
+    var stored = setArt(rest);
+    if (!stored) return { ok: false, why: "本机写不进（存储满）" };
+    return { ok: true, why: "", id: key, rows: stored.length };
   }
 
   function getUserGloss() {

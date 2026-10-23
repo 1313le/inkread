@@ -2,14 +2,19 @@
    voices-data.js · 墨读音色库（内置目录）
    —— 数据来源：Microsoft Edge TTS「Read Aloud」神经语音
       （https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list）
-      共 32 款，覆盖 普通话 / 东北·陕西方言 / 美音 / 英音 / 日语。
+      共 39 款，覆盖 普通话 / 东北·陕西方言 / 台湾腔 / 粤语 / 美音 / 英音 / 澳音 / 日语。
+   —— 港台六款与澳音一款（v1.5 多角色朗读）是为「一位角色一款真声」补的生力军：
+      大陆普通话去掉旁白只剩 5 款，12 位角色当场见底，旧版于是拿 ±Hz 捏嗓子充数。
+      这七款的 er/ep 一律留 0 —— 声线本身的区别才是区别，偏移量不是。
    —— 为什么换掉上一版：上一版目录取自 Mossland Studio 公开音色库，但那些
       试听样音是「上传者自己的录音」，朗读任意正文时仍只能退回本机 Web Speech，
       于是在 Windows 上听感就是同一条冰冷机械音。本版改用神经 TTS，
       朗读与试听走同一条云端合成链路（/api/tts），任意文本都是真·神经语音。
    —— 字段：er / ep 为 Edge SSML 的语速偏移（%）与音高偏移（Hz）；
       rate / pitch 为退回本机声线时用的倍数（由 voices.js 按标签推算）。
-   —— 想增删音色：直接改本表；想刷新可用清单，跑 scripts/list-edge-voices.js。
+   —— 想增删音色：直接改本表；想刷新官方可用清单，跑 scripts/_fetch-edge-voices.js
+      （需 NODE_OPTIONS=--use-system-ca，否则本机代理会让 Node 报证书错）。
+      注意 scripts/build-voice-catalog.js 的数据源（Mossland）已退役，别拿它补目录。
    ============================================================ */
 window.INK_VOICE_DATA = [
   /* ---------- 普通话 ---------- */
@@ -67,6 +72,50 @@ window.INK_VOICE_DATA = [
     d: "陕西口音，亮堂亲切，适合地方志与乡土文学。",
     lang: "zh", locale: "zh-CN-shaanxi", gender: "f", age: "青年",
     cat: "方言", scenes: ["方言", "乡土"], tags: ["陕西", "亮堂", "亲切"],
+    er: "0%", ep: "0Hz", demo: "墨读，让每一页都值得慢慢读。"
+  },
+
+  /* ---------- 台湾腔 / 粤语（多角色生力军，er/ep 一律留 0） ---------- */
+  {
+    id: "zh-TW-HsiaoChenNeural", name: "晓臻 · 台式女声",
+    d: "台湾腔女声，官方定位亲和正向。大陆女声用尽时第一位生力军。",
+    lang: "zh", locale: "zh-TW", gender: "f", age: "青年",
+    cat: "港台", scenes: ["港台", "对话"], tags: ["亲和", "正向", "台式"],
+    er: "0%", ep: "0Hz", demo: "墨读，让每一页都值得慢慢读。"
+  },
+  {
+    id: "zh-TW-HsiaoYuNeural", name: "晓雨 · 台式女声",
+    d: "台湾腔女声，官方定位亲和正向。与晓臻是两个人，可同场分饰。",
+    lang: "zh", locale: "zh-TW", gender: "f", age: "青年",
+    cat: "港台", scenes: ["港台", "对话"], tags: ["亲和", "正向", "台式"],
+    er: "0%", ep: "0Hz", demo: "墨读，让每一页都值得慢慢读。"
+  },
+  {
+    id: "zh-TW-YunJheNeural", name: "云哲 · 台式男声",
+    d: "台湾腔男声，官方定位亲和正向。男角池见底时的第一补充。",
+    lang: "zh", locale: "zh-TW", gender: "m", age: "青年",
+    cat: "港台", scenes: ["港台", "对话"], tags: ["亲和", "正向", "台式"],
+    er: "0%", ep: "0Hz", demo: "墨读，让每一页都值得慢慢读。"
+  },
+  {
+    id: "zh-HK-HiuGaaiNeural", name: "晓佳 · 粤语女声",
+    d: "粤语女声，官方定位亲和正向。念简体字带港味，适合港派角色。",
+    lang: "zh", locale: "zh-HK", gender: "f", age: "青年",
+    cat: "港台", scenes: ["港台", "对话"], tags: ["亲和", "正向", "粤语"],
+    er: "0%", ep: "0Hz", demo: "墨读，让每一页都值得慢慢读。"
+  },
+  {
+    id: "zh-HK-HiuMaanNeural", name: "晓曼 · 粤语女声",
+    d: "粤语女声，官方定位亲和正向。与晓佳是两个人，可同场分饰。",
+    lang: "zh", locale: "zh-HK", gender: "f", age: "中年",
+    cat: "港台", scenes: ["港台", "对话"], tags: ["亲和", "正向", "粤语"],
+    er: "0%", ep: "0Hz", demo: "墨读，让每一页都值得慢慢读。"
+  },
+  {
+    id: "zh-HK-WanLungNeural", name: "云龙 · 粤语男声",
+    d: "粤语男声，官方定位亲和正向。适合港味男性角色与旁白外的第二男声。",
+    lang: "zh", locale: "zh-HK", gender: "m", age: "中年",
+    cat: "港台", scenes: ["港台", "对话"], tags: ["亲和", "正向", "粤语"],
     er: "0%", ep: "0Hz", demo: "墨读，让每一页都值得慢慢读。"
   },
 
@@ -188,6 +237,13 @@ window.INK_VOICE_DATA = [
     d: "多语种神经女声，吐字清楚，跨语种切换自然。",
     lang: "en", locale: "en-US", gender: "f", age: "青年",
     cat: "多语种", scenes: ["多语种", "说明"], tags: ["多语种", "明澈", "清楚"],
+    er: "0%", ep: "0Hz", demo: "InkRead — make every page worth reading slowly."
+  },
+  {
+    id: "en-AU-WilliamMultilingualNeural", name: "William · 澳腔多语男声",
+    d: "澳洲腔多语种男声，一款能念几十种语言，中英混排也不跳戏。",
+    lang: "en", locale: "en-AU", gender: "m", age: "青年",
+    cat: "多语种", scenes: ["多语种", "对话"], tags: ["多语种", "澳音", "松弛"],
     er: "0%", ep: "0Hz", demo: "InkRead — make every page worth reading slowly."
   },
 

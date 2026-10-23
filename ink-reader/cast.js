@@ -87,14 +87,143 @@
      tail=false 取**开头**（后置式：「“…，”张三说。」）。
      动词取靠近引文的那一个（前置式取最后一个、后置式取第一个），
      名字只取动词前 2–4 个汉字 —— 这样「张三说道」不会把名字吃成「张三说」。 */
+
+  /* #335：提示语的主语在**句首**，不在动词前几个字里。
+     旧版从动词往左数 6 字，长状语一挤就把名字切半（「王五在旁边」→「五在旁边」），
+     残句被当成名字写进角色表 —— 这就是幽灵角色。现在两层：
+       ① 从句首按「姓氏/昵称 + 名字形态」切主语（正路，见 clauseName）；
+       ② 从动词往前剥神态/动作尾巴兜底（只认无姓角色：小红、阿明、了尘）。
+     两层都切不出来的归旁白 —— 宁可少认一个角色，也不凭空造人。 */
+  var TAIL_RULES = [
+    /* 动作 + 了/着（先长后短） */
+    /(?:叹了口气|叹口气|叹了声|摇了摇头|点点头|笑了笑|愣了愣|顿了顿|想了想|看了看|望了望|摸了摸|拍了拍|揉了揉|眨了眨眼|抿了抿嘴|咬了咬牙|伸了伸手|耸了耸肩|摊了摊手|跺了跺脚)$/,
+    /* 插入语/心理动作 */
+    /(?:听了这话|听了此言|听了这句话|闻言|见此情形|见此|看到这里|想到这里|沉默了片刻|沉默片刻|沉默半晌|愣了半晌|顿了半晌|停了片刻)$/,
+    /* V 着 + 身体部位/对象（皱着眉头 / 背着手 / 看着张三 …） */
+    /[\u4e00-\u9fff]着[\u4e00-\u9fff]{0,3}$/,
+    /* 在/于 + 方位地点（在旁边 / 在门口 / 在窗边 …） */
+    /(?:在|于)[\u4e00-\u9fff]{1,4}$/,
+    /* 对/向/朝/冲/跟/和/与 + 对象（对张三 / 向门口 …） */
+    /(?:对|向|朝|冲|跟|和|与)[\u4e00-\u9fff]{1,3}$/,
+    /* 光杆姿态动词（「周七靠在窗边」剥完「在窗边」还剩一个「靠」） */
+    /(?:站|坐|躺|靠|倚|蹲|跪|趴|立|停|走|跑|笑|哭|叹)$/
+  ];
+  var PRON1 = /^[他她我你您咱]$/;
+  function stripTails(s) {
+    var x = String(s || ""), guard = 0, changed = true;
+    while (changed && guard++ < 8) {
+      changed = false;
+      for (var i = 0; i < TAIL_RULES.length; i++) {
+        var m = x.match(TAIL_RULES[i]);
+        if (!m) continue;
+        var prefix = x.slice(0, m.index);
+        /* 尾巴占满整串时不剥：留着让 nameAcceptable 判死；只给单字代词开一例，
+           否则「于谦」「和珅」会被当成「于/和 + 人名」削光（于、和都是姓）。 */
+        if (!prefix || (prefix.length < 2 && !PRON1.test(prefix))) continue;
+        x = prefix; changed = true; break;
+      }
+      if (changed) continue;
+      var y = x.replace(TAIL_RE, "");
+      if (y !== x) {
+        if (y && y.length < 2 && !PRON1.test(y)) { /* 老表会吃光单字名，保留原样 */ }
+        else { x = y; changed = true; }
+      }
+    }
+    return x;
+  }
+  /* 名字形态闸：状语残尾一定带「在/着/了」，真名几乎不帶。
+     另有位置词尾、动作动词头两道；命中任何一道就判不合格，让这句归旁白。 */
+  var NAME_LOC = /(旁边|身旁|身边|身后|面前|对面|门口|门外|门边|窗边|床边|桌旁|墙上|楼下|楼上|屋里|屋外|院里|街上|路上|前面|后面|里面|外面|上面|下面|一旁|一边|中间|角落|墙角)$/;
+  var NAME_VERB = /^(?:端起|拿起|放下|握住|攥紧|抓着|扶着|搂住|推开|拉开|扯住|拽住|走到|跑到|站在|坐在|躺在|靠在|倚在|蹲在|跪在|趴在|转身|回头|抬头|低头|点头|摇头|挥手|摆手|皱眉|眯眼|瞪眼|撇嘴|抿嘴|咬牙|叹气|冷笑|苦笑|开口|回答|问道|说道|喊道|答道|骂道)/;
+  function nameAcceptable(name) {
+    if (!name || name.length < 2 || name.length > 4) return false;
+    if (NOT_NAME.test(name)) return false;
+    if (/^(心里|心中|暗自|默默|连忙|急忙|于是|接着|然后|只是|不过|忽然|突然)$/.test(name)) return false;
+    if (/[在着]/.test(name)) return false;          /* 「五在旁边」「抱着胳膊」残留 */
+    if (name.indexOf("了") > 0) return false;       /* 「听了这话」残留；「了尘」这类法名在首位放行 */
+    if (/[地得]/.test(name)) return false;
+    if (NAME_LOC.test(name)) return false;
+    if (NAME_VERB.test(name)) return false;
+    return true;
+  }
+
+  /* ---------------- ②a 句首主语（#335 正解） ----------------
+     中文提示语的主语几乎总在句首，而且以单姓/复姓或「老/小/阿」起头
+     （「王五站在原地不动说道」「欧阳锦靠在窗边叹道」）。从动词往前数永远会
+     被长状语切半，从句首按姓氏与形态切才稳。
+     三条否决尺：候选里夹 把/被/将/用/以/从/向/他/她；候选以谓语动词收尾；
+     候选不以姓氏/昵称起头。任一不满足就短路，漏认也比造人强。 */
+  var SURNAME1 = "王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤和常温康施文牛樊葛邢安齐易乔伍庞颜倪庄聂章鲁岳翟殷詹申欧耿关兰焦俞左柳甘祝包宁尚符舒阮柯纪梅童凌毕单季裴霍涂成苗谷盛曲翁冉骆蓝路游辛靳管柴蒙鲍华喻祁蒲房滕屈饶解牟艾尤阳时穆农司卓古吉缪简车项连芦麦褚娄窦戚岑景党宫费卜冷晏席卫米柏宗瞿桂全佟应臧闵苟邬边卞姬师仇栾隋商刁沙荣巫寇桑郎甄丛仲虞敖巩明佘池查麻苑迟邝";
+  var SURNAME2 = "欧阳,太史,端木,上官,司马,东方,独孤,南宫,万俟,闻人,夏侯,诸葛,尉迟,公羊,赫连,澹台,皇甫,宗政,濮阳,公冶,太叔,申屠,公孙,慕容,仲孙,钟离,长孙,宇文,司徒,鲜于,司空,闾丘,子车,亓官,司寇,巫马,公西,颛孙,壤驷,公良,漆雕,乐正,宰父,谷梁,拓跋,夹谷,轩辕,令狐,段干,百里,呼延,东郭,南门,羊舌,微生,梁丘,左丘,西门,第五".split(",");
+  /* 正则择先不择长：「这时」排在「这时候」前面会先吃掉前两字，剩「时候王五」被当成人名。
+     带前缀关系的领起词一律长的排前面。 */
+  var NAME_LEAD = /^(?:与此同时|话虽如此|话音刚落|这时候|第二天|片刻后|半晌后|此时|那时|当时|于是|接着|然后|随后|随即|这时|闻言|只见|却见|忽见|忽然|突然|顿时|次日|当晚|夜里|清晨|傍晚)/;
+  /* 心理状语夹在主语与动词之间：「王五心里想道」「王五心中暗道」。
+     SAY 表里没有「想」，动词位落到「道」，前四字就会被整段当成名字（王五心里）。
+     只在短语前面已经站着一个合格姓名时才切，且至少留 2 字 —— 别把「李心里」这类真名切掉。 */
+  var MENTAL = /(?:心里|心中|心底|暗自|默默|暗暗)/;
+  var NAME_INNER = /[把被将以从向的给他她我你您]/;
+  /* 谓语头：名字后面紧跟的「动作/副词/介词」。它同时用于两处：
+     候选名字的**第三个字起**不许是谓语头（否则「王五端起」被当成四字名），
+     名字之后剩的余文必须以谓语头起句（否则名字边界不可信）。
+     只收明确不作名字末字的字，明/平/国/阳/锦/头 这类常见名字用字一律不收。 */
+  var PRED_HEAD = /[在从把被将给让对向朝冲跟和与同于为一又便就也才却都还再连忙急轻缓慢冷淡微略猛忽顿立随站坐躺靠倚蹲跪趴走跑笑哭叹说问答看望听想瞧盯瞟瞪眯皱点摇抬低转回端拿放推拉抓扶抱搂拍揉喝抽擦吸吐愣停沉环顾深长满神情气色味意紧不边仔认悄偷暗默特故亲自吟喘伸抬挥摆指拱握攥捏扯拽拖举扔丢甩踢踩跳蹦滚爬挪挤撞敲砸劈砍刺挡拦迎送接递背用叉以及着地了]/;
+  var EXTRA_TAIL = /(?:起身|站起|坐下|站定|停步|迈步|走来|走去|进来|出来|过来|回去|上来|下来|起来|开头|摇头|点头)$/;
+  var NICK_STOP = /[声心道路时半伙命事家入子女儿男脸眼手脚步头身口力气意样阵片刻会次岁天年月日点些量边面方处实远然]/;
+  function nameHeadOk(cand) {
+    var two = cand.slice(0, 2);
+    for (var i = 0; i < SURNAME2.length; i++) if (SURNAME2[i] === two) return true;
+    if (SURNAME1.indexOf(cand.charAt(0)) >= 0) return true;
+    if (/^[老小阿了释]/.test(cand)) {
+      var rest = cand.slice(1);
+      if (rest && !NICK_STOP.test(rest.charAt(0))) return true;
+    }
+    return false;
+  }
+  function clauseName(clause, verb) {
+    var s = String(clause || "").replace(/^[\s，。！？；：、…—「」『』“”"']+/, "");
+    var guard = 0;
+    while (guard++ < 3) {
+      var ld = s.match(NAME_LEAD);
+      if (!ld) break;
+      s = s.slice(ld[0].length);
+    }
+    if (!s) return null;
+    var mm = s.match(MENTAL);
+    if (mm && mm.index >= 2) {
+      var mb = s.slice(0, mm.index);
+      if (nameAcceptable(mb) && nameHeadOk(mb)) s = mb;
+    }
+    if (verb === "道") {
+      var mi = s.match(/^(.{2,})心$/);
+      if (mi && nameAcceptable(mi[1]) && nameHeadOk(mi[1])) s = mi[1];
+    }
+    var pm = s.match(/^(他们|她们|我们|你们|咱们|大家|众人|他|她|我|你|您|咱)/);
+    if (pm) return pm[1];
+    /* 从长到短取第一个形态合格的候选：第三人称叙事里名字最多 4 字，
+       先试长的能保住 王小明 / 欧阳锦 / 阿尔焦姆；再靠「第三字起不许是谓语头」
+       挡住把「王五端起」整个吞下去的误切。 */
+    for (var len = 4; len >= 2; len--) {
+      if (s.length < len) continue;
+      var cand = s.slice(0, len), rest = s.slice(len);
+      if (!nameAcceptable(cand)) continue;
+      if (NAME_INNER.test(cand.slice(1))) continue;
+      if (!nameHeadOk(cand)) continue;
+      if (cand.slice(2).split("").some(function (ch) { return PRED_HEAD.test(ch); })) continue;
+      if (rest && !PRED_HEAD.test(rest.charAt(0))) continue;
+      return cand;
+    }
+    return null;
+  }
+
   function tagName(narr, tail) {
     var t = String(narr || "");
     if (!t) return null;
-    var seg = tail ? t.slice(-18) : t.slice(0, 14);
+    var seg = tail ? t.slice(-28) : t.slice(0, 20);
     SAY_RE.lastIndex = 0;
-    var m, hits = [], ends = [];
+    var m, hits = [], ends = [], verbs = [];
     while ((m = SAY_RE.exec(seg))) {
-      hits.push(m.index); ends.push(m.index + m[0].length);
+      hits.push(m.index); ends.push(m.index + m[0].length); verbs.push(m[0]);
       if (hits.length > 6) break;
     }
     /* 合并「同一句提示语被拆成两击」：SAY 里既收「低声说」这类复合动词，也收「道」这类单字，
@@ -102,25 +231,35 @@
        三字动词之后那一记「道」就漏了网 —— 动词位落到 17，名字窗口取到「他低声说」，
        角色表里凭空多出一行（v1.1-S5a 成对截图目视抓到的）。
        改成按**上一动词的结尾**判同一击，动词位取整段的开头。 */
-    var merged = [], mend = [];
+    var merged = [], mend = [], mverb = [];
     for (var q = 0; q < hits.length; q++) {
       if (merged.length && hits[q] <= mend[mend.length - 1]) continue;
-      merged.push(hits[q]); mend.push(ends[q]);
+      merged.push(hits[q]); mend.push(ends[q]); mverb.push(verbs[q]);
     }
     hits = merged;
     if (!hits.length) return null;
     var at = tail ? hits[hits.length - 1] : hits[0];
-    var before = seg.slice(Math.max(0, at - 6), at).replace(TAIL_RE, "");
-    /* 先试 2–4 字的名字；再试单字代词（「他说道」也带信息：性别指向 + 回指信号）。
+    var verb = tail ? mverb[mverb.length - 1] : mverb[0];
+    var pre = seg.slice(0, at);
+    /* 从近到远扫动词前的分句（最多 4 句）：主语在句首，且「王五点了点头，又摇了摇头说道」
+       这种名字落在**上一个分句**里 —— 只看紧挨动词的那一句会漏。 */
+    var parts = pre.split(/[。！？；：、，…—\s]+/).filter(function (x) { return !!x; });
+    for (var pi = parts.length - 1; pi >= 0 && pi >= parts.length - 4; pi--) {
+      var cn = clauseName(parts[pi], verb);
+      if (cn) return cn;
+    }
+    /* 兜底：从动词往前剥尾巴，名字只从剥完的末尾取（无姓角色：小红、阿明、了尘）。
        match 的结果没有捕获组，取 [0] —— 这行踩过：写成 [1] 会永远拿到 undefined。 */
-    var nm = before.match(/[\u4e00-\u9fff]{2,4}$/);
-    if (nm) {
-      var name = nm[0];
-      /* 剥尾巴后仍不足 2 字（「小/大」单字）就当没认出来；NOT_NAME 与「心里/忽然」这类
-         纯副词接着兜一道 —— 宁缺勿错，凭空多一个角色比少一个更刺耳。 */
-      if (NOT_NAME.test(name)) return null;
-      if (/^(心里|心中|暗自|默默|连忙|急忙|于是|接着|然后|只是|不过|忽然|突然)$/.test(name)) return null;
-      return name;
+    var last = parts.length ? parts[parts.length - 1] : pre;
+    var before = stripTails(last);
+    for (var len = 4; len >= 2; len--) {
+      if (before.length < len) continue;
+      var cand = before.slice(-len);
+      if (!nameAcceptable(cand) || !nameHeadOk(cand)) continue;
+      if (cand.slice(2).split("").some(function (ch) { return PRED_HEAD.test(ch); })) continue;
+      if (TAIL_RE.test(cand) || EXTRA_TAIL.test(cand)) continue;
+      if (NAME_VERB.test(cand)) continue;
+      return cand;
     }
     var pr = before.match(/[他她我你您咱]$/);
     return pr ? pr[0] : null;
@@ -657,7 +796,7 @@
     Object.keys(out.chars).forEach(function (k) {
       var c = out.chars[k];
       if (!c || typeof c !== "object" || Array.isArray(c)) {
-        out.chars[k] = { name: k, count: 0, gender: "", alt: [] };
+        out.chars[k] = { name: k, count: 0, gender: "", alt: [], pitch: 0 };
         return;
       }
       if (!c.name) c.name = k;
@@ -666,6 +805,10 @@
       if (!Array.isArray(c.alt)) c.alt = [];
       c.alt = c.alt.filter(function (x) { return typeof x === "string" && x; });
       c.voiceK = String(c.voiceK || "");
+      c.voiceName = String(c.voiceName || "");
+      /* v1.5 移调退役：旧账里存的 ±Hz 加载即归零 —— 既不生效也不报错（V9），
+         声线的区别从此只由 voiceK 决定。 */
+      c.pitch = 0;
       c.locked = !!c.locked;
       c.voiceLock = !!c.voiceLock;      /* A4：人亲手挑过的音色，任何重排都不碰 */
       /* A2：模型新建的角色带 by/role/evidence（面板据此单列一档、点开看凭什么）。 */
@@ -944,18 +1087,76 @@
      A4 的两处病：
        · 旧写法「按计数排序后依次抢池子里第一个空位」，池子内容一变（换旁白音会重算
          castPool，那款声线就从池子里消失了）→ 全员重新分配，听起来像整本书换了配音组；
-       · cast.js 注释早就承诺「同款但换音高由播放层负责」，而播放层发的是固定 pitch
-         （api.js 只认音色自带的 ep）—— 承诺没兑现。
+       · 旧写法把「同性别优先」实现成了「同性别强制」：这一性别的空位一旦用尽，它宁可
+         拿 ±90Hz 捏嗓子，也不肯用旁边那位空着的异性声线 —— 用户嫌蠢的正根（根因 3）。
      现在：已指派且仍可用的声线**一律不动**（只有被旁白抢走或已下架的那一两个才重排）；
-     起点按角色名散列（与池子顺序无关，稳定）；同性别优先；池子不够用时才复用一款，
-     复用者按次序拿到递进音高偏移（c.pitch，Hz），由播放层真的并进 &pitch=。
+     起点按角色名散列（与池子顺序无关，稳定）；选人次序按档位递降、性别让在后面：
+       ① 同性别 · 四把尺依次比：年龄档距离 → 出身档 → 角色描述命中音色标签 → 「小说」场景
+       ② 跨性别 · 同样比这四把尺（性别是硬约束，让在档位之后、共用之前）
+       ③ 全池无空位才共用真声：同性别优先 → 档位小优先 → 用得最少的先摊
+     四把尺写成**先后**而不是加权总和：三个语气词不该抵掉一个年龄档 ——
+     那正是「贴了标签但听着很怪」的来源。年龄判不出时按「邻档」算（不加分也不罚分），
+     判得出却只有远处有空位时，面板明说「画像 少年→中年」。
+     v1.5 定案：**移调整条退役**。共用两位就是同一个人在念，面板明说「与××同声线」并给
+     一键换人，也不把嗓子捏细 90Hz 装成两个人（行业口径同样是「换真实声线，不要移调」）。
      旁白不参与这里的音色分配（旁白永远是用户当前选的那一款）。 */
   function hashName(n) {
     var h = 2166136261, s = String(n || "");
     for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 16777619) >>> 0; }
     return h >>> 0;
   }
-  var PITCH_STEPS = [0, 30, -30, 60, -60, 90, -90];
+  function tierOf(v) { return v && typeof v.tier === "number" ? v.tier : 0; }
+
+  /* ---------------- ⑧ 画像配声：年龄与语气只是软偏好 ----------------
+     角色表里没有 age 字段（模型只回 name/alias/gender/role/evidence），所以年龄是**派生量**：
+     role 里明说就信它，否则看名字里的字（老/婆/叔 → 中年，童/娃/仔/小X → 少年，哥/姐 → 青年）。
+     判不出就留空 —— 空不是「青年」，是不加这条约束（宁可不知道，也不瞎猜）。
+     这条量只影响「挑哪款真声」，绝不参与认人：猜错也只是配了个年龄不贴的嗓子。 */
+  var AGE_TIERS = ["少年", "青年", "中年", "老年"];
+  /* 「老年」必须排在中年前面：老翁、老叟、老妪这类字两边都像，先到先得 ——
+     排在后面就永远判不出第四档，这一档等于没加。 */
+  var AGE_WORDS = [
+    ["老年", /老年|暮年|老朽|耄耋|古稀|苍老|白发|高龄|老翁|老叟|老妪|老太太|老汉/],
+    ["中年", /老者|老人|老头|老太|老婆婆|爷爷|奶奶|大叔|大婶|大娘|长辈|中年|父亲|母亲/],
+    ["少年", /少年|少女|孩童|小孩|孩子|童子|顽童|幼童|学生|学徒/],
+    ["青年", /青年|年轻人|小伙|后生/]
+  ];
+  function ageGuess(name, role) {
+    var r = String(role || "");
+    for (var i = 0; i < AGE_WORDS.length; i++) if (AGE_WORDS[i][1].test(r)) return AGE_WORDS[i][0];
+    var n = String(name || "");
+    if (/老|翁|叟|婆|叔|伯|婶|爷|奶|姥/.test(n)) return "中年";
+    if (/^小.|童|娃|仔|儿$/.test(n)) return "少年";
+    if (/哥|姐/.test(n)) return "青年";
+    return "";
+  }
+  /* 角色与声线贴不贴：面板的「画像」徽标与分配用的是同一把尺，不许两处各算一套。 */
+  function voiceFit(c, v) {
+    var ca = ageGuess(c && c.name, c && c.role);
+    var va = String((v && v.age) || "");
+    var ci = AGE_TIERS.indexOf(ca), vi = AGE_TIERS.indexOf(va);
+    var role = String((c && c.role) || "");
+    var tags = [];
+    (Array.isArray(v && v.tags) ? v.tags : []).forEach(function (t) {
+      if (t && role.indexOf(t) >= 0 && tags.indexOf(t) < 0) tags.push(t);
+    });
+    return {
+      age: ca, voiceAge: vi >= 0 ? va : "",
+      gap: (ci >= 0 && vi >= 0) ? Math.abs(ci - vi) : -1,
+      tier: tierOf(v), tags: tags,
+      scene: !!(Array.isArray(v && v.scenes) && v.scenes.indexOf("小说") >= 0)
+    };
+  }
+  function voiceRank(c, v) {
+    var f = voiceFit(c, v);
+    /* 四把尺的先后即数组字典序；年龄判不出按邻档（1）算，不奖励也不惩罚瞎猜 */
+    return [f.gap < 0 ? 1 : f.gap, Math.min(3, Math.max(0, f.tier)),
+      -Math.min(3, f.tags.length), f.scene ? 0 : 1];
+  }
+  function rankLess(a, b) {
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i];
+    return false;
+  }
   function assignVoices(chars, pool, narrK) {
     var order = (pool || []).slice();
     var avail = narrK ? order.filter(function (v) { return v.k !== narrK; }) : order;
@@ -975,26 +1176,57 @@
     need.forEach(function (cc) {
       var g = cc.gender || "";
       var start = order.length ? hashName(cc.name) % order.length : 0;
-      var pick = null, z, v;
-      for (z = 0; pick == null && z < avail.length; z++) { v = avail[(start + z) % avail.length]; if (v.gender === g && !used[v.k]) pick = v; }
-      if (!pick && !g) for (z = 0; pick == null && z < avail.length; z++) { v = avail[(start + z) % avail.length]; if (!used[v.k]) pick = v; }
-      if (!pick && g) for (z = 0; pick == null && z < avail.length; z++) { v = avail[(start + z) % avail.length]; if (v.gender === g) pick = v; }
-      if (!pick) pick = avail[start % Math.max(1, avail.length)] || avail[0] || null;
+      /* 从散列起点绕一圈，把**没被占**且过得了 predicate 的全收进来，按四把尺取最优；
+         同分时取离起点最近的那款（顺时针首个）—— 这就是「同一本书同一版本结果不漂移」。 */
+      function scan(pred) {
+        var best = null, bestR = null;
+        for (var z = 0; z < avail.length; z++) {
+          var v = avail[(start + z) % avail.length];
+          if (!pred(v) || used[v.k]) continue;
+          var r = voiceRank(cc, v);
+          if (!best || rankLess(r, bestR)) { best = v; bestR = r; }
+        }
+        return best;
+      }
+      var pick = null;
+      /* 两趟：第一趟卡同性别（性别未知的角色不设这条约束），没空位才放宽性别。
+         性别仍是硬约束 —— 它排在四把尺之后、共用之前，而不是被语气词顶掉。 */
+      var passes = g ? [true, false] : [false];
+      for (var pI = 0; !pick && pI < passes.length; pI++) {
+        var sameSex = passes[pI];
+        pick = scan(function (v) { return !sameSex || v.gender === g; });
+      }
+      if (!pick) {                                         /* ③ 全池用尽：共用真声，明说不移调 */
+        var cand = avail.slice().sort(function (a, b) {
+          var am = (!g || a.gender === g) ? 0 : 1, bm = (!g || b.gender === g) ? 0 : 1;
+          if (am !== bm) return am - bm;
+          var at = tierOf(a) - tierOf(b); if (at) return at;
+          return (used[a.k] || 0) - (used[b.k] || 0);
+        });
+        pick = cand[0] || null;
+      }
       if (!pick) return;
       cc.voiceK = pick.k; cc.voiceName = pick.name;
       used[pick.k] = (used[pick.k] || 0) + 1;      /* 占位：后面的角色先找空位，找不到才共用（I1） */
     });
-    /* 音高偏移最后统一按「共用同一款声线的第几个」递进 —— 手动指派、重识别继承来的指派
-       也算进同一款。只在分配当场给偏移会漏一种情况：用户在面板里把某角色指到别人正在用的
-       那一款，两个人听起来完全是同一个人。 */
-    var byVoice = {};
-    list.forEach(function (cc) {
-      if (!cc.voiceK) { cc.pitch = 0; return; }
-      var n = byVoice[cc.voiceK] || 0;
-      cc.pitch = n === 0 ? 0 : PITCH_STEPS[n % PITCH_STEPS.length];
-      byVoice[cc.voiceK] = n + 1;
-    });
+    /* 谁和谁共用同一款，是面板要如实说出来的事（不是偏移量，纯派生，不落盘）。 */
+    list.forEach(function (cc) { cc.pitch = 0; });
     return chars;
+  }
+  /* 同一款声线上站着哪几位角色：面板与提示词共用这一把尺。 */
+  function voiceShares(chars) {
+    var by = {};
+    Object.keys(chars || {}).forEach(function (n) {
+      var k = (chars[n] || {}).voiceK || "";
+      if (!k) return;
+      (by[k] = by[k] || []).push(n);
+    });
+    var out = {};
+    Object.keys(by).forEach(function (k) {
+      if (by[k].length < 2) return;
+      by[k].forEach(function (n) { out[n] = by[k].filter(function (x) { return x !== n; }); });
+    });
+    return out;
   }
 
   /* ---------------- ⑦b A4 音色方案（模型只提建议，本地硬校验） ----------------
@@ -1002,8 +1234,9 @@
        · char 必须是角色表里的人（别名按 findChar 归一）；
        · voice 必须是本机音色池里的键（池外 id / 显示名一律丢，模型不许凭空造声线）；
        · voiceLock 的角色不参与重排（行照留，标 locked，采用时跳过）。
-     返回的是**预览行**（含本地算出的共用次数与音高偏移），不写任何字段。
-     采用走 applyVoicePlan：写 voiceK、重算音高，再交给 assignVoices 统一收口。 */
+     返回的是**预览行**（含本地算出的「同声线同伴」），不写任何字段。
+     采用走 applyVoicePlan：写 voiceK/voiceName，再交给 assignVoices 统一收口。
+     v1.5：预览不再算「音高偏移」—— 撞款时面板如实说「与××同声线」，不捏嗓子。 */
   function planVoices(cast, plan, pool, narrK) {
     var out = { rows: [], rejected: 0, locked: 0 };
     if (!cast || !cast.chars) return out;
@@ -1020,14 +1253,15 @@
       if (c.voiceLock) {
         out.locked++;
         out.rows.push({ char: name, voice: c.voiceK || "", name: c.voiceName || (byK[c.voiceK] && byK[c.voiceK].name) || "原音色",
-          why: "已锁定 · 不参与重排", locked: true, pitch: Number(c.pitch) || 0, reuse: false });
+          why: "已锁定 · 不参与重排", locked: true, share: [], reuse: false });
         return;
       }
       out.rows.push({ char: name, voice: k, name: byK[k].name, why: String(p.why || "").slice(0, 40),
-        locked: false, pitch: 0, reuse: false });
+        locked: false, share: [], reuse: false });
     });
-    /* 预览音高：照 assignVoices 的同一套规则算（可用池、已占用、Object.keys 顺序），
-       面板上看到「共用 +30Hz」，采用后播放层拿到的就是同一个数。 */
+    /* 预览「谁和谁撞了同一款」：照 assignVoices 的同一套坐标算（可用池、
+       当前 voiceK、Object.keys 顺序），面板上写「与××同声线」，采用后播放层拿到的
+       就是同一个 voiceK —— 两处看到的是同一件事，不再一处报数一处听不出。 */
     var avail = (pool || []).slice();
     if (narrK) {
       var keep = avail.filter(function (v) { return v.k !== narrK; });
@@ -1042,24 +1276,17 @@
       sim[n] = k;
     });
     out.rows.forEach(function (r) { if (!r.locked) sim[r.char] = r.voice; });
-    var byVoice = {}, pitch = {};
-    Object.keys(cast.chars).forEach(function (n) {
-      var k = sim[n];
-      if (!k) { pitch[n] = 0; return; }
-      var idx = byVoice[k] || 0;
-      pitch[n] = idx === 0 ? 0 : PITCH_STEPS[idx % PITCH_STEPS.length];
-      byVoice[k] = idx + 1;
-    });
     out.rows.forEach(function (r) {
-      r.pitch = pitch[r.char] || 0;
-      r.reuse = (byVoice[r.voice] || 0) > 1;
+      var k = sim[r.char] || "";
+      r.share = k ? Object.keys(sim).filter(function (m) { return m !== r.char && sim[m] === k; }) : [];
+      r.reuse = r.share.length > 0;
     });
     return out;
   }
   /* 采用方案：只改 voiceK / voiceName（不把模型挑的声线升成 voiceLock —— 那是人的意图），
-     随后 assignVoices 统一重算音高。locked 行与已锁角色一律跳过并计入 skipped。 */
+     随后 assignVoices 统一重算。locked 行与已锁角色一律跳过并计入 skipped。 */
   function applyVoicePlan(cast, rows, pool, narrK) {
-    var res = { applied: 0, skipped: 0, pitched: 0 };
+    var res = { applied: 0, skipped: 0, shared: 0 };
     if (!cast || !cast.chars) return res;
     var byK = {};
     (pool || []).forEach(function (v) { if (v && v.k) byK[v.k] = v; });
@@ -1073,7 +1300,7 @@
       res.applied++;
     });
     assignVoices(cast.chars, pool, narrK);
-    Object.keys(cast.chars).forEach(function (k) { if (cast.chars[k].pitch) res.pitched++; });
+    res.shared = Object.keys(voiceShares(cast.chars)).length;
     return res;
   }
 
@@ -1163,6 +1390,7 @@
     splitSpans: splitSpans, tagName: tagName, build: build, applyModel: applyModel, normalizeCast: normalizeCast,
     applyProposal: applyProposal, mergeChars: mergeChars, findChar: findChar,
     assignVoices: assignVoices, planVoices: planVoices, applyVoicePlan: applyVoicePlan,
+    voiceShares: voiceShares, ageGuess: ageGuess, voiceFit: voiceFit,
     unitsFor: unitsFor, sentences: sentences,
     normName: normName, samePerson: samePerson, hashName: hashName,
     cyclePeriod: cyclePeriod, predictAt: predictAt, chainState: chainState,

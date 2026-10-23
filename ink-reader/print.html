@@ -99,10 +99,10 @@
       <path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><path d="M7 16h10v4H7z"/>
     </svg>打印
   </button>
-  <a class="bar-btn" href="index.html">
+  <a class="bar-btn" id="lnBack" href="index.html">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="m15 18-6-6 6-6"/>
-    </svg>返回书架
+    </svg><span id="lnBackT">返回书架</span>
   </a>
 </div>
 
@@ -117,7 +117,7 @@
 <section class="blank no-print" id="blank" hidden>
   <h2 id="blankTitle">没有可打印的正文</h2>
   <p id="blankWhy"></p>
-  <a class="bar-btn" href="index.html">回书架重新导入</a>
+  <a class="bar-btn" id="lnBlankBack" href="index.html">回书架重新导入</a>
 </section>
 
 <script src="mock.js"></script>
@@ -129,7 +129,11 @@
    书架条目直接读 inkread.shelf.v1 —— 与 InkStore 同一个键，不是第二套存储。 */
 (function () {
   var q = new URLSearchParams(location.search);
-  var docId = q.get("doc") || "";
+  /* 这张纸能排两种东西（v1.5-S4 #310）：书架上的一本（?doc=）与产物账里的一份（?art=）。
+     主进程只会在调用方点名时写其中一个键，两个键并排出现＝话事权不明，这里以 art 为准。
+     产物走的是 API.artGet 那颗公开口，不另开第二条读账的路 —— 归一与容量口径只有一份。 */
+  var artId = q.get("art") || "";
+  var docId = artId ? "" : (q.get("doc") || "");
   /* 出纸规格的三级来源，从前往后：
        ① 查询参数 —— 阅读页与主进程点名了这一版要什么纸（printUrl 只在调用方真点了名时才写这三个键）；
        ② 本机记住的偏好 —— 直接在地址栏打开这张纸（手机浏览器、另一台设备）时跟着上次的选择走；
@@ -224,12 +228,16 @@
   }
 
   var blanked = false;
-  function blank(title, why) {
+  /* 第三句「lead」是给主进程看的（v1.5-S4 #310）：导出被拒时它要把原因带回界面。
+     那句话必须由这张纸写 —— 只有它知道自己当下排的是书架上的一本还是产物账里的一份，
+     主进程替它写死「这本书…」会在产物出不了纸时报出牛头不对马嘴的话。 */
+  function blank(title, why, lead) {
     blanked = true;
     document.getElementById("sheet").hidden = true;
     /* 旗子给主进程看：没有正文的纸印出来是一页空白（空态本身是 .no-print，打印时不上纸），
        所以「导出 PDF」必须在出文件之前就停住，而不是生成一个同名空壳骗用户说导出成功了。 */
     document.body.dataset.blank = "1";
+    document.body.dataset.blankLead = String(lead || "");
     /* 没有正文可排，纸型、章首分页、打印都是空谈：把死控件收掉，别留一排按了没反应的钮 */
     elCtl.hidden = true;
     document.getElementById("btnPrint").hidden = true;
@@ -238,6 +246,19 @@
     document.getElementById("blankWhy").textContent = why;
     document.getElementById("blank").hidden = false;
     ready();
+  }
+  /* 「回哪儿去」跟着排的东西变：书的来路是书架，产物的来路是主脑页。
+     一张排着产物的纸把「返回书架」摆在角上，是把人往没有这本书的地方领。 */
+  function goHome(href, label) {
+    if (!href) return;
+    ["lnBack", "lnBlankBack"].forEach(function (id) {
+      var a = document.getElementById(id);
+      if (a) a.setAttribute("href", href);
+    });
+    var t = document.getElementById("lnBackT");
+    if (t) t.textContent = label;
+    var bl = document.getElementById("lnBlankBack");
+    if (bl) bl.lastChild.textContent = label;
   }
 
   /* 就绪信号：主进程在隐藏窗口里等 body[data-ready]，等到才 printToPDF。
@@ -261,10 +282,95 @@
 
   document.getElementById("btnPrint").addEventListener("click", function () { window.print(); });
 
+  /* ---------- 产物出纸（v1.5-S4 #310）：?art= 排的是产物账里那一份 ----------
+     读只走 API.artGet 那颗公开口（normArt 的十二字段归一、indexOnly 的判定都在账那层收口），
+     这张纸不另立第二条读账的路，也不碰书架 —— 排产物时去读 inkread.shelf.v1，
+     「产物出纸不会冒出另一本书」这条判据就永远咬不住。 */
+  function fmtWords(w) {
+    w = Math.max(0, Math.round(+w || 0));
+    if (w < 10000) return [String(w), "字"];
+    return [(w / 10000).toFixed(1), "万字"];
+  }
+  /* 字数口径抄主脑页那张卡（InkStats.fmtWords：不足一万报「N 字」，过了换成「N.N 万字」）：
+     同一份产物在卡上写「3.2 万字」、纸上写「32145 字」，读者只会认为这两份有一个在撒谎。
+     纸上只报账上真有的那几笔 —— 卡上「出处核上 N 条」是写下那一刻由引用校验现场算的临时账
+     （ink-agent.js artifact.write 的返回值），产物账里根本没有 cites / unchecked 这两位，
+     抄上纸就是给一份东西印出一个查不到出处的数字。落库的只有 size 与 audit.rejected。 */
+  function artBits(a) {
+    var wf = fmtWords(a.size);
+    var rej = (a.audit && Number(a.audit.rejected)) || 0;
+    var bits = [wf[0] + " " + wf[1]];
+    if (rej) bits.push("写下时剔过 " + rej + " 条查无出处的依据");
+    return bits;
+  }
+  function renderArt(a) {
+    document.body.dataset.art = String(a.id || artId);
+    var kindName = { report: "报告", outline: "大纲", dataset: "数据表" }[a.kind] || a.kind || "报告";
+    var t = String(a.title || "未命名产物");
+    document.title = t + " · 墨读导出";
+    document.getElementById("bkTitle").textContent = t;
+    document.getElementById("byline").textContent =
+      ["主脑产物", kindName].concat(artBits(a))
+        .concat(["墨读 InkRead 导出 · " + new Date().toLocaleDateString("zh-CN")]).join("　·　");
+    var md = typeof a.md === "string" ? a.md : "";
+    if (!md.trim()) {
+      blank(a.indexOnly === true ? "这一份只留下了索引" : "这一份没有正文",
+        a.indexOnly === true
+          ? "「" + t + "」当初超出产物账的容量上限，本机只存下标题与摘要，正文没有落地。回到主脑页缩小范围再做一份。"
+          : "「" + t + "」在产物账里的正文是空的，本机没有可排上纸的内容。回到主脑页让主脑重新交出一份。",
+        a.indexOnly === true
+          ? "这份产物在本机只留下了索引，印出来只会是一张白纸。"
+          : "这份产物在本机没有正文，印出来只会是一张白纸。");
+      return;
+    }
+    var blocks = null;
+    try { blocks = MD.blocks(md); } catch (e) {}
+    if (!blocks || !blocks.length) {
+      blank("这一份排不出正文", "「" + t + "」存的是纯文本，本机没有可用的 markdown 解析器（md.js 没加载）。",
+        "这份产物在本机排不出正文，印出来只会是一张白纸。");
+      return;
+    }
+    var fixedArt = MD.fixTables ? MD.fixTables(blocks) : blocks;
+    /* 首个 h1 就是这份东西的题目：产物卡的标题与 md 开头的一级标题常常是同一句话，
+       不提上去第一页会印两遍（与书同一规矩，两处不许分叉）。 */
+    if (fixedArt.length && fixedArt[0] && fixedArt[0].type === "h1") {
+      var own = MD.plain ? String(MD.plain(String(fixedArt[0].x || ""))).trim() : "";
+      if (own) {
+        fixedArt = fixedArt.slice(1);
+        document.title = own + " · 墨读导出";
+        document.getElementById("bkTitle").textContent = own;
+      }
+    }
+    var n = 0;
+    fixedArt.forEach(function (b) { n += String((b && (b.x || b.text)) || "").length; });
+    fixed = fixedArt;
+    document.getElementById("doc").innerHTML = MD.blocksHtml(fixedArt, { chapterBreak: chap });
+    laid = { done: true, blocks: fixedArt.length, chars: n, words: Math.round(+a.size || 0) };
+    document.body.dataset.blocks = String(fixedArt.length);
+    document.body.dataset.chars = String(n);
+    applySpec();
+    ready();
+  }
+
+  if (artId) {
+    goHome("ai.html", "回主脑页");
+    var art = null;
+    try { art = (window.API && API.artGet) ? API.artGet(artId) : null; } catch (e) {}
+    if (!art) {
+      document.getElementById("bkTitle").textContent = "未命名";
+      blank("没有可打印的产物", "本机产物账里没有这一份（?art=" + artId + "）。回到主脑页让主脑重新交出一份，或从那一张产物卡上再点一次。",
+        "这份产物在本机的产物账里找不到，印出来只会是一张白纸。");
+      return;
+    }
+    renderArt(art);
+    return;
+  }
+
   var doc = docOf(docId);
   if (!doc) {
     document.getElementById("bkTitle").textContent = "未命名";
-    blank("没有可打印的书", "本机书架里没有这个条目（?doc=" + (docId || "空") + "）。回到书架打开这本书，再从「更多 → 打印」进来。");
+    blank("没有可打印的书", "本机书架里没有这个条目（?doc=" + (docId || "空") + "）。回到书架打开这本书，再从「更多 → 打印」进来。",
+      "这本书在本机不存在，印出来只会是一张白纸。");
     return;
   }
   docId = doc.id;
@@ -296,9 +402,11 @@
       if (doc.stored === "none") {
         blank("正文没有存进本机", "《" + (doc.title || "这本书") + "》的正文当初就没写进本机存储：" +
           (window.API ? API.storedNote(doc.storedWhy || "") : "本机存储空间已满") +
-          "。腾出空间后重新导入原文件，才能打印或导出 PDF。");
+          "。腾出空间后重新导入原文件，才能打印或导出 PDF。",
+          "这本书在本机没有正文，印出来只会是一张白纸。");
       } else {
-        blank("取不到这本书的正文", why || "本机既没有落库正文，书仓里也没有这本书（可能是在别的设备上导入的）。在本机重新导入原文件后再导出。");
+        blank("取不到这本书的正文", why || "本机既没有落库正文，书仓里也没有这本书（可能是在别的设备上导入的）。在本机重新导入原文件后再导出。",
+          "这本书在本机没有正文，印出来只会是一张白纸。");
       }
       return;
     }

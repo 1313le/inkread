@@ -221,9 +221,13 @@
     if (tools && ctx.tools) { o.tools = tools; o.toolChoice = "auto"; }
     if (ctx.via === "json") o.jsonFormat = true;
     if (ctx.prm) { if (ctx.prm.cfg) o.cfg = ctx.prm.cfg; Object.assign(o, ctx.prm.send || {}); }
-    var r = await API.llmMsgs(ctx.messages, o);
-    ctx.net += (o.stats && o.stats.net) || 0;
-    return r;
+    /* 记账放在 finally：重问的额度是失败那一趟烧掉的，只记成功那半截，
+       「模型请求失败 …已自动重问 N 次」这句实话就永远是 0 次。 */
+    try {
+      return await API.llmMsgs(ctx.messages, o);
+    } finally {
+      ctx.net += (o.stats && o.stats.net) || 0;
+    }
   }
 
   /* 降级通路（T3）：这一家不认原生 tool_calls 时，改用固定形状 JSON。
@@ -483,6 +487,10 @@
       if (!ctx) return { status: "error", why: "no-ctx", plan: [], await: [], answer: "", rounds: 0, calls: 0, note: "这一步接不上刚才那轮" };
       ctx.signal = o.signal || ctx.signal;
       var list = (prev.await || []);
+      /* 落这一批之前，先把正本改写成「正在落地」那一份：queue-and-continue 之后循环
+         不再停在 status:"await"（写操作攒进队列、循环接着跑），而产物账要靠这一份把
+         写操作归给循环。不补这一笔，点头落地的每一条产物只能记成 manual / 0 轮 —— 审计字段全是装饰。 */
+      if (list.length && !o.refuse) snap(ctx, "await");
       for (var i = 0; i < list.length; i++) {
         var a = list[i];
         if (aborted(ctx)) { ctx.awaitQ = []; return snap(ctx, "stopped", "aborted"); }

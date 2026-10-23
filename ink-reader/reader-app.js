@@ -5697,6 +5697,7 @@
       var b = qs("#ttsEng");
       if (!b || !m) return;
       var base = m.mode === "neural" ? "神经语音 · " + (m.voice || "") + (m.cast ? " · " + m.cast : "")
+        : m.mode === "local" ? "本地音色 · " + (m.voice || "") + (m.cast ? " · " + m.cast : "")
         : m.mode === "cloud" ? "云音色 · " + (m.voice || "")
         : m.mode === "speech" ? "本机声线 · " + (m.voice || "")
         : m.mode === "none" ? "未出声 · " + (m.note || "本机没有可用声线")
@@ -5831,14 +5832,55 @@
   var CAST_RAW = castAll()[docId];
   var CAST = (window.InkCast ? InkCast.normalizeCast(CAST_RAW) : CAST_RAW) || { on: false, chars: {}, lines: [] };
   CAST.on = !!CAST.on;
+  /* 上次用过的本地音色可能已随清单移除 / 改坏：开页就收口一次，别让角色表留着无处可合成的键 */
+  if (castDropMissingLocals(CAST.chars)) { castVoices(CAST.chars); castPut(CAST); }
   /* 角色音色的候选池：**先把自己（旁白）那款排除掉** —— 旁白用用户选的音色，
      角色若也分到同一款，听起来就是「换了半天等于没换」（首跑实测正是如此）。
-     池子小到只剩一款时只好全体共用（宁可用，不可空）。 */
+     池子小到只剩一款时只好全体共用（宁可用，不可空）。
+     v1.5 改池子的**取法**：旧写法按「音色商城已收藏」取，只剩 9 款，其中 3 款
+     （Ava / Guy / Sonia）压根念不出简体中文字（实测回 0 字节空音频）。池子又小又带死声，
+     assignVoices 只能撞款，再用 ±Hz 捏嗓子把两个人装成两个人 —— 那正是用户嫌蠢的那件事。
+     现在按「这本书的语言念得出的真声」取，并给降级次序分档（castTier）。 */
+  function castTier(v) {
+    var id = String((v && (v.id || v.k)) || "");
+    if (/Multilingual/i.test(id)) return 3;     /* 多语种：什么都能念，但口音是外来的 */
+    if (v && v.cat === "方言") return 2;         /* 东北／陕西：主角带口音会出戏 */
+    if (/^zh-(TW|HK)/i.test(String((v && v.locale) || ""))) return 1;  /* 港台：真中文，只是口音 */
+    return 0;                                    /* 本书本族声线 */
+  }
+  function castSample() {                        /* 判语言用的小样本：正文头 600 字足够 */
+    var s = "";
+    for (var i = 0; i < blocks.length && s.length < 600; i++) {
+      var b = blocks[i] || {};
+      if (typeof b.x === "string") s += b.x;
+      if (b.items) s += b.items.join("");
+    }
+    return s;
+  }
   function castPool() {
     var cur = window.InkVoice ? InkVoice.current() : "";
-    var all = (window.InkVoice ? InkVoice.list() : []).filter(function (v) { return v.installed && v.edge; });
+    var s = castSample();
+    /* 正文一个字儿都没有（纯图档）时不瞎猜语言，跟着旁白那款走 */
+    var want = s.trim() && window.InkVoice ? InkVoice.langOf(s)
+      : String(((window.InkVoice && InkVoice.meta(cur)) || {}).lang || "zh");
+    /* 内置神经款 + 用户自机导入的本地款（v1.5-S5c）。本地款不 edge，
+       但同样是「这款书用真声念得出」的候选；语言过滤对两者一视同仁。 */
+    var src = window.InkVoice
+      ? InkVoice.list().concat(InkVoice.local ? InkVoice.local() : [])
+      : [];
+    var all = src.filter(function (v) {
+      return (v.edge || v.local) && (v.lang === want || /Multilingual/i.test(String(v.id || v.k || "")));
+    });
+    all.sort(function (a, b) { return castTier(a) - castTier(b); });   /* 稳定排序：同档保持目录原序 */
     var rest = all.filter(function (v) { return v.k !== cur; });
     return rest.length >= 2 ? rest : all;
+  }
+  /* 交给 cast.js 的那份-lite：多一个 tier，重排次序才知道谁能往下让；
+     age/tags/scenes 是画像配声的三把尺（年龄档、语气标签、小说场景），过滤器认它们 */
+  function castPoolLite() {
+    return castPool().map(function (v) {
+      return { k: v.k, name: v.name, gender: v.gender, age: v.age, tags: v.tags, scenes: v.scenes, tier: castTier(v) };
+    });
   }
   var SPEAK_UNITS_PLAIN = SPEAK_UNITS;      /* 原始单元（无角色）；开了多角色才换成带角色的那份 */
   /* 角色表面板列多少句、模型一次判多少句、一次点击最多判几块 —— 三个数各管一件事：
@@ -5857,10 +5899,27 @@
   var castStage = null;         /* A5 分配提案：整份临时角色表（只在内存里，采用才换成正本） */
   var castAllMsg = "";          /* A5 面板提示：没配模型 / 已收回 / 已过期 */
 
-  /* 池子 + 旁白那款交给 cast.js 去排（谁撞款谁重排、谁共用谁偏移音高）。 */
+  /* 清单被移除 / 被改坏 / 某条重导入后换了名字：角色表里的 local: 键已经无处可合成。
+     不松锁的话，assignVoices 的「已定的人」分支会把它原样留住（locked / voiceLock 双保险），
+     朗读就一直等一台不再存在的本机 TTS。统一在这里松掉，让 assignVoices 按画像重配真声。
+     返回清掉的条数。 */
+  function castDropMissingLocals(chars) {
+    if (!window.InkVoiceLocal || !InkVoiceLocal.list) return 0;
+    var live = {};
+    InkVoiceLocal.list().forEach(function (v) { live[v.k] = 1; });
+    var n = 0;
+    Object.keys(chars || {}).forEach(function (nm) {
+      var c = chars[nm];
+      if (!c || !c.voiceK || String(c.voiceK).indexOf("local:") !== 0 || live[c.voiceK]) return;
+      delete c.voiceK; delete c.voiceName; c.locked = false; c.voiceLock = false; n++;
+    });
+    return n;
+  }
+  /* 池子 + 旁白那款交给 cast.js 去排（谁撞款谁让位、实在排不开就明说与人同声线）。 */
   function castVoices(chars) {
     if (!window.InkCast) return chars;
-    return InkCast.assignVoices(chars, castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }),
+    castDropMissingLocals(chars);
+    return InkCast.assignVoices(chars, castPoolLite(),
       window.InkVoice ? InkVoice.current() : "");
   }
   /* 重识别（L1）：把上一版角色表传进去，用户的音色指派与手改归属不会被冲掉 */
@@ -5880,7 +5939,8 @@
     castUndo.length = 0; castPage = 0;     /* 坐标系整个换了，旧快照不能再往上盖 */
     castPut(CAST);
   }
-  /* 按角色表重建播放单元：旁白 cast 空（用用户选的音色），台词带角色名、角色音色与音高偏移。
+  /* 按角色表重建播放单元：旁白 cast 空（用用户选的音色），台词带角色名与角色音色。
+     v1.5：单元不再带 pitch —— 移调退役，一位角色一款真声；撞款时由面板如实标注「与××同声线」。
      v1.1-S5a A5：cs 不再靠 indexOf 回填 —— 归属表（cast.js 按原文扫）与播放层（blockRT 渲染文本）
      过去是两套坐标，重复句会错位、找不到就退整块起点。现在 unitsFor 走 textOf=blockRT 这一把尺，
      span 自己带 at，句自己带 cs，相加即真起点；顺带把多角色单元也细到句（与普通朗读对齐）。 */
@@ -5889,7 +5949,7 @@
     var units = InkCast.unitsFor(blocks, CAST, { textOf: function (b, i) { return blockRT(i); } });
     return units.map(function (u) {
       var c = u.cast ? CAST.chars[u.cast] : null;
-      return { bi: u.bi, cs: u.cs, text: u.text, cast: u.cast || "", voiceK: (c && c.voiceK) || "", pitch: (c && c.pitch) || 0 };
+      return { bi: u.bi, cs: u.cs, text: u.text, cast: u.cast || "", voiceK: (c && c.voiceK) || "" };
     });
   }
   /* 换队列时接着播，不能硬用老下标：开关多角色会把旁白与台词拆成不同形状（单元数整个变），
@@ -5941,6 +6001,13 @@
     if (!body) return;
     var names = Object.keys(CAST.chars || {});
     var pool = castPool();
+    /* 撞款账（谁和谁同一款）由 cast.js 现算：面板说的和播放用的是同一份 voiceK。 */
+    var shares = window.InkCast ? InkCast.voiceShares(CAST.chars) : {};
+    var whoByVoice = {};
+    names.forEach(function (m) {
+      var k = (CAST.chars[m] || {}).voiceK || "";
+      if (k) (whoByVoice[k] = whoByVoice[k] || []).push(m);
+    });
     var linesAll = CAST.lines || [];
     /* 链的账：从**当前** lines 现算（手改一句归属后要立刻反映），断裂位置从上次识别结果读。 */
     var ch = { bare: 0, alt: 0, landed: 0, none: 0, hold: 0, reach: 0, uncertain: 0, clash: 0,
@@ -6073,7 +6140,9 @@
       if (vrows.length) {
         h.push('<div class="ap-hint">配音：' + vrows.slice(0, 16).map(function (r) {
           return esc(r.char) + " → " + esc(r.locked ? (r.name || "原音色") : r.name) +
-            (r.locked ? "（已锁定）" : (r.pitch ? "（" + (r.pitch > 0 ? "+" : "") + r.pitch + "Hz）" : ""));
+            (r.locked ? "（已锁定）" :
+              (r.share && r.share.length ? "（与" + esc(r.share.slice(0, 2).join("、")) +
+                (r.share.length > 2 ? "等 " + (r.share.length + 1) + " 位" : "") + "同声线）" : ""));
         }).join("、") + (vrows.length > 16 ? "…共 " + vrows.length + " 条" : "") + "</div>");
       }
       var noGo = stale || !(cs.judged > 0);
@@ -6090,7 +6159,7 @@
       castWire();
       return;
     }
-    h.push('<section class="ap-sec"><h4>角色<span class="ap-sec-note">音色默认按性别自动配</span></h4>');
+    h.push('<section class="ap-sec"><h4>角色<span class="ap-sec-note">音色按性别、画像（年龄与语气）与戏份自动配；一位一款真声，池里没空位才共用</span></h4>');
     /* A4：不自动烧额度 —— 读者点一次才问模型；问回来的只是建议，采用才落盘。 */
     h.push('<div class="tmp-row" style="gap:6px;align-items:center">' +
       '<button class="btn btn-ghost btn-sm" id="castVoiceAsk"' +
@@ -6108,6 +6177,18 @@
         mk = '<em class="ap-badge" title="' + esc(why) + '">模型新建</em>';
       }
       var lk = c.voiceLock ? '<em class="ap-sec-note" title="你手选的音色，主脑重排不会动它">已锁定 · 不参与重排</em>' : "";
+      /* 画像徽标只在隔了两档以上时亮（少年↔中年、老年↔少年）：相邻档说了也没人看，真隔远了
+         才是读者需要知道「这位的年龄没配上」的时候。画像判不出就不亮 —— 空不是「青年」。 */
+      var vmeta = c.voiceK ? ((window.InkVoice && InkVoice.meta && InkVoice.meta(c.voiceK)) || pool.filter(function (v) { return v.k === c.voiceK; })[0] || null) : null;
+      var fit = (vmeta && window.InkCast && InkCast.voiceFit) ? InkCast.voiceFit(c, vmeta) : null;
+      var fb = (fit && fit.gap >= 2 && fit.age && fit.voiceAge)
+        ? '<em class="ap-badge warn" title="角色画像偏「' + esc(fit.age) + '」，本机池里这一档没有空着的同性别声线，退到最近的「' + esc(fit.voiceAge) + '」—— 宁可年龄不贴，也不捏嗓子装嫩">画像 ' + esc(fit.age) + "→" + esc(fit.voiceAge) + "</em>"
+        : "";
+      /* 本地款把「来源」与「你写的许可原文」摊在这一行：产品不替用户判断合法性，也不藏来源 */
+      var lb = (vmeta && vmeta.local)
+        ? '<em class="ap-badge" title="' + esc(vmeta.license || "") + '">本地 · ' + esc(vmeta.provider || "") + "</em>" +
+          '<em class="ap-sec-note">许可：' + esc(vmeta.license || "") + "</em>"
+        : "";
       /* 手选过的音色可能已不在池里（旁白占走 / 已下架）—— 仍要把那款列出来，
          否则下拉显示「按性别自动」会骗人。 */
       var vopts = pool.slice();
@@ -6115,18 +6196,54 @@
         var vn = (window.InkVoice && InkVoice.meta && InkVoice.meta(c.voiceK) || {}).name || c.voiceName || c.voiceK;
         vopts = [{ k: c.voiceK, name: vn }].concat(vopts);
       }
-      h.push('<div class="ap-row"><span class="ap-k">' + esc(n) + ' <em class="ap-sec-note">×' + c.count + "</em>" + mk + lk + "</span>" +
+      var vEdge = vopts.filter(function (v) { return !v.local; });
+      var vLocal = vopts.filter(function (v) { return !!v.local; });
+      function voiceOpt(v) {
+        var busy = (whoByVoice[v.k] || []).filter(function (m) { return m !== n; });
+        return '<option value="' + v.k + '"' + (c.voiceK === v.k ? " selected" : "") + ">" +
+          esc(v.name) + (v.local ? "（本地）" : "") +
+          (busy.length ? "（" + esc(busy[0]) + (busy.length > 1 ? "等 " + busy.length + " 位" : "") + "在用）" : "") +
+          "</option>";
+      }
+      var sh = shares[n] || [];
+      h.push('<div class="ap-row"><span class="ap-k">' + esc(n) + ' <em class="ap-sec-note">×' + c.count + "</em>" + mk + lk + fb + lb +
+        (sh.length ? '<em class="ap-badge" title="本机池里这一款已经有人了 —— 宁可共用真声，也不捏嗓子变调">与' +
+          esc(sh.slice(0, 2).join("、")) + (sh.length > 2 ? "等 " + (sh.length + 1) + " 位" : "") + "同声线</em>" : "") +
+        "</span>" +
         '<span class="ap-c">' +
         '<select class="ap-sel" data-cast-gender="' + esc(n) + '" aria-label="' + esc(n) + " 的性别\">" +
         [["", "未知"], ["m", "男"], ["f", "女"]].map(function (g) { return '<option value="' + g[0] + '"' + ((c.gender || "") === g[0] ? " selected" : "") + ">" + g[1] + "</option>"; }).join("") +
         "</select>" +
         '<select class="ap-sel" data-cast-voice="' + esc(n) + '" aria-label="' + esc(n) + " 的音色\">" +
         '<option value="">按性别自动</option>' +
-        vopts.map(function (v) { return '<option value="' + v.k + '"' + (c.voiceK === v.k ? " selected" : "") + ">" + esc(v.name) + "</option>"; }).join("") +
-        "</select></span></div>");
+        vEdge.map(voiceOpt).join("") +
+        (vLocal.length ? '<optgroup label="本地音色">' + vLocal.map(voiceOpt).join("") + "</optgroup>" : "") +
+        "</select>" +
+        '<button class="ap-mini" data-cast-demo="' + esc(n) + '"' + (c.voiceK ? "" : " disabled title='这位还没配音色'") +
+          '>试听</button>' +
+        (sh.length ? '<button class="ap-mini" data-cast-swap="' + esc(n) +
+          '" title="在本机池里给这位找一款还没人占的声线，换完即锁定">换一位</button>' : "") +
+        "</span></div>");
     });
     h.push("</section>");
-    /* A4 建议表：一行一位角色，共用声线把音高偏移与「为什么共用」一起摊开。 */
+    /* 本地音色分区（v1.5-S5c）：未配置时整块不渲染（不是灰按钮、不是空分组）。
+       来源与许可原样上屏 —— 产品不替用户判断合法性，也不隐藏来源。 */
+    var locals = (window.InkVoiceLocal && InkVoiceLocal.list) ? InkVoiceLocal.list() : [];
+    if (locals.length) {
+      h.push('<section class="ap-sec" id="castLocalSec"><h4>本地音色<span class="ap-sec-note">' +
+        esc(locals.length + " 款 · " + (InkVoiceLocal.provider() || "")) + " · 你自己机器上的 TTS 服务</span></h4>");
+      h.push('<div class="ap-hint">' + esc((InkVoiceLocal.endpoint && InkVoiceLocal.endpoint()) || "") +
+        " · 来源与许可是你在清单里写的原文，墨读不改写</div>");
+      locals.forEach(function (v) {
+        h.push('<div class="ap-row"><span class="ap-k">' + esc(v.name) +
+          ' <em class="ap-badge">本地 · ' + esc(v.provider || "") + "</em>" +
+          ' <em class="ap-sec-note">许可：' + esc(v.license || "") + "</em></span></div>");
+      });
+      h.push('<div class="tmp-row" style="gap:6px">' +
+        '<button class="ap-mini" data-local-import>导入音色清单…</button>' +
+        '<button class="ap-mini" data-local-clear>移除本地音色</button></div></section>');
+    }
+    /* A4 建议表：一行一位角色，撞了同一款声线就把「同伴是谁」摊开说 —— 不靠移调糊过去。 */
     if (castPlan) {
       var prow = (castPlan.rows || []).filter(function (r) { return r && CAST.chars[r.char]; });
       h.push('<section class="ap-sec" id="castVoiceSec"><h4>主脑配音建议<span class="ap-sec-note">只是建议，点「采用」才写入</span></h4>');
@@ -6134,8 +6251,9 @@
         var bits = "";
         if (r.locked) bits += '<em class="ap-sec-note">已锁定 · 不参与重排</em>';
         else {
-          if (r.reuse) bits += '<em class="ap-badge" title="池子里这款声线被多位角色共用，播放层按音高区分">共用' +
-            (r.pitch ? " · 音高 " + (r.pitch > 0 ? "+" : "") + r.pitch + "Hz" : " · 首位") + "</em>";
+          if (r.share && r.share.length) bits += '<em class="ap-badge" title="本机池里这款声线已经有人了；宁可共用真声，也不捏嗓子变调">' +
+            "与" + esc(r.share.slice(0, 2).join("、")) + (r.share.length > 2 ? "等 " + (r.share.length + 1) + " 位" : "") +
+            "同声线</em>";
           if (r.why) bits += '<em class="ap-sec-note">' + esc(r.why) + "</em>";
         }
         h.push('<div class="ap-row"><span class="ap-k">' + esc(r.char) + " → " + esc(r.name) + " " + bits + "</span></div>");
@@ -6382,6 +6500,12 @@
       sel.addEventListener("change", function () {
         var c = CAST.chars[sel.dataset.castGender]; if (!c) return;
         c.gender = sel.value; c.locked = !!sel.value;
+        /* 声明性别要真的换人：自动指派来的那款（不是亲手挑的 voiceLock）与新性别不符时先松开。
+           不松的话 cast.js 的 keep-branch 把它当「已定的人」原样留着，下拉按下去等于没反应。 */
+        if (sel.value && c.voiceK && !c.voiceLock) {
+          var vg = (window.InkVoice && InkVoice.meta && InkVoice.meta(c.voiceK) || {}).gender;
+          if (vg && vg !== sel.value) { delete c.voiceK; delete c.voiceName; }
+        }
         castVoices(CAST.chars);
         castPut(CAST); castApplyUnits(); castRender();
       });
@@ -6395,9 +6519,21 @@
              只改键会把它标成上一款声线的名字。 */
           c.voiceName = (window.InkVoice && InkVoice.meta && InkVoice.meta(sel.value) || {}).name || sel.value;
         } else { delete c.voiceK; delete c.voiceName; c.locked = false; c.voiceLock = false; }
-        castVoices(CAST.chars);      /* 手改后重算音高偏移：指到别人那一款就得让两者听得出区别 */
+        castVoices(CAST.chars);      /* 手改后重收口：撞了同一款就在面板上明说，不再偏移音高 */
         castPut(CAST); castApplyUnits(); castRender();
       });
+    });
+    body.querySelectorAll("[data-cast-demo]").forEach(function (b) {
+      b.addEventListener("click", function () { castAudition(b.dataset.castDemo); });
+    });
+    body.querySelectorAll("[data-cast-swap]").forEach(function (b) {
+      b.addEventListener("click", function () { castSwapVoice(b.dataset.castSwap); });
+    });
+    body.querySelectorAll("[data-local-import]").forEach(function (b) {
+      b.addEventListener("click", castPickLocalFile);
+    });
+    body.querySelectorAll("[data-local-clear]").forEach(function (b) {
+      b.addEventListener("click", castClearLocal);
     });
     body.querySelectorAll("[data-cast-line]").forEach(function (sel) {
       sel.addEventListener("change", function () {
@@ -6474,7 +6610,7 @@
     var n = InkCast.mergeChars(CAST, A, B);
     if (n < 0) { castUndo.pop(); toast("这两个人并不到一起（不在表里或本来就是同一人）", "info"); return; }
     castPlan = null; castVoiceMsg = "";   /* 角色表变了，旧配音建议作废 */
-    castVoices(CAST.chars);            /* 并掉的那位可能占着一款声线，音高偏移要重算 */
+    castVoices(CAST.chars);            /* 并掉的那位可能占着一款声线，撞款账要重算 */
     castPut(CAST); castApplyUnits(); castRender();
     toast("已并人：" + A + " → " + B + (n ? "（" + n + " 句改归 " + B + "）" : "（没有句子要改归）"), "users");
   }
@@ -6818,7 +6954,7 @@
         voice = vp.plan; voiceErr = vp.err || "";
         if (voice && (voice.rows || []).length && !ctl.signal.aborted) {
           voiceRes = InkCast.applyVoicePlan(stage, voice.rows,
-            castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }),
+            castPoolLite(),
             window.InkVoice ? InkVoice.current() : "");
           if (!voiceRes.applied) voiceErr = "配音方案里的角色都已锁定，没有可改的条目。";
         }
@@ -6896,13 +7032,13 @@
     var stage = castStage.cast;
     stage.on = CAST.on;
     stage.cap = CAST.cap;
-    castVoices(stage.chars);       /* 旁白或音色池在提案期间变了：按当前池重收口，音高跟着重算 */
+    castVoices(stage.chars);       /* 旁白或音色池在提案期间变了：按当前池重收口，撞款账跟着重算 */
     castStage = null; castAllMsg = ""; castPlan = null; castVoiceMsg = "";
     CAST = stage;
     castPut(CAST); castApplyUnits(); castRender();
     var tb = ["新建 " + (s.newChars || 0) + " 个角色", "改了 " + (s.changed || 0) + " 句归属"];
     if (s.uncertain) tb.push("拿不准 " + s.uncertain + " 句留在面板里");
-    if (v.applied) tb.push("配声 " + v.applied + " 位" + (v.pitched ? " · " + v.pitched + " 位带音高偏移" : ""));
+    if (v.applied) tb.push("配声 " + v.applied + " 位" + (v.shared ? " · " + v.shared + " 位与人同声线" : " · 每位一款真声"));
     toast("已采用主脑分配：" + tb.join(" · ") + "，可撤销", "circle-check");
     if (window.InkAgent && InkAgent.log) {
       InkAgent.log("采用主脑分配：" + tb.join("，"), "cast.assign", "write");
@@ -7009,7 +7145,7 @@
     if (!castPlan || !(castPlan.rows || []).length) return;
     castSnap("采用主脑配音方案");
     var res = InkCast.applyVoicePlan(CAST, castPlan.rows,
-      castPool().map(function (v) { return { k: v.k, name: v.name, gender: v.gender }; }),
+      castPoolLite(),
       window.InkVoice ? InkVoice.current() : "");
     if (!res.applied) {
       castUndo.pop();
@@ -7019,13 +7155,109 @@
     castPlan = null; castVoiceMsg = "";
     castPut(CAST); castApplyUnits(); castRender();
     toast("已采用主脑配音：" + res.applied + " 位角色" +
-      (res.pitched ? " · " + res.pitched + " 位带音高偏移" : "") + "，可撤销", "users");
+      (res.shared ? " · " + res.shared + " 位与人同声线" : " · 每位一款真声") + "，可撤销", "users");
   }
   function castDropVoices() {
     castPlan = null;
     castVoiceMsg = "已不用这套配音建议，现有音色不变。";
     castRender(); toast("已不用这套配音建议；现有音色不变", "x");
   }
+  /* 撞款时的一键换人：在本机池里给这位找一款还没人占的真声（同性别优先，其次按档位序 ——
+     castPool 已排好，第一项就是最贴本书口音的）。换完即 voiceLock：这是人点的，
+     主脑重排不许再挪走。池子真见底时如实说没有，而不是回头给她加 90Hz。 */
+  function castSwapVoice(n) {
+    var c = CAST && CAST.chars[n];
+    if (!c) return;
+    var used = {};
+    Object.keys(CAST.chars).forEach(function (m) {
+      if (m !== n) { var k = (CAST.chars[m] || {}).voiceK || ""; if (k) used[k] = 1; }
+    });
+    var pool = castPool();
+    var free = pool.filter(function (v) { return !used[v.k] && v.k !== c.voiceK; });
+    if (!free.length) {
+      var p = voicePartners(n)[0] || "别人";
+      castVoiceMsg = "换不了：本机池里 " + pool.length + " 款声线全有人了。" +
+        "可以给旁白换一款腾个位置，也可以就这么与" + p + "共用同一款 —— 不会再靠变调区分。";
+      castRender(); toast("声线池已见底：没有空着的款可换", "info");
+      return;
+    }
+    var g = c.gender || "";
+    var same = free.filter(function (v) { return v.gender === g; });
+    var pick = same[0] || free[0];
+    castSnap("给 " + n + " 换声线");
+    c.voiceK = pick.k; c.voiceName = pick.name;
+    c.locked = true; c.voiceLock = true;
+    castVoices(CAST.chars);
+    castPut(CAST); castApplyUnits(); castRender();
+    toast(n + " 换成「" + pick.name + "」" + (same.length ? "" : "（同性别的款都占满了）") + "，可撤销", "users");
+  }
+  function voicePartners(n) {
+    return (window.InkCast && InkCast.voiceShares(CAST.chars) || {})[n] || [];
+  }
+  /* 每位角色一枚试听：拿这位在这本书里真说过的一句，用她/他当前那款声线念出来。
+     走 /api/tts 的同一地址、与朗读同源，但不碰朗读队列 —— 试错不该把整场朗读打断。
+     拉不到声就明说，不悄悄退回系统机械音（那正好是「听了等于没听」）。 */
+  function castAudition(n) {
+    var c = CAST && CAST.chars[n];
+    if (!c) return;
+    if (!c.voiceK) { toast(n + " 还没配上音色：先在「" + "角色" + "」里挑一款，或点「主脑配音」", "info"); return; }
+    var v = window.InkVoice && InkVoice.meta ? InkVoice.meta(c.voiceK) : null;
+    if (!v) { toast("这只音色已不在本机目录里：重新导入清单或换一款", "alert-triangle"); return; }
+    var line = (CAST.lines || []).filter(function (l) {
+      return l.speaker === n && String(l.text || "").trim();
+    })[0];
+    var text = String((line && line.text) || (n + "。")).replace(/^[\s“”"'‘’「」『』]+|[\s“”"'‘’「」『』]+$/g, "");
+    /* 本地款：走 /api/localtss 真合成，独立 Audio 不碰朗读队列；失败原样报原因 */
+    if (v.local) {
+      if (!window.API || !API.localAudition) { toast("本地音色模块未就绪", "alert-triangle"); return; }
+      if (_castAud) { try { _castAud.pause(); } catch (e) {} _castAud = null; }
+      toast("试听「" + n + "」· " + v.name + "（本机合成）", "audio-lines");
+      API.localAudition(text.slice(0, 60), v.k).then(function (r) {
+        if (r && !r.ok) toast("试听「" + n + "」未出声：" + r.why, "alert-triangle");
+      });
+      return;
+    }
+    if (!v.edge) { toast("这款声线没有本机神经合成地址，试听不了", "alert-triangle"); return; }
+    var url = InkVoice.ttsUrl(v, text.slice(0, 60));
+    if (!url) { toast("这款声线没有本机神经合成地址，试听不了", "alert-triangle"); return; }
+    if (_castAud) { try { _castAud.pause(); } catch (e) {} _castAud = null; }
+    var a = new Audio(url);
+    _castAud = a;
+    var done = false;
+    var giveUp = function (why) {
+      if (done) return;
+      done = true;
+      if (_castAud === a) _castAud = null;
+      toast("试听「" + n + "」未出声：" + why, "alert-triangle");
+    };
+    a.onerror = function () { giveUp("神经合成没响应（检查网络后重试）"); };
+    a.onended = function () { if (_castAud === a) _castAud = null; };
+    a.onplay = function () { if (!done) toast("试听「" + n + "」· " + v.name, "audio-lines"); };
+    setTimeout(function () { if (!done && a.paused) giveUp("8 秒没出声（本机服务未启动？）"); }, 8000);
+    try { a.play().catch(function () { giveUp("浏览器拦了自动播放，再点一次"); }); }
+    catch (e) { giveUp("本机播放失败"); }
+  }
+  /* 本地音色清单：导入 / 移除都走 voices-local.js 的同一套校验；
+     失败把 why 原样上屏（哪一条、缺什么），不吞成「导入失败」。 */
+  function castPickLocalFile() {
+    if (!window.InkVoiceLocal || !InkVoiceLocal.importFile) { toast("本地音色模块未加载", "alert-triangle"); return; }
+    InkVoiceLocal.importFile(function (r) {
+      if (!r || !r.ok) { toast("导入失败：" + ((r && r.why) || "清单无效"), "alert-triangle"); return; }
+      var n = (r.data && r.data.items || []).length;
+      var notes = [];
+      if (r.dropped) notes.push("跳过 " + r.dropped + " 条重复/无效");
+      if (r.capped) notes.push("超出上限，只收前 " + n + " 条");
+      toast("已导入 " + n + " 款本地音色" + (notes.length ? " · " + notes.join(" · ") : ""), "download");
+      castVoices(CAST.chars); castPut(CAST); castApplyUnits(); castRender();
+    });
+  }
+  function castClearLocal() {
+    if (!window.confirm("移除本机导入的本地音色清单？用它们配音的角色会按内置池重新分配。")) return;
+    if (window.InkVoiceLocal) InkVoiceLocal.clear();
+    castVoices(CAST.chars); castPut(CAST); castApplyUnits(); castRender();
+    toast("已移除本地音色清单", "trash-2");
+  }
+  var _castAud = null;
   (function castBind() {
     var box = qs("#ttsCast");
     if (box) {
@@ -9216,6 +9448,12 @@
     "missing-pair": "术语要成对：源词与译名都得给", "nothing-to-change": "改完之后和原来一模一样，那就不改了",
     "bad-progress": "进度得是 0 到 1 之间的一个数", "unknown-page": "没有这一页",
     "rejected": "读者点了「先不」，这条没落地", "none": "没有可交出来的结果",
+    /* v1.5-S4 产物三枚带回来的：写产物这条路有四种「没写成」，各不相同，
+       合并成一句「没成」就等于让读者去猜是自己漏了正文还是那句出处查无实据。 */
+    "no-title": "这份产物没给标题：产物区要靠标题找回它，空标题不行",
+    "no-body": "这份产物没有正文：只有标题的一条空账，不值得存",
+    "all-citations-dropped": "这份正文里带出处的依据全被剔了（本机对不上任何一本架上的书），剔完没剩下东西",
+    "write-failed": "本机没能存下这一份，账上一个字没动",
     "error": "执行时出了错", "failed": "没有成功"
   };
   function arWhy(w) { return AR_WHY[w] || String(w || "failed"); }
@@ -9223,7 +9461,13 @@
     if (!r) return;
     if (r.rejected) { arRow("err", '<span class="ar-tag">挡下</span>' + esc(arWhy(r.why) + (r.detail && r.detail.tool ? "：" + r.detail.tool : ""))); return; }
     if (r.needConfirm) { arShowConfirm(r); return; }
-    if (r.ok === false) { arRow("err", '<span class="ar-tag">没成</span>' + esc(arWhy(r.why))); return; }
+    if (r.ok === false) {
+      /* 工具层带回来的 note 是它自己那一句为什么（如产物写不进时存储给的原文）：
+         code 只说「没存下」，读者要的是「为什么没存下」。 */
+      arRow("err", '<span class="ar-tag">没成</span>' +
+        esc(arWhy(r.why) + (typeof r.note === "string" && r.note ? "：" + r.note : "")));
+      return;
+    }
     if (r.same) { arAct("已经在这一页了"); return; }
     var t = InkAgent.trace(), last = t[t.length - 1];
     arAct(last ? last.text : "办好了");

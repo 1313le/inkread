@@ -468,6 +468,158 @@ function serveLlm(req, res) {
 }
 
 /* ------------------------------------------------------------
+   /api/localtss · 用户自机 TTS 服务的两形状适配（v1.5-S5c）
+   —— 用户在自己机器上跑 GPT-SoVITS / ChatTTS / CosyVoice 等，产品只做接线：
+        ① openai 形状：POST <endpoint>/v1/audio/speech（ChatTTS 自带 openai_api）
+        ② gsv 形状：  POST <endpoint>/（GPT-SoVITS api.py，params 原样合并）
+   —— 为什么由服务端代取：跨端口直连会被 CORS 拦下（这些服务不发 CORS 头），
+      且「端点只许回环」必须有一道不依赖前端自律的守卫。
+   —— 与 /api/llm 同款边界：只接本机回环、Key 不落盘、上游状态码与字节原样回吐；
+      本路由零本地状态 —— 不进快照、不进同步、不进日志。
+   —— params 里可能带参考音频路径（D:/ref/my.wav）：只在内存里过一遍，不缓存。
+   —— 无状态原则（定案 9.8.1）：不用 /change_refer，每句都带全量参数，
+      避免多角色交替调用时参考音频串音。
+   ------------------------------------------------------------ */
+const LOCALTSS_MAX = 900;                  /* 单次合成上限，与 /api/tts 一致 */
+const LOCALTSS_BODY = 256 * 1024;
+const LOCALTSS_LANGS = ["zh", "en", "ja", "ko", "yue", "auto"];
+function localTtsLang(x) {
+  const short = String(x || "").toLowerCase().replace(/_/g, "-").split("-")[0];
+  return LOCALTSS_LANGS.indexOf(short) >= 0 ? short : "auto";
+}
+/* 原型污染三键写成数组：对象字面量的 __proto__ 会改原型而不是落成自有键 */
+const LOCALTSS_BAD_KEYS = ["__proto__", "constructor", "prototype"];
+function localLoopbackHost(h) {
+  const s = String(h || "").toLowerCase();
+  return s === "127.0.0.1" || s === "::1" || s === "[::1]";
+}
+function localTtsTarget(endpoint, provider) {
+  let base;
+  try { base = new URL(String(endpoint || "")); } catch (e) { return null; }
+  if (base.protocol !== "http:" && base.protocol !== "https:") return null;
+  if (base.username || base.password) return null;
+  if (!localLoopbackHost(base.hostname)) return null;
+  return {
+    mod: base.protocol === "https:" ? https : http,
+    host: base.hostname.replace(/^\[|\]$/g, ""),
+    port: base.port || (base.protocol === "https:" ? 443 : 80),
+    path: base.pathname.replace(/\/+$/, "") + (provider === "openai" ? "/v1/audio/speech" : "/")
+  };
+}
+/* params 只收扁平标量：嵌套对象与数组一律拒收 —— 真需要复杂参数时
+   用户该在自己的服务前面套壳，而不是让本路由变成任意 JSON 中继。 */
+function localTtsParams(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const keys = Object.keys(x);
+  if (keys.length > 12) return null;
+  const out = {};
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    if (!k || k.length > 24 || LOCALTSS_BAD_KEYS.indexOf(k) >= 0) return null;
+    const v = x[k];
+    if (typeof v === "string") {
+      if (v.length > 500) return null;
+      out[k] = v;
+    } else if (typeof v === "number") {
+      if (!isFinite(v)) return null;
+      out[k] = v;
+    } else if (typeof v === "boolean") {
+      out[k] = v;
+    } else {
+      return null;
+    }
+  }
+  return out;
+}
+function localTtsPayload(provider, params, text, speed, lang) {
+  const out = Object.assign({}, params);
+  const base = Number(params.speed);
+  const mult = Number(speed);
+  const eff = (isFinite(base) && base > 0 ? base : 1) * (isFinite(mult) && mult > 0 ? mult : 1);
+  if (isFinite(mult) && mult > 0 && Math.abs(mult - 1) > 0.001) {
+    out.speed = Math.max(0.25, Math.min(4, Math.round(eff * 1000) / 1000));
+  }
+  if (provider === "openai") {
+    out.input = text;
+    out.voice = String(params.voice || "");
+    if (!out.model) out.model = "tts-1";
+    if (!out.response_format) out.response_format = "mp3";
+  } else {
+    out.text = text;
+    out.refer_wav_path = String(params.refer_wav_path || "");
+    out.prompt_text = String(params.prompt_text || "");
+    if (!out.prompt_language) out.prompt_language = "zh";
+    if (!out.text_language) out.text_language = localTtsLang(lang);
+  }
+  return out;
+}
+function serveLocalTts(req, res) {
+  const jh = { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
+  const bad = (code, msg, extra) => {
+    if (res.headersSent) return;
+    try { send(res, code, JSON.stringify(Object.assign({ code, message: msg }, extra || {})), jh); } catch (e) {}
+  };
+  if (!llmPeerLocal(req)) return bad(403, "本地 TTS 只对本机开放");
+  if (req.method === "GET" || req.method === "HEAD") {
+    return send(res, 200, JSON.stringify({ code: 0, data: { ok: true, via: "api/localtss" } }), jh);
+  }
+  if (req.method !== "POST") return bad(405, "method not allowed");
+  readBody(req, LOCALTSS_BODY).then((buf) => {
+    let cfg;
+    try { cfg = JSON.parse(buf.toString("utf8")) || {}; } catch (e) { return bad(400, "JSON 不合法"); }
+    const provider = String(cfg.provider || "");
+    if (provider !== "openai" && provider !== "gsv") return bad(400, "provider 只认 openai / gsv");
+    const params = localTtsParams(cfg.params);
+    if (!params) return bad(400, "params 不合法（只收扁平标量，键 ≤24、值 ≤500 字）");
+    if (provider === "openai" && !String(params.voice || "").trim()) {
+      return bad(400, "openai 形状缺少 params.voice");
+    }
+    if (provider === "gsv" && (!String(params.refer_wav_path || "").trim() || !String(params.prompt_text || "").trim())) {
+      return bad(400, "gsv 形状缺少 params.refer_wav_path / params.prompt_text");
+    }
+    const t = localTtsTarget(cfg.endpoint, provider);
+    if (!t) return bad(400, "端点只许本机回环（127.0.0.1 或 [::1]）");
+    let text = String(cfg.text || "").trim();
+    if (!text) return bad(400, "text 为空");
+    if (text.length > LOCALTSS_MAX) text = text.slice(0, LOCALTSS_MAX);
+    const payload = JSON.stringify(localTtsPayload(provider, params, text, cfg.speed, cfg.lang));
+    const heads = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+      Accept: "audio/*,*/*",
+      "User-Agent": "Mozilla/5.0 InkRead"
+    };
+    const up = t.mod.request({ hostname: t.host, port: t.port, path: t.path, method: "POST", headers: heads, timeout: 120000 }, (r) => {
+      const ct = String(r.headers["content-type"] || "");
+      const okType = ct.indexOf("audio/") === 0 || ct.indexOf("application/octet-stream") === 0;
+      if (r.statusCode >= 200 && r.statusCode < 300 && okType) {
+        res.writeHead(200, {
+          "Content-Type": ct.indexOf("audio/") === 0 ? ct : "audio/mpeg",
+          "Cache-Control": "no-store",
+          "Access-Control-Allow-Origin": "*"
+        });
+        return r.pipe(res);
+      }
+      /* 失败分支只收前 4KB 说明：本机服务回 HTML 报错页也只会留下开头，不攒整页 */
+      let msg = "";
+      r.setEncoding("utf8");
+      r.on("data", (c) => { if (msg.length < 4096) msg += c; });
+      r.on("error", () => bad(502, "本机 TTS 响应中断"));
+      r.on("end", () => {
+        if (r.statusCode >= 200 && r.statusCode < 300) {
+          return bad(502, "本机 TTS 回的不是音频（" + (ct || "无 Content-Type") + "）", { upstream: r.statusCode });
+        }
+        bad(502, "本机 TTS 上游 " + r.statusCode + (msg ? " · " + msg.replace(/\s+/g, " ").slice(0, 200) : ""), { upstream: r.statusCode });
+      });
+    });
+    up.on("error", () => bad(502, "本机 TTS 不可达（服务没起 / 端口不对）"));
+    up.setTimeout(120000, () => up.destroy(new Error("local tts timeout")));
+    up.write(payload);
+    up.end();
+  }).catch(() => bad(413, "请求体过大"));
+}
+
+/* ------------------------------------------------------------
    /api/mossapi · 用户自配 Moss 云音色代理（v2.13）
    —— api.mosi.cn 这类 TTS 端点不对浏览器开放 CORS（官方只保证服务端调用；
       mossland.studio 当年同病，/api/moss 代理即先例）。拉取音色与云端合成
@@ -2571,6 +2723,10 @@ function createServer() {
     /* LLM 透传自带方法判断（GET 探测 / POST 代取），放在守卫之前 */
     if (u.indexOf("/api/llm") === 0) {
       return serveLlm(req, res);
+    }
+    /* 本地 TTS 适配同样是 POST + 自带方法判断 */
+    if (u.indexOf("/api/localtss") === 0) {
+      return serveLocalTts(req, res);
     }
     if (u.indexOf("/api/parse/") === 0) {
       return serveParse(req, res);

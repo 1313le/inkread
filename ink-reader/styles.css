@@ -485,6 +485,9 @@ html[data-tone="dark"] .eink-flash { background: var(--paper); }
 .btn:hover { background: var(--ink); color: var(--paper); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .36; pointer-events: none; }
+/* 忙态用 data-busy 而不是 disabled：钮得留在可点可聚焦的状态（页内的连点闸门才量得到）。
+   原来这条写在 ai.html 页内，是把组件身份属性又声明一遍的真方言，随 G2 上收到这里。 */
+.btn[data-busy="1"] { opacity: .55; cursor: progress; }
 .btn-primary { background: var(--ink); color: var(--paper); }
 .btn-primary:hover { opacity: .87; background: var(--ink); color: var(--paper); }
 .btn-accent { background: var(--accent); border-color: var(--accent-ink); color: var(--on-accent); }
@@ -3533,6 +3536,31 @@ html[data-int="bold"] .ft-card { border-width: var(--int-bd-2); }
 html[data-int="bold"] .vc-card { border-width: var(--int-bd-2); }
 html[data-reduce="on"] .vc-wave i { transition: none; }
 @media (prefers-reduced-motion: reduce) { .vc-wave i { transition: none; } }
+
+/* ---------- 音色分区：本地音色条（v1.5-S5c） ----------
+   自机 TTS 的导入入口常显在「音色」分区顶上；来源与许可原文照登，不做判断。
+   未接入时是一行引导，接入后列出清单 —— 两种形态用同一块壳，切换不跳版。 */
+.lv-strip {
+  margin-bottom: var(--space-14); padding: var(--space-13) var(--space-16);
+  border: var(--int-bd) dashed var(--line); border-radius: var(--int-r);
+  background-color: var(--paper-2); background-image: var(--grain);
+}
+html[data-int="bold"] .lv-strip { border-width: var(--int-bd-2); }
+.lv-h { display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap; }
+.lv-h b { font-size: var(--fs-13); letter-spacing: .04em; }
+.lv-d { margin: var(--space-5) 0 0; font-size: var(--fs-11_5); color: var(--ink-3); line-height: 1.65; letter-spacing: .02em; }
+.lv-list { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-9); }
+.lv-row {
+  display: flex; align-items: baseline; gap: var(--space-8); min-width: 0;
+  font-size: var(--fs-11_5); padding-bottom: var(--space-3); border-bottom: 1px inset var(--rule);
+}
+.lv-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.lv-nm { color: var(--ink); letter-spacing: .02em; white-space: nowrap; }
+.lv-lic {
+  color: var(--ink-3); letter-spacing: .02em; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lv-strip .th-acts { margin-top: var(--space-9); }
 
 /* 预览 / 编辑弹层 */
 .th-modal { width: min(760px, 94vw); }

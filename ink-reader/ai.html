@@ -155,6 +155,145 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
     padding-right: 0; padding-bottom: var(--space-10); margin-bottom: var(--space-14);
   }
 }
+
+/* ---------- E1. 主脑自主回合：系统条 / 轨迹台账 / 确认卡（v1.5-S4） ----------
+   形状抄阅读页助手的三条带，类名各页独立（bm-*）：两界面不共用选择器，
+   改一处不会连带另一处。色值零新增，全部走既有 token。
+   .bm-sys 说的是「这一趟怎么跑的」（通路降级 / 触顶 / 被叫停），不是模型答的话；
+   它必须常驻可见 —— 读者看不出这次走的是降级通路，界面就等于替他做了个不实的假设。 */
+body[data-page="ai"] .bm-sys {
+  flex: none; display: flex; align-items: center; gap: var(--space-6);
+  padding: var(--space-5) var(--space-18); font-size: var(--fs-11_5); line-height: 1.6; color: var(--ink-3);
+  border-top: 1px solid var(--line); background: var(--paper-3);
+}
+body[data-page="ai"] .bm-sys[data-kind="warn"] { color: var(--accent-ink); border-top-color: var(--accent); }
+
+/* 台账那一行本身就是预算账：「跑了多久」与「跑了什么」是同一个问题的两面，不必两颗钮 */
+body[data-page="ai"] .bm-plan { flex: none; border-top: 1px solid var(--line); }
+body[data-page="ai"] .bm-plan-t {
+  display: flex; align-items: center; gap: var(--space-7); width: 100%;
+  padding: var(--space-6) var(--space-18); font: inherit; font-size: var(--fs-11_5); color: var(--ink-3);
+  background: none; border: 0; cursor: pointer; text-align: left;
+}
+body[data-page="ai"] .bm-plan-t:hover { color: var(--ink-2); }
+body[data-page="ai"] .bm-plan-k { flex: none; letter-spacing: .04em; }
+body[data-page="ai"] .bm-budget {
+  flex: 1; min-width: 0; font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 折展开的尖角：纯 CSS 画的，不进图标名册（它是状态指示，不是一个「含义图标」） */
+body[data-page="ai"] .bm-caret {
+  flex: none; width: 7px; height: 7px; border-right: 1.4px solid currentColor;
+  border-bottom: 1.4px solid currentColor; transform: rotate(45deg) translateY(-2px);
+  transition: transform .18s;
+}
+body[data-page="ai"] .bm-plan-t[aria-expanded="true"] .bm-caret { transform: rotate(-135deg) translateY(-2px); }
+html[data-reduce="on"] body[data-page="ai"] .bm-caret { transition: none; }
+body[data-page="ai"] .bm-steps {
+  max-height: 168px; overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 var(--space-18) var(--space-8); display: flex; flex-direction: column; gap: var(--space-4);
+}
+body[data-page="ai"] .bm-step {
+  display: flex; align-items: baseline; gap: var(--space-6);
+  font-size: var(--fs-11); color: var(--ink-3); line-height: 1.6;
+}
+/* 工具名是这一行唯一必须认出的东西：等宽 + 不折行，才看得出「这轮调了哪一枚」 */
+body[data-page="ai"] .bm-step b {
+  flex: none; font-family: var(--font-mono); font-size: var(--fs-10_5); font-weight: 500; color: var(--ink-2);
+}
+body[data-page="ai"] .bm-step span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-page="ai"] .bm-step[data-ok="0"] b { color: var(--accent-ink); }
+body[data-page="ai"] .bm-step i {
+  flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--line); align-self: center;
+}
+body[data-page="ai"] .bm-step[data-ok="1"] i { background: var(--accent); }
+/* 写操作与读操作不能只靠颜色分家：方点是「要落进书里」的那一枚 */
+body[data-page="ai"] .bm-step[data-risk="write"] i { border-radius: 0; }
+
+/* 确认卡：写操作前把「将落地什么」逐条摊开，不是一坨参数 JSON */
+body[data-page="ai"] .bm-cft {
+  flex: none; margin: 0 var(--space-18) var(--space-8); padding: var(--space-9) var(--space-10);
+  background: var(--paper); border: 1px solid var(--accent); border-radius: var(--r-sm);
+}
+body[data-page="ai"] .bm-cft > b { display: block; font-size: var(--fs-12); margin-bottom: var(--space-6); }
+body[data-page="ai"] .bm-cft ul {
+  margin: 0 0 var(--space-7); padding-left: var(--space-16); font-size: var(--fs-11_5);
+  color: var(--ink-2); line-height: 1.7; max-height: 116px; overflow-y: auto;
+}
+body[data-page="ai"] .bm-cft .bm-cf-t { font-family: var(--font-mono); font-size: var(--fs-10_5); font-weight: 500; }
+body[data-page="ai"] .bm-cft .bm-cf-sub { list-style: none; margin-left: calc(var(--space-16) * -1); color: var(--ink-3); }
+body[data-page="ai"] .bm-cft .bm-cf-row { display: flex; align-items: center; gap: var(--space-6); }
+body[data-page="ai"] .bm-cft .bm-cf-row .bm-cf-note { font-size: var(--fs-10_5); }
+/* 停止钮只在真有一趟在跑时出现 —— 常驻一颗办不了事的钮是死控件 */
+body[data-page="ai"] .chat-input-row #chatStop { flex: none; }
+/* ---------- E4. 附图（v1.5-S4）：托盘 + 气泡里的缩略图 ----------
+   图只在发出去的那一轮活着：托盘的 caption 明说「用完即弃」，
+   不让读者以为它会像笔记一样留在本机。缩略图尺寸跟着气泡走，不撑破窄屏。 */
+body[data-page="ai"] .chat-att {
+  display: flex; align-items: center; gap: var(--space-8);
+  padding: var(--space-8) var(--space-18) 0;
+}
+body[data-page="ai"] .att-it { position: relative; width: 46px; height: 46px; flex: none; }
+body[data-page="ai"] .att-it img {
+  width: 100%; height: 100%; object-fit: cover;
+  border-radius: var(--radius-4); border: 1px solid var(--line-2);
+}
+body[data-page="ai"] .att-x {
+  position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
+  display: grid; place-items: center; padding: 0; cursor: pointer;
+  border-radius: 50%; border: 1px solid var(--line);
+  background: var(--paper-3); color: var(--ink-2);
+}
+body[data-page="ai"] .att-x:hover { color: var(--ink); border-color: var(--line-2); }
+body[data-page="ai"] .att-cap { font-size: var(--fs-10_5); color: var(--ink-3); line-height: 1.5; }
+body[data-page="ai"] .msg-att { display: flex; flex-wrap: wrap; gap: var(--space-6); margin-top: var(--space-6); }
+body[data-page="ai"] .msg-att img {
+  max-width: 148px; max-height: 148px;
+  border-radius: var(--radius-4); border: 1px solid var(--line);
+}
+body[data-page="ai"] .chat-input-row #chatImgBtn { flex: none; width: 34px; padding: 0; display: grid; place-items: center; }
+body[data-page="ai"] .chat-msgs.drop-hot,
+body[data-page="ai"] .chat-input-row.drop-hot { outline: 2px dashed var(--mark); outline-offset: -6px; }
+/* 落地回执：工具层真写过一次书，就在流里留一行小字（确认卡收起后它是唯一的凭据） */
+body[data-page="ai"] .bm-act {
+  align-self: flex-start; font-size: var(--fs-11); color: var(--ink-3); line-height: 1.6;
+}
+/* ---------- E2. 产物卡：一段回答变成一份文件（v1.5-S4） ----------
+   左边一道发丝竖线是「卷宗脊」：它marks 这是主脑交出来的一份东西，不是聊天气泡。
+   动作各管一件事 —— 复制「拿去别处」、下载「本机留底」、存为文档「排成给人看的那份」、
+   丢掉「账上收回」。只留索引的那份正文根本没落地，前三颗一律不摆：摆了就是点了没反应的死控件。 */
+body[data-page="ai"] .bm-art {
+  align-self: stretch; position: relative; max-width: 560px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-5);
+  background: var(--paper-2); padding: var(--space-10) var(--space-12) var(--space-9) var(--space-14);
+}
+body[data-page="ai"] .bm-art::before {
+  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px;
+  border-radius: 0 var(--radius-2) var(--radius-2) 0; background: var(--accent);
+}
+body[data-page="ai"] .bm-art-h { display: flex; align-items: baseline; gap: var(--space-8); }
+body[data-page="ai"] .bm-art-n {
+  flex: 1; min-width: 0; font-family: var(--font-serif); font-size: var(--fs-13);
+  line-height: 1.6; color: var(--ink);
+}
+body[data-page="ai"] .bm-art-k {
+  flex: none; font-family: var(--font-mono); font-size: var(--fs-10_5); color: var(--ink-3);
+  border: 1px solid var(--line-2); border-radius: var(--radius-4); padding: 0 var(--space-5);
+}
+body[data-page="ai"] .bm-art-m {
+  margin-top: var(--space-3); font-family: var(--font-mono); font-size: var(--fs-10_5);
+  color: var(--ink-3); line-height: 1.7;
+}
+body[data-page="ai"] .bm-art-x {
+  margin-top: var(--space-6); font-size: var(--fs-11); line-height: 1.65; color: var(--ink-2);
+  border-left: 2px solid var(--line); padding-left: var(--space-8);
+}
+body[data-page="ai"] .bm-art-w {
+  margin-top: var(--space-6); font-size: var(--fs-11); line-height: 1.65; color: var(--mark-ink);
+}
+body[data-page="ai"] .bm-art-a { display: flex; flex-wrap: wrap; gap: var(--space-8); margin-top: var(--space-9); }
+body[data-page="ai"] .bm-art.gone { opacity: .5; }
+body[data-page="ai"] .bm-art.gone::before { background: var(--line); }
 </style>
 <script src="ink-keys.js"></script>
 <script src="fonts.js"></script>
@@ -211,9 +350,33 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
               <div id="memList"></div>
             </div>
             <div class="chat-msgs" id="chatMsgs"></div>
+            <!-- v1.5-S4 E1：主脑页第一次有了「这一轮怎么办出来的」三条带 + 一张确认卡。
+                 形状与阅读页助手同族（系统条 / 轨迹台账 / 确认卡），但 DOM 与选择器各页独立，
+                 不共用类名 —— 一套界面改了不会连带另一套。账目数字只从 InkLoop 的快照正本取。 -->
+            <div class="bm-sys" id="bmSys" role="status" aria-live="polite" hidden></div>
+            <div class="bm-plan" id="bmPlan" hidden>
+              <button class="bm-plan-t" id="bmPlanT" type="button" aria-expanded="false" aria-controls="bmPlanList">
+                <span class="bm-plan-k">想了什么</span>
+                <span class="bm-budget" id="bmBudget"></span>
+                <span class="bm-caret" aria-hidden="true"></span>
+              </button>
+              <div class="bm-steps" id="bmPlanList" role="list" hidden></div>
+            </div>
+            <div class="bm-cft" id="bmCft" role="group" aria-label="确认这次操作" hidden></div>
             <div class="chat-quick" id="chatQuick"></div>
+            <!-- v1.5-S4 E4：附图托盘。图只在内存里等出发 —— 不写 localStorage、不进 history，
+                 发完即清（base64 落盘会同时炸同步上限与配额）。 -->
+            <div class="chat-att" id="chatAtt" hidden></div>
             <div class="chat-input-row">
+              <button class="btn btn-ghost btn-sm" id="chatImgBtn" type="button" aria-label="添加图片" title="添加图片（可粘贴或拖进来）"><span id="icImg"></span></button>
+              <input type="file" id="chatImgFile" accept="image/png,image/jpeg,image/webp" multiple hidden>
               <input class="field" id="chatInput" placeholder="问点什么：总结当前文档 / 这本书讲了什么 / 帮我写段代码 / 解释「注意力机制」…" aria-label="向主脑提问">
+              <!-- E1 新造：主脑页原先没有停止钮。多轮循环一动起来就是几十秒与真金白银的额度，
+                   没有「停下」就等于把 abort 这条路藏起来了 —— 阅读页助手有的那颗，这里也必须有一颗。 -->
+              <button class="btn btn-ghost btn-sm" id="chatStop" type="button" hidden>停止</button>
+              <!-- v1.5-S4 E3：报告不是聊天里的一句，是一条单独的写作工序 —— 宿主先检索、
+                   按段号核依据，再把整份报告落进产物账。与「发送」分开，读者点哪颗心里有数。 -->
+              <button class="btn btn-ghost" id="bmReportBtn" type="button"><span id="icReport"></span>写报告</button>
               <button class="btn btn-primary" id="chatSend"><span id="icSend"></span>发送</button>
             </div>
           </div>
@@ -457,11 +620,19 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
 <div class="toast-root" id="toastRoot" aria-live="polite" aria-atomic="false"></div>
 <script src="mock.js"></script>
 <script src="md.js"></script>
+<script src="voices-local.js"></script>
 <script src="voices-data.js"></script>
 <script src="voices.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
 <script src="brain.js"></script>
+<!-- v1.5-S4 E1：主脑页第一次接上工具层与回合编排器（装载次序与依赖理由同 reader.html 那段）。
+     ink-agent.js 要用 Brain.currentDoc / docTitle / corpus，必须排在 brain.js 之后；
+     ink-loop.js 只认 InkAgent 与 API，排在 ink-agent.js 之后。
+     主脑页没有阅读页那些宿主能力（跳转、页内定位），工具层自己会答「此页未接入」——
+     少一枚宿主桥不等于整页不能用。 -->
+<script src="ink-agent.js"></script>
+<script src="ink-loop.js"></script>
 <script>
 (function () {
   var ck = InkStore.getCheckins();
@@ -469,6 +640,7 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
 
   var IC = {
     icSync: "refresh-cw", icModel: "cpu", icModelTitle: "cpu", icSend: "send", icMem: "brain",
+    icReport: "notebook-pen", icImg: "image",
     icMemChip: "brain", icCtx: "book-open",
     icCpu: "cpu", icDev: "share-2", icDesk: "monitor", icPhone: "smartphone", icMirror: "smartphone",
     icGloss: "languages", icGlSearch: "search", icPrompt: "quote",
@@ -568,6 +740,17 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
       var label = { remember: "记忆 · 已写入", forget: "记忆 · 已删除", list: "记忆 · 当前清单", miss: "记忆 · 未匹配" }[r.action] || "记忆";
       return '<div class="msg-mode on">' + icon("database", 11) + esc(label) + "</div>";
     }
+    /* E1 之后主脑页多了「触顶 / 叫停 / 没起跑 / 没办成 / 续办回执」这几种收尾。
+       把它们一律显示成「离线库作答」，等于把半截活说成另一回事 —— 每种各标各的。 */
+    var badge = r.continued ? "续办回执 · 落地 " + (r.landed || 0) + " 条"
+      : r.mode === "budget" ? "主脑 · 回合触顶（" + (r.rounds || 0) + " 轮 / " + (r.calls || 0) + " 次调用）"
+      : r.mode === "stopped" ? "已被叫停（下面这是停住之前说完的那半截）"
+      : r.mode === "blocked" ? "没起跑 · " + (r.why === "no-model" ? "未配模型" : "这一趟没接上模型")
+      : r.mode === "error" ? "这一趟没办成 · " + (r.why || "error") : null;
+    if (badge != null) {
+      return '<div class="msg-mode off">' + icon(r.mode === "stopped" ? "pause" : "alert-triangle", 11) +
+        esc(badge) + "</div>";
+    }
     var online = r.mode === "online";
     var txt = online ? ("主脑 · " + (r.model || "模型")) : "离线库作答" + (r.used && r.used.length ? " · " + r.used.join("/") : "");
     /* 随问附上多少原文要看得见（v1.3 D4）：数字就是真发出去的那一份；
@@ -581,9 +764,18 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
     return '<div class="msg-mode ' + (online ? "on" : "off") + '">' + icon(online ? "sparkles" : "wifi-off", 11) + esc(txt) + "</div>";
   }
 
-  function pushMsg(role, text, refs, r) {
+  /* 用户气泡里的附图：src 只可能是 canvas 重画出来的 data:image/jpeg，
+     原文件的字节从没进过 DOM —— 这条也让「图不进存储」多一层保证。 */
+  function attHTML(imgs) {
+    if (!imgs || !imgs.length) return "";
+    return '<div class="msg-att">' + imgs.map(function (im) {
+      return '<img src="' + im.url + '" alt="附图">';
+    }).join("") + "</div>";
+  }
+
+  function pushMsg(role, text, refs, r, imgs) {
     var box = qs("#chatMsgs");
-    var html = role === "ai" ? MD.render(text) + memRefsHTML(refs) + modeHTML(r) : esc(text);
+    var html = role === "ai" ? MD.render(text) + memRefsHTML(refs) + modeHTML(r) : esc(text) + attHTML(imgs);
     box.insertAdjacentHTML("beforeend", msgEl(role, html));
     box.scrollTop = box.scrollHeight;
     bindRefChips();
@@ -629,6 +821,363 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
     bindRefChips();
   }
 
+  /* ============ v1.5-S4 E1：自主多轮回合的场面 ============
+     主脑页从「单发一枪」升成「跑一趟」之后，界面就得把这一趟怎么办出来的摊开：
+     想了什么（轨迹台账 + 预算账）/ 系统这一侧发生了什么（通路降级 · 触顶 · 被叫停）/
+     要落地什么（确认卡，点头之前一条都不写）。
+     账上的数只认 InkLoop 快照那一份正本：界面自己数回调，丢一次回调屏上的数就少一次。 */
+  var bmSys = qs("#bmSys"), bmPlan = qs("#bmPlan"), bmPlanT = qs("#bmPlanT"),
+    bmPlanList = qs("#bmPlanList"), bmBudget = qs("#bmBudget"), bmCft = qs("#bmCft"),
+    bmStop = qs("#chatStop"), bmSendBtn = qs("#chatSend");
+  var bmCtl = null, bmRun = null, bmPend = null, bmSink = null;
+
+  /* 换问即清场：上一轮的台账与确认卡留着，读者会以为那张卡还在等这一问的头。
+     没点头的那几条本就没写进书里，清掉卡不等于撤掉动作。 */
+  function bmReset() {
+    bmRun = null; bmPend = null; bmCtl = null; bmSink = null;
+    if (bmPlanList) { bmPlanList.innerHTML = ""; bmPlanList.hidden = true; }
+    if (bmPlanT) bmPlanT.setAttribute("aria-expanded", "false");
+    if (bmPlan) bmPlan.hidden = true;
+    if (bmBudget) bmBudget.textContent = "";
+    if (bmSys) { bmSys.innerHTML = ""; bmSys.hidden = true; }
+    if (bmCft) { bmCft.innerHTML = ""; bmCft.hidden = true; }
+  }
+
+  function bmAct(txt) {
+    if (!txt) return;
+    var box = qs("#chatMsgs");
+    box.insertAdjacentHTML("beforeend", '<div class="bm-act">' + esc(txt) + "</div>");
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /* ---------- E2. 产物卡：写成功的那一条在流里立住（v1.5-S4） ----------
+     卡上不嵌正文：一份报告可能几十万字，抄进气泡就把聊天流变成文件浏览器。
+     「复制 / 下载 / 出纸」都在点下去的当下现读本机账，不拿写入那一刻的快照 ——
+     同一份被后面几轮改写过后，旧卡按下载或导出也该拿到最新版，拿快照会给到老版。
+     只留索引（超本机预算）的那一份账上根本没有正文，与其摆三颗点了没反应的钮，
+     不如只留「丢掉」，把为什么办不了写进上方那行降级说明。 */
+  /* 桌面（Electron）才有 printToPDF 引擎；浏览器里这枚钮走的是把纸面视图开出来。
+     判法与阅读页 #tExport 同一条，两页不许各判各的。 */
+  var DESK = !!(window.inkread && window.inkread.desktop);
+  var BM_KIND = { report: "报告", outline: "大纲", dataset: "数据表" };
+  /* 本页只翻本页要说的那几枚 code：阅读页助手另有一份，两页的界面账各记各的
+     （与 .ar-* / .bm-* 两套选择器同一分工，改一套不连带另一套）。 */
+  var BM_WHY = {
+    "no-title": "没给标题：产物区要靠标题找回它", "no-body": "正文是空的，没东西可存",
+    "all-citations-dropped": "带出处的依据被剔完了（本机对不上任何一本架上的书），这一份没剩下什么",
+    "write-failed": "本机没能存下这一份，账上一个字没动", "not-found": "账上没有这一份",
+    "unknown-tool": "这条指令不在白名单里", "missing-param": "缺了必要参数", "bad-type": "参数类型不对",
+    "no-host": "这一页没有接入该能力", "busy": "上一条还在跑", "no-model": "没配模型",
+    "rejected": "点了「先不」，这条没落地", "none": "没有可交出来的结果",
+    "error": "执行时出了错", "failed": "没有成功"
+  };
+  function bmWhy(w) { return BM_WHY[w] || String(w || "failed"); }
+  function bmArtBody(id) {
+    var a = (window.API && API.artGet) ? API.artGet(id) : null;
+    return a && typeof a.md === "string" ? a.md : "";
+  }
+  /* 只洗掉 Windows / POSIX 真落不了的字符，中文标题原样留着 —— 那是读者认这份产物的唯一凭据。 */
+  function bmArtName(title) {
+    var s = String(title || "").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, "_").slice(0, 60);
+    return (/^[._]*$/.test(s) ? "inkread-artifact" : s) + ".md";
+  }
+  /* 抄一份现成的：navigator.clipboard 在 file:// 下可能被拒，拒了就走 execCommand 那条退路。 */
+  function bmCopyFall(txt) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = txt; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  }
+  function bmCopyText(txt, then) {
+    var done = function (ok) { if (then) then(ok); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { done(bmCopyFall(txt)); });
+    } else done(bmCopyFall(txt));
+  }
+
+  function bmArt(r) {
+    if (!r || !r.id) return;
+    var box = qs("#chatMsgs");
+    if (!box) return;
+    var w = window.InkStats && InkStats.fmtWords ? InkStats.fmtWords(r.size || 0).join(" ") : (Number(r.size) || 0) + " 字";
+    /* 「核上 N 条」= 带出处且本机对得上的那些行；剩下的分两笔：剔掉的（查无）与无从对证的
+       （架上没这本书之外的两种情况：同一行两本书、书在架上但本机没正文）。三笔加起来才是出处账。 */
+    var cites = Number(r.cites) || 0, rej = Number(r.rejected) || 0, unc = Number(r.unchecked) || 0;
+    var ver = Math.max(0, cites - rej - unc);
+    var bits = [w];
+    bits.push(!cites ? "没引出处" : (ver ? "出处核上 " + ver + " 条" : "出处 " + cites + " 条本机无从对证"));
+    if (rej) bits.push("已剔 " + rej + " 条查无出处");
+    if (unc) bits.push("另 " + unc + " 条对不上证，原样留着");
+    var dx = (r.dropped || []).map(function (d) { return d && d.why; }).filter(Boolean).slice(0, 3).join("；");
+    var has = r.indexOnly !== true;
+    /* 桌面有 printToPDF，出来的是真 PDF；浏览器 / 手机没有那个引擎，这一钮实际是把那张纸
+       开出来让人自己打。文案按能力改写 —— 不拿「存为 PDF」骗人点下去再解释（与阅读页同一规矩）。 */
+    var acts = (has ? '<button class="btn btn-ghost btn-sm" data-act="artCopy">' + icon("copy", 13) + "复制 Markdown</button>" +
+      '<button class="btn btn-ghost btn-sm" data-act="artDl">' + icon("download", 13) + "下载 .md</button>" +
+      '<button class="btn btn-ghost btn-sm" data-act="artPdf">' + icon("printer", 13) + (DESK ? "存为 PDF" : "存为文档") + "</button>" : "") +
+      '<button class="btn btn-ghost btn-sm" data-act="artDrop">' + icon("trash-2", 13) + "丢掉</button>";
+    var kind = BM_KIND[r.kind] || r.kind || "报告";
+    box.insertAdjacentHTML("beforeend",
+      '<div class="bm-art" data-art="' + esc(r.id) + '" data-title="' + esc(r.title || "未命名产物") + '">' +
+      '<div class="bm-art-h"><span class="bm-art-n">' + esc(r.title || "未命名产物") +
+      '</span><span class="bm-art-k">' + esc(kind) + "</span></div>" +
+      '<div class="bm-art-m">' + esc(bits.join(" · ")) + "</div>" +
+      (dx ? '<div class="bm-art-x">剔掉的依据：' + esc(dx) + "</div>" : "") +
+      (r.note ? '<div class="bm-art-w">' + esc(r.note) + "</div>" : "") +
+      '<div class="bm-art-a">' + acts + "</div></div>");
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /* 出纸：桌面有 printToPDF 那台引擎，产物直接排成 PDF 落盘；浏览器 / 手机没有，
+       把纸面视图开出来让人用系统打印 —— 与阅读页 #tExport 分两种文案同一个道理。
+       排版要几秒：这几秒把钮按住（连点只发一发，主进程那边也一次只开一张纸），
+       用户在「另存为」里点了取消是他自己的选择，不吭声。 */
+  function artPdf(btn, card, id) {
+    if (btn.dataset.busy === "1") return;
+    if (!DESK) {
+      var w = window.open("print.html?art=" + encodeURIComponent(id), "_blank");
+      if (!w) toast("浏览器拦住了新窗口：允许弹出窗口后再点一次", "x");
+      return;
+    }
+    var release = function () { btn.dataset.busy = ""; btn.setAttribute("aria-busy", "false"); };
+    btn.dataset.busy = "1"; btn.setAttribute("aria-busy", "true");
+    toast("正在排版「" + (card.dataset.title || "这份产物") + "」…", "printer");
+    window.inkread.paper.toPdf({ art: id }).then(function (r) {
+      release();
+      if (r && r.ok) {
+        var name = String(r.path || "").split(/[\\/]/).pop();
+        toast("已导出 " + (name || "PDF"), "download");
+      } else if (r && r.busy) {
+        toast(r.error || "已有一个导出在进行，等它结束。", "x");
+      } else if (!r || !r.canceled) {
+        toast((r && r.error) || "导出没能完成", "x");
+      }
+    }, function (e) { release(); toast("导出没能完成：" + String((e && e.message) || e), "x"); });
+  }
+
+  /* 四个动作挂一次事件委托：卡是流里一张张追加的，逐张绑会越绑越多。
+     丢掉 = 真删本机账，照本页「忘掉一条记忆」那两击确认的规矩办，不弹系统框。 */
+  (function bindArt() {
+    var box = qs("#chatMsgs");
+    if (!box) return;
+    box.addEventListener("click", function (e) {
+      var el = e.target;
+      if (!el || el.nodeType !== 1 || !el.closest) return;
+      var btn = el.closest("[data-act]");
+      if (!btn) return;
+      var act = btn.dataset.act;
+      if (act !== "artCopy" && act !== "artDl" && act !== "artDrop" && act !== "artPdf") return;
+      var card = btn.closest(".bm-art");
+      var id = card && card.dataset.art;
+      if (!id) return;
+      if (act === "artPdf") { artPdf(btn, card, id); return; }
+      if (act === "artCopy") {
+        var txt = bmArtBody(id);
+        if (!txt) { toast("这一份只留下索引，本机没有正文可复制", "alert-triangle"); return; }
+        bmCopyText(txt, function (ok) { toast(ok ? "已复制这份产物的 Markdown" : "复制失败，请改用下载", ok ? "copy" : "alert-triangle"); });
+        return;
+      }
+      if (act === "artDl") {
+        var md = bmArtBody(id);
+        if (!md) { toast("这一份只留下索引，本机没有正文可下载", "alert-triangle"); return; }
+        var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = bmArtName(card.dataset.title || "");
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
+        toast("已下载 " + a.download, "download");
+        return;
+      }
+      if (btn.dataset.arm !== "1") {
+        btn.dataset.arm = "1"; btn.classList.add("arm"); btn.title = "再点一次确认丢掉";
+        setTimeout(function () { btn.dataset.arm = ""; btn.classList.remove("arm"); btn.title = "丢掉（从本机产物账里删掉）"; }, 2600);
+        return;
+      }
+      var res = API.artDelete ? API.artDelete(id) : { ok: false, why: "这一页没有删产物的口" };
+      if (!res || !res.ok) { toast("没删掉：" + (res && res.why ? res.why : "本机不认这次删除"), "alert-triangle"); return; }
+      btn.dataset.arm = ""; btn.classList.remove("arm");
+      if (card.classList) card.classList.add("gone");
+      var row = card.querySelector(".bm-art-a");
+      if (row) row.innerHTML = '<div class="bm-art-m">已从本机产物账里丢掉</div>';
+      toast("已丢掉这份产物", "trash-2");
+    });
+  })();
+
+  /* 一轮一段：模型在第 1 轮说「我先读第 3 章」，第 2 轮说结论 —— 糊进同一个气泡，
+     读者就看不出它中途改过主意（这也是 loopHost 交的是「本轮这一截」而不是全局的原因）。 */
+  function bmDelta(piece, roundText) {
+    if (!bmSink) return;
+    bmSink.text = roundText != null ? String(roundText) : String(piece || "");
+    if (!bmSink.holder) { typing(false); bmSink.holder = pushStreaming("ai"); }
+    paintStreaming(bmSink.holder, bmSink.text);
+  }
+  function bmSeal() {
+    if (!bmSink || !bmSink.holder) return;
+    finalizeStreaming(bmSink.holder, bmSink.text, null, null);
+    /* 记下刚封上的那一段：最后一轮的话已经在这儿了，收尾只该给它补脚注 */
+    bmSink.lastEl = bmSink.holder; bmSink.lastText = bmSink.text;
+    bmSink.holder = null; bmSink.text = "";
+  }
+
+  /* 收尾那一笔。循环把最后一轮的话单独画成了一段（bmSeal），脚注（引用与来源）就补在那一段上：
+     另起一个气泡把同一段结论再打一遍，读者看见的是「它答了两遍」—— 而第二遍还带着来源，
+     第一遍没有，两段哪个算数也说不清。触顶 / 叫停 / 降级补的那句本来就没人画过，照旧新起一段。 */
+  function bmFinish(shown, r) {
+    if (bmSink && bmSink.holder) { finalizeStreaming(bmSink.holder, shown, r.refs, r); return; }
+    var reply = String((r && r.reply) || "").trim();
+    var el = bmSink && bmSink.lastEl;
+    if (el && reply && !bmNote(r) &&
+        String(bmSink.lastText).replace(/\s+/g, "") === reply.replace(/\s+/g, "")) {
+      el.insertAdjacentHTML("beforeend", memRefsHTML(r.refs) + modeHTML(r));
+      bindRefChips();
+      qs("#chatMsgs").scrollTop = qs("#chatMsgs").scrollHeight;
+      return;
+    }
+    typing(false);
+    pushMsg("ai", shown, r.refs, r);
+  }
+
+  /* InkLoop 那句「还能逐条收回」写给的是阅读页助手 —— 那里每条落地都配一颗撤销钮。
+     主脑页没有撤销面，照抄等于向读者许诺一件本页办不到的事，所以本页按本页的账说话。 */
+  function bmNote(r) {
+    return r && r.mode === "stopped"
+      ? "你叫停了。已经落地的动作留在原处，没点头的那几条压根没写。"
+      : String((r && r.note) || "");
+  }
+
+  function bmPlanPaint() {
+    if (!bmPlanList || !bmPlan) return;
+    var rows = ((bmRun && bmRun.plan) || []).filter(function (e) { return e && e.tool; });
+    if (!rows.length) { bmPlan.hidden = true; return; }
+    /* 面板必须先显形，那行预算才量得出字：#bmBudget 长在 #bmPlan 里面，藏着读不到 */
+    bmPlan.hidden = false;
+    var B = (window.InkLoop && InkLoop.budget) || { rounds: 6, calls: 24 };
+    if (bmBudget) bmBudget.textContent = "用了 " + ((bmRun && bmRun.rounds) || 0) + "/" + B.rounds + " 轮 · " +
+      ((bmRun && bmRun.calls) || 0) + "/" + B.calls + " 次调用" +
+      ((bmRun && bmRun.landed) ? " · 落地 " + bmRun.landed + " 条" : "");
+    bmPlanList.innerHTML = rows.map(function (e) {
+      var t = String(e.text || "");
+      if (t.indexOf(e.tool) === 0) t = t.slice(e.tool.length).replace(/^[\s:：]+/, "");
+      return '<div class="bm-step" role="listitem" data-ok="' + (e.ok ? 1 : 0) + '"' +
+        (e.risk ? ' data-risk="' + esc(e.risk) + '"' : "") + "><b>" + esc(e.tool) + "</b><span>" +
+        esc(t || (e.ok ? "办了" : "没办成")) + "</span><i></i></div>";
+    }).join("");
+  }
+
+  if (bmPlanT) bmPlanT.addEventListener("click", function () {
+    if (!bmPlanList) return;
+    var open = bmPlanList.hidden;
+    bmPlanList.hidden = !open;
+    bmPlanT.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+
+  /* 系统条说的是「这一趟怎么跑的」，不是主脑答的话：通路降级、预算触顶、被叫停。
+     它绝不能只藏在折叠的台账里 —— 读者若看不出这次走的不是原生工具调用，
+     界面就等于替他做了个不实的假设。 */
+  function bmSysPaint(r) {
+    if (!bmSys) return;
+    var m = [];
+    if (r.via === "json") m.push(["warn", "这一家不认原生工具调用，已改走结构化 JSON：还是它自己挑工具、自己决定先读哪一段，只是把要办的事写成 JSON 交回来。"]);
+    if (r.mode === "budget") m.push(["warn", "预算用到顶了（" + (r.rounds || 0) + " 轮 / " + (r.calls || 0) + " 次调用）。停在半路的没往下办，已经落地的没有回滚。"]);
+    if (r.mode === "stopped") m.push(["info", "你叫停了。已经落地的动作留在原处，没点头的那几条压根没写。"]);
+    if (r.mode === "error" && r.why === "correct-stalled") m.push(["warn", "同一枚工具连改两次参数还是不对，主脑先停下来 —— 继续问只会白烧额度。"]);
+    if (r.mode === "blocked" && r.why === "no-model") m.push(["warn", "没配模型，这一趟没起跑：下面这条是它该说的话，交给本机离线库。"]);
+    bmSys.innerHTML = "";
+    bmSys.hidden = !m.length;
+    if (!m.length) return;
+    bmSys.dataset.kind = m.some(function (x) { return x[0] === "warn"; }) ? "warn" : "info";
+    bmSys.innerHTML = m.map(function (x) { return esc(x[1]); }).join("；");
+  }
+
+  /* 循环一次能交出好几条写操作：摊成一张卡、一次点头全落 —— 比一叠弹层少点 N 次，
+     但每一条都单独列出来，读者看得见每一条，点下去的头才算数。 */
+  function bmShowAwait(list) {
+    if (!bmCft) return;
+    bmPend = { n: list.length };
+    var li = [];
+    list.forEach(function (a) {
+      var pv = a.preview || {};
+      li.push('<li><b class="bm-cf-t">' + esc(a.tool) + " —— " + esc(pv.title || "确认这一条") + "</b></li>");
+      (pv.lines || []).forEach(function (s) { li.push('<li class="bm-cf-sub">' + esc(s) + "</li>"); });
+    });
+    bmCft.innerHTML = "<b>这一轮要落地 " + list.length + " 条" + (list.length > 1 ? "（一次点头全落）" : "") + "：</b>" +
+      "<ul>" + li.join("") + "</ul>" +
+      '<div class="bm-cf-row"><button class="btn btn-primary btn-sm" id="bmCfYes" type="button">确认落地</button>' +
+      '<button class="btn btn-ghost btn-sm" id="bmCfNo" type="button">先不</button>' +
+      '<span class="spacer"></span><span class="card-note bm-cf-note">点头之前一条都没写</span></div>';
+    bmCft.hidden = false;
+    bmCftWire();
+  }
+
+  function bmCftWire() {
+    var y = qs("#bmCfYes", bmCft), n = qs("#bmCfNo", bmCft);
+    if (!y || !n) return;
+    y.addEventListener("click", function () { var j = bmPend; bmPend = null; bmCft.hidden = true; if (j) bmResume({}); });
+    n.addEventListener("click", function () { var j = bmPend; bmPend = null; bmCft.hidden = true; if (j) bmResume({ refuse: true }); });
+    /* 焦点给「确认落地」：这张卡本来就是等一个人点头，Tab 到它最少的一步 */
+    y.focus();
+  }
+
+  /* 点完头把刚才那一轮接着跑。prev 只从 InkLoop.last() 取正本（在 brain.js 里），
+     界面不留副本 —— 留了两份「刚才那一轮」，撤销与账就会对不上号。 */
+  async function bmResume(opt) {
+    if (busy) return;
+    busy = true;
+    if (bmStop) bmStop.hidden = false;
+    if (bmSendBtn) bmSendBtn.disabled = true;
+    bmCtl = window.AbortController ? new AbortController() : null;
+    bmSink = { holder: null, text: "" };
+    if (!bmRun) bmRun = { plan: [], rounds: 0, calls: 0, landed: 0, via: "native" };
+    else { bmRun.landed = 0; }         /* 这一段只数续跑落了几条，不把上一问的数重播 */
+    var r;
+    try {
+      r = await Brain.resumeTools({
+        docId: ctxDoc(), signal: bmCtl && bmCtl.signal, refuse: !!(opt && opt.refuse),
+        onDelta: bmDelta,
+        onPlan: function (p) { if (bmRun) { bmRun.plan = p; bmPlanPaint(); } bmSeal(); },
+        onEvent: function (e) { if (bmRun) { bmRun.rounds = e.rounds; bmRun.calls = e.calls; } bmPlanPaint(); },
+        onTool: bmTool
+      });
+    } catch (e) {
+      r = { mode: "error", reply: "", why: API.netErrPhrase(e), awaitList: [], note: "" };
+    }
+    bmCtl = null;
+    var shown = String(r.reply || "").trim() || "> " + (bmNote(r) || "这一趟没有办成。");
+    bmFinish(shown, r);
+    bmSink = null;
+    if (bmRun) { bmRun.rounds = r.rounds || bmRun.rounds; bmRun.calls = r.calls || bmRun.calls;
+      bmRun.landed = r.landed || bmRun.landed; bmRun.via = r.via || bmRun.via; }
+    bmPlanPaint(); bmSysPaint(r);
+    if (r.awaitList && r.awaitList.length) bmShowAwait(r.awaitList);
+    busy = false;
+    if (bmStop) bmStop.hidden = true;
+    if (bmSendBtn) bmSendBtn.disabled = false;
+    InkFX.flash();
+  }
+
+  /* 点头落地的每一条都要在流里留一张回执：卡一收，读者只剩这一行能看出
+     「刚才真写了什么」—— 只报「办完了」是把三件事糊成一件。 */
+  function bmTool(d) {
+    if (bmRun && d && d.landed) bmRun.landed++;
+    if (d && d.landed && window.InkAgent) {
+      var ok = d.ok !== false, r = d.result || {};
+      if (ok && d.tool === "artifact.write" && r.id) bmArt(r);
+      else if (ok) {
+        var t = InkAgent.trace(), last = t[t.length - 1];
+        /* 回执只认「这一枚工具刚写下的那一条」：trail 是全页累积的，不比对 tool
+           就会在一条没办成的指令后面，把上一条成功的原话再打一遍。 */
+        if (last && last.text && last.tool === d.tool) bmAct(last.text);
+      }
+      if (!ok) bmAct("这一条没办成：" + bmWhy(r.why) + (typeof r.note === "string" && r.note ? "：" + r.note : "") + "（" + d.tool + "）");
+    }
+    bmPlanPaint();
+  }
+
   /* 开场白：由真实状态现算，不是预置文案 */
   function greet() {
     var name = window.InkProfile ? InkProfile.name() : "读者";
@@ -651,41 +1200,218 @@ body[data-page="ai"] .pm-msg.bad { color: var(--mark); }
     b.addEventListener("click", function () { send(b.dataset.q); });
   });
 
+  /* ============ v1.5-S4 E4：附图（粘贴 / 拖拽 / 选文件三条来路，同一只托盘） ============
+     手机拍的书页动辄 12MP / 4MB：原图直传会同时炸上游的图上限与本机的同步配额。
+     一律先重画进 canvas 再出 JPEG（最长边 ≤1024、≤200KB）；压不下去就拒收，不偷偷发原图。 */
+  var attImgs = [];   /* [{url,bytes,name}] 只在内存，发完即清 */
+  var ATT_MAX = 3, ATT_EDGE = 1024, ATT_BYTES = 200 * 1024;
+
+  function attPaint() {
+    var box = qs("#chatAtt");
+    if (!attImgs.length) { box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+    var kb = Math.round(attImgs.reduce(function (s, im) { return s + im.bytes; }, 0) / 1024);
+    box.innerHTML = attImgs.map(function (im, i) {
+      return '<div class="att-it"><img src="' + im.url + '" alt="' + esc(im.name) + '">' +
+        '<button class="att-x" type="button" data-i="' + i + '" aria-label="移除这张图">' + icon("x", 12) + "</button></div>";
+    }).join("") + '<span class="att-cap">' + attImgs.length + " 张 · " + kb + " KB · 只随下一轮发出，用完即弃</span>";
+    qsa("#chatAtt .att-x").forEach(function (b) {
+      b.addEventListener("click", function () { attImgs.splice(Number(b.dataset.i), 1); attPaint(); });
+    });
+  }
+
+  function readImage(file) {
+    return new Promise(function (res, rej) {
+      var fr = new FileReader();
+      fr.onload = function () { res(String(fr.result || "")); };
+      fr.onerror = function () { rej(new Error("这个文件读不出来")); };
+      fr.readAsDataURL(file);
+    });
+  }
+
+  function openImage(url) {
+    return new Promise(function (res, rej) {
+      var im = new Image();
+      im.onload = function () { res(im); };
+      im.onerror = function () { rej(new Error("这不是一张能打开的图片")); };
+      im.src = url;
+    });
+  }
+
+  /* 压不下去时把「压到多大」带在错误上：读者要知道是图的问题，不是主脑坏了。 */
+  async function shrinkImage(file) {
+    var img = await openImage(await readImage(file));
+    var iw = img.naturalWidth || img.width || 1, ih = img.naturalHeight || img.height || 1;
+    var scale = Math.min(1, ATT_EDGE / Math.max(iw, ih));
+    var w = Math.max(1, Math.round(iw * scale)), h = Math.max(1, Math.round(ih * scale));
+    var cv = document.createElement("canvas"), cx = cv.getContext("2d");
+    if (!cx) throw new Error("本机画不出画布，压不了图");
+    var lastBytes = 0;
+    for (var i = 0; i < 5; i++) {
+      cv.width = w; cv.height = h;
+      cx.fillStyle = "#fff"; cx.fillRect(0, 0, w, h);   /* 透明 PNG 转 JPEG 会变黑底，书页要垫白 */
+      cx.drawImage(img, 0, 0, w, h);
+      var url = cv.toDataURL("image/jpeg", i < 2 ? 0.82 : 0.68);
+      var bytes = Math.floor((url.length - url.indexOf(",") - 1) * 3 / 4);
+      lastBytes = bytes;
+      if (bytes <= ATT_BYTES) return { url: url, bytes: bytes, name: file.name || "图" };
+      w = Math.max(1, Math.round(w * 0.78));
+      h = Math.max(1, Math.round(h * 0.78));
+    }
+    var er = new Error("too-big");
+    er.bytes = lastBytes;
+    throw er;
+  }
+
+  async function addImages(files) {
+    var list = Array.prototype.slice.call(files || []);
+    if (!list.length) return;
+    var room = ATT_MAX - attImgs.length;
+    if (room <= 0) { toast("一次最多带 " + ATT_MAX + " 张图", "alert-triangle"); return; }
+    if (list.length > room) { toast("一次最多带 " + ATT_MAX + " 张图，多余的没收", "alert-triangle"); list = list.slice(0, room); }
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i];
+      if (!/^image\//.test(f.type || "")) { toast("只收图片（png / jpg / webp）", "alert-triangle"); continue; }
+      try { attImgs.push(await shrinkImage(f)); attPaint(); }
+      catch (e) {
+        if (e && e.bytes) toast("图太大，已压到 " + Math.round(e.bytes / 1024) + " KB / 请换一张", "alert-triangle");
+        else toast((e && e.message) || "这张图读不了", "alert-triangle");
+      }
+    }
+  }
+
+  qs("#chatImgBtn").addEventListener("click", function () { qs("#chatImgFile").click(); });
+  qs("#chatImgFile").addEventListener("change", function () {
+    var el = qs("#chatImgFile");
+    addImages(el.files);
+    el.value = "";   /* 同一张图连选两次也要能触发 change */
+  });
+  /* 截图直接 Ctrl+V：主脑页最常见的来路 */
+  qs("#chatInput").addEventListener("paste", function (e) {
+    var items = e.clipboardData && e.clipboardData.items, fs2 = [];
+    if (!items) return;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === "file" && /^image\//.test(items[i].type || "")) {
+        var f = items[i].getAsFile(); if (f) fs2.push(f);
+      }
+    }
+    if (fs2.length) { e.preventDefault(); addImages(fs2); }
+  });
+  ["#chatMsgs", "#chatInput", "#chatAtt"].forEach(function (sel) {
+    var el = qs(sel);
+    el.addEventListener("dragover", function (e) {
+      if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") < 0) return;
+      e.preventDefault(); el.classList.add("drop-hot");
+    });
+    el.addEventListener("dragleave", function () { el.classList.remove("drop-hot"); });
+    el.addEventListener("drop", function (e) {
+      el.classList.remove("drop-hot");
+      var fs2 = Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || [])
+        .filter(function (f) { return /^image\//.test(f.type || ""); });
+      if (!fs2.length) return;
+      e.preventDefault(); addImages(fs2);
+    });
+  });
+
   var busy = false;
   async function send(text) {
     if (busy) return;
     text = (text || qs("#chatInput").value).trim();
-    if (!text) return;
+    var imgs = attImgs.slice();
+    if (!text && !imgs.length) return;
     qs("#chatInput").value = "";
-    pushMsg("me", text);
+    attImgs = []; attPaint();
+    bmReset();
+    pushMsg("me", text, null, null, imgs);
     busy = true;
     typing(true);
-    var holder = null;
+    if (bmStop) bmStop.hidden = false;
+    if (bmSendBtn) bmSendBtn.disabled = true;
+    /* 停止钮是一颗真钮：AbortController 一路递到 brain.js 的 loopHost，再递进 InkLoop。
+       没配模型时不递 useTools —— 走的就是原来那条单轮路径，离线形态一个字没变。 */
+    bmCtl = window.AbortController ? new AbortController() : null;
+    bmSink = { holder: null, text: "" };
+    bmRun = { plan: [], rounds: 0, calls: 0, landed: 0, via: "native" };
+    var r;
     try {
-      var r = await Brain.ask(text, {
+      r = await Brain.ask(text, {
         docId: ctxDoc(),
-        onDelta: function (piece, all) {
-          if (!holder) { typing(false); holder = pushStreaming("ai"); }
-          paintStreaming(holder, all);
-        }
+        images: imgs,
+        useTools: !!(window.InkLoop && Brain.online()) && !imgs.length,
+        signal: bmCtl && bmCtl.signal,
+        onDelta: bmDelta,
+        onPlan: function (p) { if (bmRun) { bmRun.plan = p; bmPlanPaint(); } bmSeal(); },
+        onEvent: function (e) { if (bmRun) { bmRun.rounds = e.rounds; bmRun.calls = e.calls; } bmPlanPaint(); },
+        onTool: bmTool
       });
-      /* r.note：模型请求失败、brain.js 已改用离线库作答 —— 原因必须让用户看见，
-         否则会把降级后的离线答案当成模型给的（v2.22 主脑错误态）。 */
-      var shown = r.note ? r.reply + "\n\n> " + r.note : r.reply;
-      if (holder) finalizeStreaming(holder, shown, r.refs, r);
-      else { typing(false); pushMsg("ai", shown, r.refs, r); }
     } catch (e) {
       typing(false);
-      if (holder) holder.remove();
+      if (bmSink && bmSink.holder) bmSink.holder.remove();
+      bmCtl = null; busy = false;
+      if (bmStop) bmStop.hidden = true;
+      if (bmSendBtn) bmSendBtn.disabled = false;
       pushMsg("ai", "主脑出错了：" + ((e && e.message) || "未知错误") + "。\n\n可到右侧「模型设置」检查接口地址与密钥；离线时我仍能用本机离线库作答。");
+      return;
     }
+    bmCtl = null;
+    /* r.note：模型请求失败、brain.js 已改用离线库作答 —— 原因必须让读者看见，
+       否则会把降级后的离线答案当成模型给的（v2.22 主脑错误态）。
+       触顶 / 叫停 / 没起跑这几种收尾根本没有正文，note 就是那句话本身，别再拼空引子。 */
+    var reply = String(r.reply || "").trim();
+    var nt = bmNote(r);
+    var shown = reply
+      ? (nt ? reply + "\n\n> " + nt : reply)
+      : "> " + (nt || (r.mode === "stopped" ? "这一趟被你叫停了，没写完。" : "这一趟没有结果。"));
+    bmFinish(shown, r);
+    bmSink = null;
+    /* 收尾时以循环自己交出的那份账为准：界面上的轮次/调用/落地数只能取自快照正本，
+       不能取「界面自己听到几次回调算出来的数」—— 回调丢一次，屏上的数就少了。 */
+    if (bmRun) { bmRun.rounds = r.rounds || 0; bmRun.calls = r.calls || 0;
+      bmRun.landed = r.landed || 0; bmRun.plan = r.plan || bmRun.plan; bmRun.via = r.via || "native"; }
+    bmPlanPaint(); bmSysPaint(r);
+    if (r.awaitList && r.awaitList.length) bmShowAwait(r.awaitList);
     busy = false;
+    if (bmStop) bmStop.hidden = true;
+    if (bmSendBtn) bmSendBtn.disabled = false;
     InkFX.flash();
     renderMemory();
   }
 
+  /* v1.5-S4 E3：写报告。与「发送」分开：它不做多轮对话，宿主先检索、按段号核依据，
+     然后一次把整份报告落进产物账 —— 产物卡就是回执，聊天里只留一句去了哪里。 */
+  async function bmWriteReport() {
+    if (busy) return;
+    var goal = qs("#chatInput").value.trim();
+    if (!goal) {
+      toast("先写一句这份报告要回答什么，再点「写报告」", "alert-triangle");
+      qs("#chatInput").focus();
+      return;
+    }
+    qs("#chatInput").value = "";
+    bmReset();
+    pushMsg("me", goal);
+    busy = true;
+    typing(true);
+    if (bmSendBtn) bmSendBtn.disabled = true;
+    var r;
+    try { r = await Brain.report(goal, { docId: ctxDoc() }); }
+    catch (e) { r = { ok: false, note: "写报告出错了：" + ((e && e.message) || "未知错误") }; }
+    typing(false);
+    busy = false;
+    if (bmSendBtn) bmSendBtn.disabled = false;
+    if (!r || !r.ok) {
+      pushMsg("ai", "> " + ((r && r.note) || "这一份报告没写出来。"));
+      return;
+    }
+    pushMsg("ai", r.reply || "报告已写好。");
+    bmArt(r);
+    InkFX.flash();
+  }
+  qs("#bmReportBtn").addEventListener("click", function () { bmWriteReport(); });
+
   qs("#chatSend").addEventListener("click", function () { send(); });
   qs("#chatInput").addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
+  if (bmStop) bmStop.addEventListener("click", function () { if (bmCtl) { try { bmCtl.abort(); } catch (e) {} } });
 
   /* ============ 记忆（主脑从行为中学到的，带证据） ============
      入口只有两个：对话头部的「N 条记忆」按钮、答案里的记忆引用条。
